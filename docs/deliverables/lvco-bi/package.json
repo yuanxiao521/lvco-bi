@@ -1,0 +1,12 @@
+{
+  "name": "lvco-bi",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lvco BI monorepo (frontend + backend)",
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && uvicorn app.main:app --reload",
+    "build:frontend": "cd frontend && npm run build",
+    "typecheck:frontend": "cd frontend && npm run typecheck"
+  }
+}

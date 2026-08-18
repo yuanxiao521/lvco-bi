@@ -1,0 +1,95 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: lvco-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - lvco-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lvco-frontend
+    expose:
+      - "3000"
+    volumes:
+      - ./frontend/src:/app/src:ro
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+    networks:
+      - lvco-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lvco-backend
+    expose:
+      - "8000"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - duckdb_data:/app/data/duckdb
+      - upload_data:/app/data/uploads
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - lvco-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: lvco-postgres
+    environment:
+      POSTGRES_USER: lvco
+      POSTGRES_PASSWORD: lvco_secret
+      POSTGRES_DB: lvco_bi
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # 不挂 init.sql，避免跟 alembic 0001_init 冲突；建表完全交给 alembic 权威
+      # 如需恢复：取消下一行注释，并删除 PG volume（docker volume rm lvco-bi_pg_data）后重启
+      # - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lvco -d lvco_bi"]
+      interval: 5s
+      retries: 5
+    networks:
+      - lvco-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: lvco-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - lvco-network
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  duckdb_data:
+  upload_data:
+
+networks:
+  lvco-network:
+    driver: bridge

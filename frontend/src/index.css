@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #F8FAFB;
+  --color-foreground: #1A2332;
+  --color-card: #FFFFFF;
+  --color-card-foreground: #2D3748;
+
+  --color-primary: #2BB5A0;
+  --color-primary-hover: #239E8B;
+  --color-primary-foreground: #FFFFFF;
+  --color-primary-light: #E8F7F4;
+  --color-primary-muted: #B8E8E0;
+
+  --color-ai: #6C7BF2;
+  --color-ai-hover: #5A6AE0;
+  --color-ai-foreground: #FFFFFF;
+  --color-ai-light: #EEF0FE;
+  --color-ai-muted: #C7CCF9;
+
+  --color-success: #34C77B;
+  --color-success-light: #E6F9EF;
+  --color-warning: #F5A623;
+  --color-warning-light: #FFF8EB;
+  --color-danger: #EF5B5B;
+  --color-danger-light: #FEF0F0;
+  --color-info: #4EADFF;
+  --color-info-light: #EBF5FF;
+
+  --color-muted: #F1F4F8;
+  --color-muted-foreground: #8B97A8;
+  --color-border: #E2E8F0;
+  --color-border-light: #F0F3F7;
+  --color-input: #F5F7FA;
+  --color-ring: #2BB5A0;
+
+  --color-sidebar-bg: #FFFFFF;
+  --color-sidebar-border: #EDF1F5;
+  --color-sidebar-hover: #F5F8FA;
+  --color-sidebar-active-bg: #E8F7F4;
+  --color-sidebar-active-text: #2BB5A0;
+
+  --color-chart-1: #2BB5A0;
+  --color-chart-2: #6C7BF2;
+  --color-chart-3: #F5A623;
+  --color-chart-4: #EF5B5B;
+  --color-chart-5: #4EADFF;
+  --color-chart-6: #A78BFA;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --shadow-card: 0 1px 4px rgba(26, 35, 50, 0.04), 0 2px 8px rgba(26, 35, 50, 0.04);
+  --shadow-float: 0 12px 36px rgba(26, 35, 50, 0.08);
+
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+@layer base {
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #E2E8F0 transparent;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (max-width: 768px) {
+  table {
+    font-size: 0.75rem;
+  }
+}
+
+/* 通用动画 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.35s ease-out both;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.25s ease-out both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out both;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* 卡片交错动画 */
+.stagger-1 { animation-delay: 0ms; }
+.stagger-2 { animation-delay: 60ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 180ms; }
+.stagger-5 { animation-delay: 240ms; }
+.stagger-6 { animation-delay: 300ms; }
+
+/* 通知铃铛红点脉冲 */
+.bell-badge-pulse {
+  animation: pulse-dot 2s ease-in-out infinite;
+}

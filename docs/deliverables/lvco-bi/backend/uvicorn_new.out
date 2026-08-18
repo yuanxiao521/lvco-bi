@@ -1,0 +1,1413 @@
+﻿2026-07-27 11:33:06 [info     ] redis_connected                url=redis://localhost:6379/0
+2026-07-27 11:33:06 [info     ] minio_connected                endpoint=localhost:9000
+python : INFO:     Started server process [3512]
+At line:15 char:8080
++ ... bi\backend; python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO:     Started server process [3512]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO:     Waiting for application startup.
+{"status": "ok", "event": "redis ping", "timestamp": "2026-07-27T03:33:06.678274Z"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+{"method": "DELETE", "path": "/api/v1/trash/canvas/dc1be4a1-5041-4ca7-bd27-55457ed3244d", "status_code": 403, "duration_ms": 90.86, "event": "request_completed", "timestamp": "2026-07-27T03:33:14.300016Z"}
+INFO:     127.0.0.1:52025 - "DELETE /api/v1/trash/canvas/dc1be4a1-5041-4ca7-bd27-55457ed3244d HTTP/1.1" 403 Forbidden
+{"method": "DELETE", "path": "/api/v1/trash/canvas/dc1be4a1-5041-4ca7-bd27-55457ed3244d", "status_code": 404, "duration_ms": 52.84, "event": "request_completed", "timestamp": "2026-07-27T03:33:14.355114Z"}
+INFO:     127.0.0.1:52025 - "DELETE /api/v1/trash/canvas/dc1be4a1-5041-4ca7-bd27-55457ed3244d HTTP/1.1" 404 Not Found
+{"method": "DELETE", "path": "/api/v1/trash/canvas/8e03c629-bd2a-4f00-b4e9-fedb07b5ac7b", "status_code": 404, "duration_ms": 5.23, "event": "request_completed", "timestamp": "2026-07-27T03:33:22.388016Z"}
+INFO:     127.0.0.1:52238 - "DELETE /api/v1/trash/canvas/8e03c629-bd2a-4f00-b4e9-fedb07b5ac7b HTTP/1.1" 404 Not Found
+{"method": "GET", "path": "/health", "status_code": 200, "duration_ms": 1.94, "event": "request_completed", "timestamp": "2026-07-27T06:02:22.478540Z"}
+INFO:     127.0.0.1:54860 - "GET /health HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.76, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.902274Z"}
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.56, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.902274Z"}
+INFO:     127.0.0.1:57439 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57440 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 401, "duration_ms": 1.33, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.906865Z"}
+INFO:     127.0.0.1:57439 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "OPTIONS", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 1.22, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.913300Z"}
+INFO:     127.0.0.1:57440 - "OPTIONS /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 401, "duration_ms": 2.71, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.914347Z"}
+INFO:     127.0.0.1:57439 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 3.83, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.954780Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.3, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.955299Z"}
+INFO:     127.0.0.1:52080 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.05, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.956327Z"}
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 38.83, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.956327Z"}
+INFO:     127.0.0.1:60865 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.92, "event": "request_completed", "timestamp": "2026-07-27T06:03:59.956839Z"}
+INFO:     127.0.0.1:52288 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57441 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57560 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 7.46, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.000564Z"}
+INFO:     127.0.0.1:58450 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "OPTIONS", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 3.44, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.098691Z"}
+INFO:     127.0.0.1:58450 - "OPTIONS /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 4.7, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.101012Z"}
+INFO:     127.0.0.1:55923 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+2026-07-27 14:04:00,103 ERROR asyncio: Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "asyncio\events.py", line 80, in _run
+  File "asyncio\proactor_events.py", line 165, in _call_connection_lost
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 5.73, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.114198Z"}
+INFO:     127.0.0.1:59172 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 8.12, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.115751Z"}
+INFO:     127.0.0.1:52871 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 3.96, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.122431Z"}
+INFO:     127.0.0.1:59172 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 3.49, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.131769Z"}
+INFO:     127.0.0.1:52871 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 165.36, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.158217Z"}
+INFO:     127.0.0.1:57441 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 48.29, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.174804Z"}
+INFO:     127.0.0.1:59172 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 18.23, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.179562Z"}
+INFO:     127.0.0.1:57441 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 24.36, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.201263Z"}
+INFO:     127.0.0.1:52871 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 14.89, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.217802Z"}
+INFO:     127.0.0.1:59172 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.44, "event": "request_completed", "timestamp": "2026-07-27T06:04:00.227058Z"}
+INFO:     127.0.0.1:52871 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T06:04:56.447896Z"}
+INFO:     127.0.0.1:63802 - "OPTIONS /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 44.41, "event": "request_completed", "timestamp": "2026-07-27T06:04:56.495005Z"}
+INFO:     127.0.0.1:63802 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 31.67, "event": "request_completed", "timestamp": "2026-07-27T06:04:56.528262Z"}
+INFO:     127.0.0.1:63802 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 46.66, "event": "request_completed", "timestamp": "2026-07-27T06:05:07.219526Z"}
+INFO:     127.0.0.1:59990 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 17.03, "event": "request_completed", "timestamp": "2026-07-27T06:05:07.239223Z"}
+INFO:     127.0.0.1:59990 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.68, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.103374Z"}
+INFO:     127.0.0.1:59990 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.65, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.106119Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.45, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.106119Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.45, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.106119Z"}
+INFO:     127.0.0.1:60001 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60003 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60002 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.17, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.119201Z"}
+INFO:     127.0.0.1:60004 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 1.84, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.126511Z"}
+INFO:     127.0.0.1:60002 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 1.18, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.127030Z"}
+INFO:     127.0.0.1:60003 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 14.27, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.144710Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 26.08, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.147112Z"}
+INFO:     127.0.0.1:60004 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 6.9, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.153755Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.68, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.158007Z"}
+INFO:     127.0.0.1:60003 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.8, "event": "request_completed", "timestamp": "2026-07-27T06:05:10.167581Z"}
+INFO:     127.0.0.1:60003 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.52, "event": "request_completed", "timestamp": "2026-07-27T06:05:11.504890Z"}
+INFO:     127.0.0.1:60003 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 14.75, "event": "request_completed", "timestamp": "2026-07-27T06:05:11.522315Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.75, "event": "request_completed", "timestamp": "2026-07-27T06:05:12.778281Z"}
+INFO:     127.0.0.1:60002 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.79, "event": "request_completed", "timestamp": "2026-07-27T06:05:12.779798Z"}
+INFO:     127.0.0.1:60003 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 29.64, "event": "request_completed", "timestamp": "2026-07-27T06:05:12.812503Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 22.07, "event": "request_completed", "timestamp": "2026-07-27T06:05:12.835696Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 0.24, "event": "request_completed", "timestamp": "2026-07-27T06:05:13.337519Z"}
+INFO:     127.0.0.1:60002 - "OPTIONS /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 24.28, "event": "request_completed", "timestamp": "2026-07-27T06:05:13.364739Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 15.55, "event": "request_completed", "timestamp": "2026-07-27T06:05:13.382557Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 21.09, "event": "request_completed", "timestamp": "2026-07-27T06:05:17.419843Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 18.19, "event": "request_completed", "timestamp": "2026-07-27T06:05:17.440445Z"}
+INFO:     127.0.0.1:60002 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 0.32, "event": "request_completed", "timestamp": "2026-07-27T06:05:53.501329Z"}
+INFO:     127.0.0.1:57836 - "OPTIONS /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 30.71, "event": "request_completed", "timestamp": "2026-07-27T06:05:53.540801Z"}
+INFO:     127.0.0.1:57837 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 51.92, "event": "request_completed", "timestamp": "2026-07-27T06:05:53.556061Z"}
+INFO:     127.0.0.1:57836 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 20.35, "event": "request_completed", "timestamp": "2026-07-27T06:05:53.565589Z"}
+INFO:     127.0.0.1:57837 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 10.75, "event": "request_completed", "timestamp": "2026-07-27T06:05:53.572760Z"}
+INFO:     127.0.0.1:57836 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 0.16, "event": "request_completed", "timestamp": "2026-07-27T06:05:55.363223Z"}
+INFO:     127.0.0.1:57836 - "OPTIONS /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions", "status_code": 201, "duration_ms": 11.94, "event": "request_completed", "timestamp": "2026-07-27T06:05:55.377116Z"}
+INFO:     127.0.0.1:57837 - "POST /api/v1/ai/sessions HTTP/1.1" 201 Created
+{"method": "OPTIONS", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T06:05:55.381117Z"}
+INFO:     127.0.0.1:57837 - "OPTIONS /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 7.65, "event": "request_completed", "timestamp": "2026-07-27T06:05:55.390752Z"}
+INFO:     127.0.0.1:57836 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages", "status_code": 200, "duration_ms": 0.49, "event": "request_completed", "timestamp": "2026-07-27T06:05:55.392930Z"}
+INFO:     127.0.0.1:57837 - "OPTIONS /api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages", "status_code": 200, "duration_ms": 625.36, "event": "request_completed", "timestamp": "2026-07-27T06:05:56.020112Z"}
+INFO:     127.0.0.1:57837 - "GET /api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages HTTP/1.1" 200 OK
+2026-07-27 14:05:56,160 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T06:05:57.026631Z"}
+INFO:     127.0.0.1:57837 - "OPTIONS /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 16.77, "event": "request_completed", "timestamp": "2026-07-27T06:05:57.045247Z"}
+INFO:     127.0.0.1:57837 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+2026-07-27 14:05:57,541 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 5.42, "event": "request_completed", "timestamp": "2026-07-27T06:06:06.169953Z"}
+INFO:     127.0.0.1:57836 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+2026-07-27 14:06:06,310 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:06:07,638 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:06:10,258 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:06:12,238 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:06:14,991 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:06:16,404 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 21.26, "event": "request_completed", "timestamp": "2026-07-27T06:06:53.972023Z"}
+INFO:     127.0.0.1:56820 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.82, "event": "request_completed", "timestamp": "2026-07-27T06:06:53.982825Z"}
+INFO:     127.0.0.1:60628 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 14.9, "event": "request_completed", "timestamp": "2026-07-27T06:06:53.999883Z"}
+INFO:     127.0.0.1:56820 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.13, "event": "request_completed", "timestamp": "2026-07-27T06:06:54.011978Z"}
+INFO:     127.0.0.1:60628 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.99, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.007026Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 13.6, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.023070Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 9.43, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.030460Z"}
+INFO:     127.0.0.1:64309 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 15.68, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.041518Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 14.18, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.049118Z"}
+INFO:     127.0.0.1:64309 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.21, "event": "request_completed", "timestamp": "2026-07-27T06:07:12.056723Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.16, "event": "request_completed", "timestamp": "2026-07-27T06:07:13.278940Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.59, "event": "request_completed", "timestamp": "2026-07-27T06:07:13.294953Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 24.89, "event": "request_completed", "timestamp": "2026-07-27T06:07:14.136920Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 7.59, "event": "request_completed", "timestamp": "2026-07-27T06:07:14.146365Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 17.86, "event": "request_completed", "timestamp": "2026-07-27T06:07:15.009110Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 8.2, "event": "request_completed", "timestamp": "2026-07-27T06:07:15.019023Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.1, "event": "request_completed", "timestamp": "2026-07-27T06:07:15.529135Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.68, "event": "request_completed", "timestamp": "2026-07-27T06:07:15.540873Z"}
+INFO:     127.0.0.1:64308 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T06:07:17.639590Z"}
+INFO:     127.0.0.1:64308 - "OPTIONS /api/v1/reports?status=archived HTTP/1.1" 200 OK
+2026-07-27 14:07:17,657 ERROR lvco: Unhandled exception on GET /api/v1/reports: (sqlalchemy.dialects.postgresql.asyncpg
+.Error) <class 'asyncpg.exceptions.InvalidTextRepresentationError'>: invalid input value for enum report_status: "archi
+ved"
+[SQL: SELECT count(*) AS count_1 
+FROM reports 
+WHERE reports.user_id = $1::UUID AND reports.status != $2::report_status AND reports.status = $3::report_status]
+[parameters: (UUID('ecbd32f6-9ad7-4161-b3f3-785eb460cc52'), 'deleted', 'archived')]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+2026-07-27 14:07:17,758 ERROR lvco: Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 534, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 176, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 267, in __bind_execute
+    data, status, _ = await self.__do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 256, in __do_execute
+    return await executor(protocol)
+  File "asyncpg\\protocol\\protocol.pyx", line 206, in bind_execute
+asyncpg.exceptions.InvalidTextRepresentationError: invalid input value for enum report_status: "archived"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 568, in execute
+    self._adapt_connection.await_(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 546, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 497, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 780, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: <class 'asyncpg.exceptions.InvalidTextRepresenta
+tionError'>: invalid input value for enum report_status: "archived"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\reports.py", line 63, in list_reports
+    items, total = await service.list_reports(
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\services\report_service.py", line 86, in list_reports
+    total = (await self.db.execute(count_q)).scalar() or 0
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\session.py", line 2247, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\context.py", line 305, in orm_execute_statement
+    result = conn.execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1418, in execute
+    return meth(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\sql\elements.py", line 515, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1640, in _execute_clauseelement
+    ret = self._execute_context(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 568, in execute
+    self._adapt_connection.await_(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 546, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 497, in _handle_exception
+INFO:     127.0.0.1:64308 - "GET /api/v1/reports?status=archived HTTP/1.1" 500 Internal Server Error
+    self._adapt_connection._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 780, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.InvalidTextReprese
+ntationError'>: invalid input value for enum report_status: "archived"
+[SQL: SELECT count(*) AS count_1 
+FROM reports 
+WHERE reports.user_id = $1::UUID AND reports.status != $2::report_status AND reports.status = $3::report_status]
+[parameters: (UUID('ecbd32f6-9ad7-4161-b3f3-785eb460cc52'), 'deleted', 'archived')]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 534, in _prepare_and_execute
+    self._rows = deque(await prepared_stmt.fetch(*parameters))
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 176, in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 267, in __bind_execute
+    data, status, _ = await self.__do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\asyncpg\p
+repared_stmt.py", line 256, in __do_execute
+    return await executor(protocol)
+  File "asyncpg\\protocol\\protocol.pyx", line 206, in bind_execute
+asyncpg.exceptions.InvalidTextRepresentationError: invalid input value for enum report_status: "archived"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 568, in execute
+    self._adapt_connection.await_(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 546, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 497, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 780, in _handle_exception
+    raise translated_error from error
+sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: <class 'asyncpg.exceptions.InvalidTextRepresenta
+tionError'>: invalid input value for enum report_status: "archived"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvicorn\p
+rotocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvicorn\m
+iddleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\a
+pplications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\reports.py", line 63, in list_reports
+    items, total = await service.list_reports(
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\services\report_service.py", line 86, in list_reports
+    total = (await self.db.execute(count_q)).scalar() or 0
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\session.py", line 2247, in _execute_internal
+    result: Result[Any] = compile_state_cls.orm_execute_statement(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\orm\context.py", line 305, in orm_execute_statement
+    result = conn.execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1418, in execute
+    return meth(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\sql\elements.py", line 515, in _execute_on_connection
+    return connection._execute_clauseelement(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1640, in _execute_clauseelement
+    ret = self._execute_context(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1846, in _execute_context
+    return self._exec_single_context(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1986, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 2355, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\base.py", line 1967, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\engine\default.py", line 941, in do_execute
+    cursor.execute(statement, parameters)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 568, in execute
+    self._adapt_connection.await_(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 546, in _prepare_and_execute
+    self._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 497, in _handle_exception
+    self._adapt_connection._handle_exception(error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sqlalchem
+y\dialects\postgresql\asyncpg.py", line 780, in _handle_exception
+    raise translated_error from error
+sqlalchemy.exc.DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.InvalidTextReprese
+ntationError'>: invalid input value for enum report_status: "archived"
+[SQL: SELECT count(*) AS count_1 
+FROM reports 
+WHERE reports.user_id = $1::UUID AND reports.status != $2::report_status AND reports.status = $3::report_status]
+[parameters: (UUID('ecbd32f6-9ad7-4161-b3f3-785eb460cc52'), 'deleted', 'archived')]
+(Background on this error at: https://sqlalche.me/e/20/dbapi)
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:07:18.758333Z"}
+INFO:     127.0.0.1:63844 - "OPTIONS /api/v1/reports?status=shared HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 21.06, "event": "request_completed", "timestamp": "2026-07-27T06:07:18.781031Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=shared HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:07:19.272659Z"}
+INFO:     127.0.0.1:63844 - "OPTIONS /api/v1/reports?status=published HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.19, "event": "request_completed", "timestamp": "2026-07-27T06:07:19.282878Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=published HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T06:07:20.140652Z"}
+INFO:     127.0.0.1:63844 - "OPTIONS /api/v1/reports?status=draft HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 13.52, "event": "request_completed", "timestamp": "2026-07-27T06:07:20.155304Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=draft HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.4, "event": "request_completed", "timestamp": "2026-07-27T06:07:21.617306Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 22.02, "event": "request_completed", "timestamp": "2026-07-27T06:07:23.414608Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=draft HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 23.77, "event": "request_completed", "timestamp": "2026-07-27T06:07:23.755843Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=published HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.81, "event": "request_completed", "timestamp": "2026-07-27T06:07:24.407983Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=draft HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 7.02, "event": "request_completed", "timestamp": "2026-07-27T06:07:25.105286Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=published HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 7.09, "event": "request_completed", "timestamp": "2026-07-27T06:07:26.367857Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=shared HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 6.45, "event": "request_completed", "timestamp": "2026-07-27T06:07:26.813601Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports?status=published HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.42, "event": "request_completed", "timestamp": "2026-07-27T06:07:27.135151Z"}
+INFO:     127.0.0.1:63844 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 23.29, "event": "request_completed", "timestamp": "2026-07-27T06:08:11.531508Z"}
+INFO:     127.0.0.1:52333 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 15.8, "event": "request_completed", "timestamp": "2026-07-27T06:08:11.551268Z"}
+INFO:     127.0.0.1:52333 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 20.61, "event": "request_completed", "timestamp": "2026-07-27T06:08:11.797349Z"}
+INFO:     127.0.0.1:52333 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.09, "event": "request_completed", "timestamp": "2026-07-27T06:08:11.812695Z"}
+INFO:     127.0.0.1:52333 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f", "status_code": 200, "duration_ms": 0.65, "event": "request_completed", "timestamp": "2026-07-27T06:08:13.707043Z"}
+INFO:     127.0.0.1:52333 - "OPTIONS /api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 1.6, "event": "request_completed", "timestamp": "2026-07-27T06:08:13.710292Z"}
+{"method": "OPTIONS", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 1.86, "event": "request_completed", "timestamp": "2026-07-27T06:08:13.710358Z"}
+INFO:     127.0.0.1:55454 - "OPTIONS /api/v1/statistics/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55455 - "OPTIONS /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f", "status_code": 200, "duration_ms": 15.93, "event": "request_completed", "timestamp": "2026-07-27T06:08:13.727146Z"}
+INFO:     127.0.0.1:52333 - "GET /api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 862.73, "event": "request_completed", "timestamp": "2026-07-27T06:08:14.578624Z"}
+INFO:     127.0.0.1:55456 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 864.94, "event": "request_completed", "timestamp": "2026-07-27T06:08:14.582771Z"}
+INFO:     127.0.0.1:55457 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:08:27.029419Z"}
+INFO:     127.0.0.1:63773 - "OPTIONS /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 12.8, "event": "request_completed", "timestamp": "2026-07-27T06:08:27.044880Z"}
+INFO:     127.0.0.1:63773 - "POST /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 11.64, "event": "request_completed", "timestamp": "2026-07-27T06:08:27.825347Z"}
+INFO:     127.0.0.1:63773 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 10.37, "event": "request_completed", "timestamp": "2026-07-27T06:08:28.326611Z"}
+INFO:     127.0.0.1:63773 - "POST /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 13.61, "event": "request_completed", "timestamp": "2026-07-27T06:08:30.500081Z"}
+INFO:     127.0.0.1:63773 - "POST /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 11.99, "event": "request_completed", "timestamp": "2026-07-27T06:09:07.267731Z"}
+INFO:     127.0.0.1:54517 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 10.67, "event": "request_completed", "timestamp": "2026-07-27T06:09:10.528484Z"}
+INFO:     127.0.0.1:54517 - "POST /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 11.84, "event": "request_completed", "timestamp": "2026-07-27T06:09:10.831953Z"}
+INFO:     127.0.0.1:54517 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/correlation", "status_code": 200, "duration_ms": 10.61, "event": "request_completed", "timestamp": "2026-07-27T06:09:11.239468Z"}
+INFO:     127.0.0.1:54517 - "POST /api/v1/statistics/correlation HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 10.88, "event": "request_completed", "timestamp": "2026-07-27T06:09:11.540123Z"}
+INFO:     127.0.0.1:54517 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 962.12, "event": "request_completed", "timestamp": "2026-07-27T06:09:36.507827Z"}
+INFO:     127.0.0.1:49322 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 1019.54, "event": "request_completed", "timestamp": "2026-07-27T06:09:36.562371Z"}
+INFO:     127.0.0.1:49320 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+2026-07-27 14:09:36,564 ERROR lvco: Unhandled exception on POST /api/v1/statistics/describe: Catalog Error: Table with 
+name data does not exist!
+Did you mean "18f26ece_7f187be5.data, 4dd54041_394c5365.data, 4dd54041_7a0aaf30.data, 4dd54041_9d0dc646.data, 87790965_
+ea278805.data, 8ab433e3_ffc68190.data, ccfc7818_0426dd20.data, ecbd32f6_0525a532.data, ecbd32f6_1ee37cba.data, or ecbd3
+2f6_37298d2b.data"?
+
+LINE 1: ... "unit_price" IS NULL THEN 1 ELSE 0 END) as null_count FROM "ecbd32f6_15e54427"."data"
+                                                                       ^
+2026-07-27 14:09:36,582 ERROR lvco:   + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starl
+ette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starl
+ette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\anyio
+\_backends\_asyncio.py", line 815, in __aexit__
+  |     raise BaseExceptionGroup(
+  | exceptiongroup.ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "contextlib.py", line 153, in __exit__
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    |     response: Response = await call_next(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "contextlib.py", line 153, in __exit__
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    |     response: Response = await call_next(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\cors.py", line 93, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\cors.py", line 144, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fas
+tapi\routing.py", line 301, in app
+    |     raw_response = await run_endpoint_function(
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fas
+tapi\routing.py", line 212, in run_endpoint_function
+    |     return await dependant.call(**values)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in describe_statistics
+    |     result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+    |   File "asyncio\threads.py", line 25, in to_thread
+    |   File "concurrent\futures\thread.py", line 58, in run
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in <lambda>
+    |     result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\duckdb_client.py", line 48, in execute
+    |     return conn.execute(query)
+    | duckdb.duckdb.CatalogException: Catalog Error: Table with name data does not exist!
+    | Did you mean "18f26ece_7f187be5.data, 4dd54041_394c5365.data, 4dd54041_7a0aaf30.data, 4dd54041_9d0dc646.data, 877
+90965_ea278805.data, 8ab433e3_ffc68190.data, ccfc7818_0426dd20.data, ecbd32f6_0525a532.data, ecbd32f6_1ee37cba.data, or
+ ecbd32f6_37298d2b.data"?
+    | 
+    | LINE 1: ... "unit_price" IS NULL THEN 1 ELSE 0 END) as null_count FROM "ecbd32f6_15e54427"."data"
+    |                                                                        ^
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+INFO:     127.0.0.1:49321 - "POST /api/v1/statistics/describe HTTP/1.1" 500 Internal Server Error
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in describe_statistics
+    result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+  File "asyncio\threads.py", line 25, in to_thread
+  File "concurrent\futures\thread.py", line 58, in run
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in <lambda>
+    result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\duckdb_client.py", line 48, in execute
+    return conn.execute(query)
+duckdb.duckdb.CatalogException: Catalog Error: Table with name data does not exist!
+Did you mean "18f26ece_7f187be5.data, 4dd54041_394c5365.data, 4dd54041_7a0aaf30.data, 4dd54041_9d0dc646.data, 87790965_
+ea278805.data, 8ab433e3_ffc68190.data, ccfc7818_0426dd20.data, ecbd32f6_0525a532.data, ecbd32f6_1ee37cba.data, or ecbd3
+2f6_37298d2b.data"?
+
+LINE 1: ... "unit_price" IS NULL THEN 1 ELSE 0 END) as null_count FROM "ecbd32f6_15e54427"."data"
+                                                                       ^
+
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starl
+ette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starl
+ette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\anyio
+\_backends\_asyncio.py", line 815, in __aexit__
+  |     raise BaseExceptionGroup(
+  | exceptiongroup.ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvi
+corn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvi
+corn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fas
+tapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "contextlib.py", line 153, in __exit__
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    |     response: Response = await call_next(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "contextlib.py", line 153, in __exit__
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    |     response: Response = await call_next(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\cors.py", line 93, in __call__
+    |     await self.simple_response(scope, receive, send, request_headers=headers)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\cors.py", line 144, in simple_response
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\sta
+rlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fas
+tapi\routing.py", line 301, in app
+    |     raw_response = await run_endpoint_function(
+    |   File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fas
+tapi\routing.py", line 212, in run_endpoint_function
+    |     return await dependant.call(**values)
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in describe_statistics
+    |     result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+    |   File "asyncio\threads.py", line 25, in to_thread
+    |   File "concurrent\futures\thread.py", line 58, in run
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in <lambda>
+    |     result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+    |   File "E:\BI\LvcoBI\lvco-bi\backend\app\core\duckdb_client.py", line 48, in execute
+    |     return conn.execute(query)
+    | duckdb.duckdb.CatalogException: Catalog Error: Table with name data does not exist!
+    | Did you mean "18f26ece_7f187be5.data, 4dd54041_394c5365.data, 4dd54041_7a0aaf30.data, 4dd54041_9d0dc646.data, 877
+90965_ea278805.data, 8ab433e3_ffc68190.data, ccfc7818_0426dd20.data, ecbd32f6_0525a532.data, ecbd32f6_1ee37cba.data, or
+ ecbd32f6_37298d2b.data"?
+    | 
+    | LINE 1: ... "unit_price" IS NULL THEN 1 ELSE 0 END) as null_count FROM "ecbd32f6_15e54427"."data"
+    |                                                                        ^
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvicorn\p
+rotocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\uvicorn\m
+iddleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\a
+pplications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 72, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "contextlib.py", line 153, in __exit__
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\middleware.py", line 20, in dispatch
+    response: Response = await call_next(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 93, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\cors.py", line 144, in simple_response
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\starlette
+\routing.py", line 73, in app
+    response = await f(request)
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 301, in app
+    raw_response = await run_endpoint_function(
+  File "C:\Users\YuanXiao\AppData\Roaming\TRAE SOLO CN\ModularData\ai-agent\vm\tools\python\lib\site-packages\fastapi\r
+outing.py", line 212, in run_endpoint_function
+    return await dependant.call(**values)
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in describe_statistics
+    result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+  File "asyncio\threads.py", line 25, in to_thread
+  File "concurrent\futures\thread.py", line 58, in run
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\api\v1\statistics.py", line 85, in <lambda>
+    result_row = await asyncio.to_thread(lambda: duckdb_client.execute(sql).fetchone())
+  File "E:\BI\LvcoBI\lvco-bi\backend\app\core\duckdb_client.py", line 48, in execute
+    return conn.execute(query)
+duckdb.duckdb.CatalogException: Catalog Error: Table with name data does not exist!
+Did you mean "18f26ece_7f187be5.data, 4dd54041_394c5365.data, 4dd54041_7a0aaf30.data, 4dd54041_9d0dc646.data, 87790965_
+ea278805.data, 8ab433e3_ffc68190.data, ccfc7818_0426dd20.data, ecbd32f6_0525a532.data, ecbd32f6_1ee37cba.data, or ecbd3
+2f6_37298d2b.data"?
+
+LINE 1: ... "unit_price" IS NULL THEN 1 ELSE 0 END) as null_count FROM "ecbd32f6_15e54427"."data"
+                                                                       ^
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 17.22, "event": "request_completed", "timestamp": "2026-07-27T06:10:45.007624Z"}
+INFO:     127.0.0.1:59991 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 24.66, "event": "request_completed", "timestamp": "2026-07-27T06:10:45.013521Z"}
+INFO:     127.0.0.1:59990 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 16.46, "event": "request_completed", "timestamp": "2026-07-27T06:10:45.027393Z"}
+INFO:     127.0.0.1:59991 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 12.44, "event": "request_completed", "timestamp": "2026-07-27T06:10:45.030124Z"}
+INFO:     127.0.0.1:59990 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages", "status_code": 200, "duration_ms": 6.07, "event": "request_completed", "timestamp": "2026-07-27T06:10:46.175502Z"}
+INFO:     127.0.0.1:59990 - "GET /api/v1/ai/sessions/6636d0be-5710-4e6e-b6ab-b362fd817e82/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 13.95, "event": "request_completed", "timestamp": "2026-07-27T06:10:51.094545Z"}
+INFO:     127.0.0.1:51345 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 22.21, "event": "request_completed", "timestamp": "2026-07-27T06:10:59.808147Z"}
+INFO:     127.0.0.1:51354 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 10.39, "event": "request_completed", "timestamp": "2026-07-27T06:10:59.819797Z"}
+INFO:     127.0.0.1:51354 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 18.54, "event": "request_completed", "timestamp": "2026-07-27T06:11:04.718269Z"}
+INFO:     127.0.0.1:51354 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 24.78, "event": "request_completed", "timestamp": "2026-07-27T06:11:04.745669Z"}
+INFO:     127.0.0.1:51354 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 14.37, "event": "request_completed", "timestamp": "2026-07-27T06:11:07.289340Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 14.89, "event": "request_completed", "timestamp": "2026-07-27T06:11:07.307444Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 21.17, "event": "request_completed", "timestamp": "2026-07-27T06:11:10.541769Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 15.22, "event": "request_completed", "timestamp": "2026-07-27T06:11:10.559535Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:11:12.159242Z"}
+INFO:     127.0.0.1:63950 - "OPTIONS /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 18.23, "event": "request_completed", "timestamp": "2026-07-27T06:11:12.179873Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 14.02, "event": "request_completed", "timestamp": "2026-07-27T06:11:12.196218Z"}
+INFO:     127.0.0.1:63950 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/ac21805a-79f5-46dc-bc11-840e95327e04", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:11:23.116282Z"}
+INFO:     127.0.0.1:59467 - "OPTIONS /api/v1/trash/canvas/ac21805a-79f5-46dc-bc11-840e95327e04 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/ac21805a-79f5-46dc-bc11-840e95327e04", "status_code": 200, "duration_ms": 9.61, "event": "request_completed", "timestamp": "2026-07-27T06:11:23.127522Z"}
+INFO:     127.0.0.1:59467 - "DELETE /api/v1/trash/canvas/ac21805a-79f5-46dc-bc11-840e95327e04 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 13.32, "event": "request_completed", "timestamp": "2026-07-27T06:11:26.224150Z"}
+INFO:     127.0.0.1:59467 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 12.5, "event": "request_completed", "timestamp": "2026-07-27T06:11:26.237986Z"}
+INFO:     127.0.0.1:59467 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 11.21, "event": "request_completed", "timestamp": "2026-07-27T06:11:26.654283Z"}
+INFO:     127.0.0.1:59467 - "GET /api/v1/permissions/users?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 0.15, "event": "request_completed", "timestamp": "2026-07-27T06:11:28.236719Z"}
+INFO:     127.0.0.1:59467 - "OPTIONS /api/v1/permissions/users?page=1&pageSize=20&role=admin HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 18.63, "event": "request_completed", "timestamp": "2026-07-27T06:11:28.256866Z"}
+INFO:     127.0.0.1:59467 - "GET /api/v1/permissions/users?page=1&pageSize=20&role=admin HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 0.17, "event": "request_completed", "timestamp": "2026-07-27T06:11:30.332374Z"}
+INFO:     127.0.0.1:59467 - "OPTIONS /api/v1/permissions/users?page=1&pageSize=20&role=editor HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 15.97, "event": "request_completed", "timestamp": "2026-07-27T06:11:30.351064Z"}
+INFO:     127.0.0.1:59467 - "GET /api/v1/permissions/users?page=1&pageSize=20&role=editor HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T06:11:39.584381Z"}
+INFO:     127.0.0.1:50317 - "OPTIONS /api/v1/permissions/users?page=1&pageSize=20&role=viewer HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 7.29, "event": "request_completed", "timestamp": "2026-07-27T06:11:39.593362Z"}
+INFO:     127.0.0.1:50317 - "GET /api/v1/permissions/users?page=1&pageSize=20&role=viewer HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 14.36, "event": "request_completed", "timestamp": "2026-07-27T06:11:41.946981Z"}
+INFO:     127.0.0.1:50317 - "GET /api/v1/permissions/users?page=1&pageSize=20&role=editor HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/permissions/users", "status_code": 200, "duration_ms": 15.6, "event": "request_completed", "timestamp": "2026-07-27T06:11:48.469255Z"}
+INFO:     127.0.0.1:49210 - "GET /api/v1/permissions/users?page=1&pageSize=20&role=editor HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 9.73, "event": "request_completed", "timestamp": "2026-07-27T06:12:09.455243Z"}
+INFO:     127.0.0.1:52425 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 10.93, "event": "request_completed", "timestamp": "2026-07-27T06:12:09.468635Z"}
+INFO:     127.0.0.1:52425 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 6.15, "event": "request_completed", "timestamp": "2026-07-27T06:12:11.222197Z"}
+INFO:     127.0.0.1:52425 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 22.69, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.399577Z"}
+INFO:     127.0.0.1:63614 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.65, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.415382Z"}
+INFO:     127.0.0.1:63614 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 13.57, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.434862Z"}
+INFO:     127.0.0.1:63614 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 20.22, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.439089Z"}
+INFO:     127.0.0.1:63615 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 15.66, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.455614Z"}
+INFO:     127.0.0.1:63616 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 18.21, "event": "request_completed", "timestamp": "2026-07-27T06:12:59.462829Z"}
+INFO:     127.0.0.1:63614 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 0.23, "event": "request_completed", "timestamp": "2026-07-27T06:13:00.921540Z"}
+INFO:     127.0.0.1:63614 - "OPTIONS /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 20.5, "event": "request_completed", "timestamp": "2026-07-27T06:13:00.944455Z"}
+INFO:     127.0.0.1:63614 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T06:13:13.499779Z"}
+INFO:     127.0.0.1:64950 - "OPTIONS /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 29.4, "event": "request_completed", "timestamp": "2026-07-27T06:13:13.531174Z"}
+INFO:     127.0.0.1:64950 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:13:13,659 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "OPTIONS", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 0.46, "event": "request_completed", "timestamp": "2026-07-27T06:13:20.897140Z"}
+INFO:     127.0.0.1:64950 - "OPTIONS /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 3725.54, "event": "request_completed", "timestamp": "2026-07-27T06:13:24.624863Z"}
+INFO:     127.0.0.1:64951 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.73, "event": "request_completed", "timestamp": "2026-07-27T06:13:26.174985Z"}
+INFO:     127.0.0.1:64951 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.81, "event": "request_completed", "timestamp": "2026-07-27T06:13:30.597849Z"}
+INFO:     127.0.0.1:64951 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 42.83, "event": "request_completed", "timestamp": "2026-07-27T06:13:38.332569Z"}
+INFO:     127.0.0.1:52891 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:13:38,478 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 54.82, "event": "request_completed", "timestamp": "2026-07-27T06:15:04.796847Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 48.22, "event": "request_completed", "timestamp": "2026-07-27T06:15:05.437354Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 49.46, "event": "request_completed", "timestamp": "2026-07-27T06:15:05.599686Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 67.46, "event": "request_completed", "timestamp": "2026-07-27T06:15:05.783912Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 53.35, "event": "request_completed", "timestamp": "2026-07-27T06:15:05.923888Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 52.36, "event": "request_completed", "timestamp": "2026-07-27T06:15:06.046015Z"}
+INFO:     127.0.0.1:58309 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 46.16, "event": "request_completed", "timestamp": "2026-07-27T06:15:36.201566Z"}
+INFO:     127.0.0.1:65299 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 14.66, "event": "request_completed", "timestamp": "2026-07-27T06:18:01.646351Z"}
+INFO:     127.0.0.1:54734 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 37.73, "event": "request_completed", "timestamp": "2026-07-27T06:18:27.333084Z"}
+INFO:     127.0.0.1:58172 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:18:27,596 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 30.31, "event": "request_completed", "timestamp": "2026-07-27T06:19:11.323272Z"}
+INFO:     127.0.0.1:50680 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:19:11,450 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 27.23, "event": "request_completed", "timestamp": "2026-07-27T06:19:45.534888Z"}
+INFO:     127.0.0.1:60147 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:19:45,666 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 56.56, "event": "request_completed", "timestamp": "2026-07-27T06:19:55.542371Z"}
+INFO:     127.0.0.1:60147 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.28, "event": "request_completed", "timestamp": "2026-07-27T06:19:57.074336Z"}
+INFO:     127.0.0.1:60147 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.1, "event": "request_completed", "timestamp": "2026-07-27T06:20:00.631322Z"}
+INFO:     127.0.0.1:60147 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 25.74, "event": "request_completed", "timestamp": "2026-07-27T06:20:27.522835Z"}
+INFO:     127.0.0.1:53913 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:20:27,644 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 25.41, "event": "request_completed", "timestamp": "2026-07-27T06:21:31.067345Z"}
+INFO:     127.0.0.1:60868 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+2026-07-27 14:21:31,584 INFO httpx: HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+2026-07-27 14:21:44,586 WARNING lvco.ai_api: Canvas AI SQL error (raw): Binder Error: Referenced column "avg_rate_pct" 
+not found in FROM clause!
+Candidate bindings: "avg_rating", "return_rate_pct", "category", "unit_price", "product_name"
+
+LINE 3:   AVG("avg_rate_pct") AS avg_avg_rate_pct
+              ^
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.07, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.730254Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.03, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.730254Z"}
+INFO:     127.0.0.1:59155 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59156 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 3.02, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.741884Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 3.04, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.741884Z"}
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.24, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.743824Z"}
+INFO:     127.0.0.1:59160 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.37, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.745425Z"}
+INFO:     127.0.0.1:59158 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 13.34, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.764725Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 25.82, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.766926Z"}
+INFO:     127.0.0.1:59156 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 10.39, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.777962Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 13.92, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.784822Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.39, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.798910Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.22, "event": "request_completed", "timestamp": "2026-07-27T06:22:13.810923Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.23, "event": "request_completed", "timestamp": "2026-07-27T06:22:15.240164Z"}
+INFO:     127.0.0.1:59159 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.24, "event": "request_completed", "timestamp": "2026-07-27T06:22:15.609582Z"}
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.71, "event": "request_completed", "timestamp": "2026-07-27T06:22:15.612405Z"}
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.3, "event": "request_completed", "timestamp": "2026-07-27T06:22:15.624771Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 15.86, "event": "request_completed", "timestamp": "2026-07-27T06:22:15.643155Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.272438Z"}
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 1.29, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.274659Z"}
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 30.16, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.304907Z"}
+INFO:     127.0.0.1:59156 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 6.6, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.314088Z"}
+INFO:     127.0.0.1:59156 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.599837Z"}
+INFO:     127.0.0.1:59156 - "OPTIONS /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/insights/suggestions", "status_code": 200, "duration_ms": 0.99, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.602506Z"}
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/insights/suggestions HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.75, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.604553Z"}
+{"method": "OPTIONS", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 1.76, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.604553Z"}
+{"method": "OPTIONS", "path": "/api/v1/insights/suggestions", "status_code": 200, "duration_ms": 2.97, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.606380Z"}
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/datasources HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59158 - "OPTIONS /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 4.03, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.608086Z"}
+INFO:     127.0.0.1:59160 - "OPTIONS /api/v1/insights/suggestions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59155 - "OPTIONS /api/v1/datasources HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/suggestions", "status_code": 200, "duration_ms": 21.21, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.633905Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/insights/suggestions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 20.36, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.635995Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/datasources HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 45.03, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.649467Z"}
+INFO:     127.0.0.1:59156 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/suggestions", "status_code": 200, "duration_ms": 15.79, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.653728Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/insights/suggestions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 14.74, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.656848Z"}
+INFO:     127.0.0.1:59155 - "GET /api/v1/datasources HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/insights/rules", "status_code": 200, "duration_ms": 9.36, "event": "request_completed", "timestamp": "2026-07-27T06:22:16.662642Z"}
+INFO:     127.0.0.1:59159 - "GET /api/v1/insights/rules HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 0.24, "event": "request_completed", "timestamp": "2026-07-27T06:22:17.369011Z"}
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 1.25, "event": "request_completed", "timestamp": "2026-07-27T06:22:17.371374Z"}
+INFO:     127.0.0.1:59155 - "OPTIONS /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 12.4, "event": "request_completed", "timestamp": "2026-07-27T06:22:17.384307Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 14.38, "event": "request_completed", "timestamp": "2026-07-27T06:22:17.401480Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.156858Z"}
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 1.52, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.161570Z"}
+INFO:     127.0.0.1:59155 - "OPTIONS /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 3.93, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.164923Z"}
+{"method": "OPTIONS", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 3.96, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.164923Z"}
+INFO:     127.0.0.1:59159 - "OPTIONS /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59156 - "OPTIONS /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 29.08, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.190691Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 28.96, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.197055Z"}
+INFO:     127.0.0.1:59160 - "GET /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 13.7, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.207592Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 13.42, "event": "request_completed", "timestamp": "2026-07-27T06:22:19.213609Z"}
+INFO:     127.0.0.1:59160 - "GET /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 15.99, "event": "request_completed", "timestamp": "2026-07-27T06:22:20.692354Z"}
+INFO:     127.0.0.1:59160 - "GET /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 19.53, "event": "request_completed", "timestamp": "2026-07-27T06:22:20.698037Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs", "status_code": 200, "duration_ms": 21.33, "event": "request_completed", "timestamp": "2026-07-27T06:22:20.717051Z"}
+INFO:     127.0.0.1:59160 - "GET /api/v1/audit/logs?page=1&pageSize=25 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/audit/logs/summary", "status_code": 200, "duration_ms": 21.38, "event": "request_completed", "timestamp": "2026-07-27T06:22:20.724253Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/audit/logs/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 19.74, "event": "request_completed", "timestamp": "2026-07-27T06:22:23.410655Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 11.41, "event": "request_completed", "timestamp": "2026-07-27T06:22:23.424591Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.1, "event": "request_completed", "timestamp": "2026-07-27T06:22:26.318983Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.12, "event": "request_completed", "timestamp": "2026-07-27T06:22:26.332803Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/485bf624-8953-4663-8bb4-e323a636d3c1", "status_code": 200, "duration_ms": 0.81, "event": "request_completed", "timestamp": "2026-07-27T06:22:27.674885Z"}
+INFO:     127.0.0.1:59157 - "OPTIONS /api/v1/datasources/485bf624-8953-4663-8bb4-e323a636d3c1 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 1.14, "event": "request_completed", "timestamp": "2026-07-27T06:22:27.676895Z"}
+{"method": "OPTIONS", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 1.31, "event": "request_completed", "timestamp": "2026-07-27T06:22:27.676895Z"}
+INFO:     127.0.0.1:52967 - "OPTIONS /api/v1/statistics/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52968 - "OPTIONS /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/485bf624-8953-4663-8bb4-e323a636d3c1", "status_code": 200, "duration_ms": 12.95, "event": "request_completed", "timestamp": "2026-07-27T06:22:27.693233Z"}
+INFO:     127.0.0.1:59157 - "GET /api/v1/datasources/485bf624-8953-4663-8bb4-e323a636d3c1 HTTP/1.1" 200 OK

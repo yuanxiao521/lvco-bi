@@ -1,0 +1,32 @@
+/* theme: lvco-brand — LVCO 智能数据分析平台品牌色系 */
+/* Primary: #2BB5A0 (teal), AI Accent: #6C7BF2 (purple-blue) */
+:root{
+  --bg:#F8FAFB;
+  --bg-soft:#EFF6F5;
+  --surface:#FFFFFF;
+  --surface-2:#F1F4F8;
+  --border:rgba(43,181,160,.12);
+  --border-strong:rgba(43,181,160,.25);
+  --text-1:#1A2332;
+  --text-2:#2D3748;
+  --text-3:#8B97A8;
+  --accent:#2BB5A0;
+  --accent-2:#6C7BF2;
+  --accent-3:#239E8B;
+  --good:#34C77B;
+  --warn:#F5A623;
+  --bad:#EF5B5B;
+  --grad:linear-gradient(135deg,#2BB5A0,#6C7BF2);
+  --grad-soft:linear-gradient(135deg,#E8F7F4,#EEF0FE);
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 4px rgba(26,35,50,.04),0 2px 8px rgba(26,35,50,.04);
+  --shadow-lg:0 4px 12px rgba(26,35,50,.06),0 12px 36px rgba(26,35,50,.06);
+  --font-sans:'Inter','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-display:'Inter','PingFang SC','Microsoft YaHei',sans-serif;
+}
+.card{border:1px solid var(--border)}
+.kicker{color:var(--accent)}
+.tag{background:var(--accent);color:#fff}
+.grid.g1-4{grid-template-columns:1fr 4fr}

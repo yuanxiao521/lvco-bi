@@ -1,0 +1,1256 @@
+2026-07-27 09:30:45 [info     ] redis_connected                url=redis://localhost:6379/0
+2026-07-27 09:30:45 [info     ] minio_connected                endpoint=localhost:9000
+{"status": "ok", "event": "redis ping", "timestamp": "2026-07-27T01:30:45.822321Z"}
+{"method": "GET", "path": "/health", "status_code": 200, "duration_ms": 0.38, "event": "request_completed", "timestamp": "2026-07-27T01:30:51.782335Z"}
+INFO:     127.0.0.1:64945 - "GET /health HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 283.13, "event": "request_completed", "timestamp": "2026-07-27T01:31:00.097175Z"}
+INFO:     127.0.0.1:64956 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 17.56, "event": "request_completed", "timestamp": "2026-07-27T01:31:00.120159Z"}
+INFO:     127.0.0.1:64956 - "GET /api/v1/datasources?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases", "status_code": 201, "duration_ms": 13.82, "event": "request_completed", "timestamp": "2026-07-27T01:31:00.135884Z"}
+INFO:     127.0.0.1:64956 - "POST /api/v1/canvases HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/canvases/f0e4aaae-667f-479e-825d-1d708768fcbe/export/pdf", "status_code": 200, "duration_ms": 1438.02, "event": "request_completed", "timestamp": "2026-07-27T01:31:01.575707Z"}
+INFO:     127.0.0.1:64956 - "GET /api/v1/canvases/f0e4aaae-667f-479e-825d-1d708768fcbe/export/pdf HTTP/1.1" 200 OK
+{"method": "GET", "path": "/docs", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T01:31:11.711771Z"}
+INFO:     127.0.0.1:64965 - "GET /docs HTTP/1.1" 200 OK
+{"method": "GET", "path": "/openapi.json", "status_code": 200, "duration_ms": 26.85, "event": "request_completed", "timestamp": "2026-07-27T01:31:11.740359Z"}
+INFO:     127.0.0.1:64965 - "GET /openapi.json HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/register", "status_code": 409, "duration_ms": 4.56, "event": "request_completed", "timestamp": "2026-07-27T01:31:11.748136Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/register HTTP/1.1" 409 Conflict
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 204.68, "event": "request_completed", "timestamp": "2026-07-27T01:31:11.954368Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "PATCH", "path": "/api/v1/auth/profile", "status_code": 200, "duration_ms": 7.85, "event": "request_completed", "timestamp": "2026-07-27T01:31:11.963909Z"}
+INFO:     127.0.0.1:64965 - "PATCH /api/v1/auth/profile HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 207.88, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.173785Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 1.07, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.176629Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/change-password", "status_code": 200, "duration_ms": 413.19, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.591336Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/change-password HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/logout", "status_code": 200, "duration_ms": 2.97, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.595817Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/auth/logout HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 5.57, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.602884Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/datasources?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 5.33, "event": "request_completed", "timestamp": "2026-07-27T01:31:12.609715Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/datasources?page=1&pageSize=50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/7f187be5-3461-4e30-9de9-a470e87daaf5/preview", "status_code": 200, "duration_ms": 452.38, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.063693Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/datasources/7f187be5-3461-4e30-9de9-a470e87daaf5/preview?limit=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases", "status_code": 201, "duration_ms": 7.56, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.072944Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8", "status_code": 200, "duration_ms": 4.68, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.079197Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8 HTTP/1.1" 200 OK
+{"method": "PATCH", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8", "status_code": 200, "duration_ms": 9.46, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.090323Z"}
+INFO:     127.0.0.1:64965 - "PATCH /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/blocks", "status_code": 200, "duration_ms": 9.26, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.101254Z"}
+INFO:     127.0.0.1:64965 - "PUT /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/blocks HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 7.45, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.110118Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/canvases?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 17.9, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.129595Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 8.0, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.139156Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.81, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.148638Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 8.13, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.158401Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 8.0, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.168238Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 9.25, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.179140Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 8.56, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.189435Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.51, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.198601Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.79, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.207921Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.89, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.217334Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.99, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.226991Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.54, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.236007Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs", "status_code": 201, "duration_ms": 7.84, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.245629Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/chart-configs HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/query", "status_code": 200, "duration_ms": 17.6, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.264753Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/dashboards", "status_code": 201, "duration_ms": 11.15, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.277505Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/dashboards HTTP/1.1" 201 Created
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/pin-to-dashboard", "status_code": 201, "duration_ms": 24.59, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.303646Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/pin-to-dashboard HTTP/1.1" 201 Created
+{"method": "DELETE", "path": "/api/v1/dashboards/1c849d64-de05-4693-980d-b0ac172d93ea", "status_code": 200, "duration_ms": 9.05, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.314381Z"}
+INFO:     127.0.0.1:64965 - "DELETE /api/v1/dashboards/1c849d64-de05-4693-980d-b0ac172d93ea HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/save-as-report", "status_code": 201, "duration_ms": 17.14, "event": "request_completed", "timestamp": "2026-07-27T01:31:13.333212Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/save-as-report HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/export/pdf", "status_code": 200, "duration_ms": 1252.49, "event": "request_completed", "timestamp": "2026-07-27T01:31:14.587331Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/export/pdf HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/ai-recommend", "status_code": 200, "duration_ms": 658.37, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.247447Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/ai-recommend HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8", "status_code": 200, "duration_ms": 7.91, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.257000Z"}
+INFO:     127.0.0.1:64965 - "DELETE /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.66, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.267428Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/reports?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13", "status_code": 200, "duration_ms": 5.59, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.274694Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13 HTTP/1.1" 200 OK
+{"method": "PATCH", "path": "/api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13", "status_code": 200, "duration_ms": 10.83, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.287149Z"}
+INFO:     127.0.0.1:64965 - "PATCH /api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13/share", "status_code": 200, "duration_ms": 8.94, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.298420Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/reports/dd635cb8-500b-4369-8ff3-98551a143d13/share HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/public/share/shr_report_HTm83-AaWpY", "status_code": 200, "duration_ms": 6.12, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.306021Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/public/share/shr_report_HTm83-AaWpY HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 10.36, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.317893Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/restore", "status_code": 200, "duration_ms": 7.53, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.327030Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/restore HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/restore", "status_code": 404, "duration_ms": 4.27, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.333484Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8/restore HTTP/1.1" 404 Not Found
+{"method": "DELETE", "path": "/api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8", "status_code": 200, "duration_ms": 6.56, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.341607Z"}
+INFO:     127.0.0.1:64965 - "DELETE /api/v1/canvases/2ef1b994-5a24-4134-ab89-2abbda1fe8c8 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8", "status_code": 200, "duration_ms": 7.79, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.351031Z"}
+INFO:     127.0.0.1:64965 - "DELETE /api/v1/trash/canvas/2ef1b994-5a24-4134-ab89-2abbda1fe8c8 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 8.44, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.361108Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/dashboards?page=1&pageSize=20 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/dashboards", "status_code": 201, "duration_ms": 7.82, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.370590Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/dashboards HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/dashboards/477bb980-3793-4b24-8762-4648763e1ca6", "status_code": 200, "duration_ms": 5.76, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.377903Z"}
+INFO:     127.0.0.1:64965 - "GET /api/v1/dashboards/477bb980-3793-4b24-8762-4648763e1ca6 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/dashboards/477bb980-3793-4b24-8762-4648763e1ca6", "status_code": 200, "duration_ms": 7.71, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.387170Z"}
+INFO:     127.0.0.1:64965 - "DELETE /api/v1/dashboards/477bb980-3793-4b24-8762-4648763e1ca6 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 8.78, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.397580Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 8.32, "event": "request_completed", "timestamp": "2026-07-27T01:31:15.407399Z"}
+INFO:     127.0.0.1:64965 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 218.13, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.010756Z"}
+INFO:     127.0.0.1:56673 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 12.38, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.026194Z"}
+INFO:     127.0.0.1:56673 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions", "status_code": 201, "duration_ms": 13.13, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.041104Z"}
+INFO:     127.0.0.1:56673 - "POST /api/v1/ai/sessions HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143", "status_code": 200, "duration_ms": 20.21, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.063516Z"}
+INFO:     127.0.0.1:56673 - "GET /api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143/messages", "status_code": 200, "duration_ms": 8.67, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.074396Z"}
+INFO:     127.0.0.1:56673 - "GET /api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143/messages HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143/messages", "status_code": 200, "duration_ms": 212.55, "event": "request_completed", "timestamp": "2026-07-27T01:33:40.288952Z"}
+INFO:     127.0.0.1:56673 - "POST /api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.36, "event": "request_completed", "timestamp": "2026-07-27T01:33:41.020184Z"}
+INFO:     127.0.0.1:56679 - "GET /api/v1/datasources?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/query", "status_code": 200, "duration_ms": 648.99, "event": "request_completed", "timestamp": "2026-07-27T01:33:41.671251Z"}
+INFO:     127.0.0.1:56679 - "POST /api/v1/ai/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/polish", "status_code": 200, "duration_ms": 641.77, "event": "request_completed", "timestamp": "2026-07-27T01:33:42.315118Z"}
+INFO:     127.0.0.1:56679 - "POST /api/v1/ai/polish HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/insights", "status_code": 200, "duration_ms": 699.12, "event": "request_completed", "timestamp": "2026-07-27T01:33:43.016553Z"}
+INFO:     127.0.0.1:56679 - "POST /api/v1/ai/insights HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/clean", "status_code": 200, "duration_ms": 17.05, "event": "request_completed", "timestamp": "2026-07-27T01:33:43.035983Z"}
+INFO:     127.0.0.1:56679 - "POST /api/v1/ai/clean HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 8.19, "event": "request_completed", "timestamp": "2026-07-27T01:33:43.046853Z"}
+INFO:     127.0.0.1:56679 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 62.3, "event": "request_completed", "timestamp": "2026-07-27T01:33:44.087736Z"}
+INFO:     127.0.0.1:56687 - "GET /api/v1/canvases?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 422, "duration_ms": 5.62, "event": "request_completed", "timestamp": "2026-07-27T01:33:44.095128Z"}
+INFO:     127.0.0.1:56687 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 422 Unprocessable Content
+{"method": "DELETE", "path": "/api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143", "status_code": 200, "duration_ms": 29.66, "event": "request_completed", "timestamp": "2026-07-27T01:33:44.127006Z"}
+INFO:     127.0.0.1:56687 - "DELETE /api/v1/ai/sessions/e1df75dd-16e3-42b7-87b0-74676ad07143 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 262.36, "event": "request_completed", "timestamp": "2026-07-27T01:34:24.928808Z"}
+INFO:     127.0.0.1:56722 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 6.36, "event": "request_completed", "timestamp": "2026-07-27T01:34:24.937268Z"}
+INFO:     127.0.0.1:56722 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions", "status_code": 201, "duration_ms": 11.85, "event": "request_completed", "timestamp": "2026-07-27T01:34:24.951205Z"}
+INFO:     127.0.0.1:56722 - "POST /api/v1/ai/sessions HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e", "status_code": 200, "duration_ms": 7.54, "event": "request_completed", "timestamp": "2026-07-27T01:34:24.960618Z"}
+INFO:     127.0.0.1:56722 - "GET /api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e/messages", "status_code": 200, "duration_ms": 14.62, "event": "request_completed", "timestamp": "2026-07-27T01:34:24.976846Z"}
+INFO:     127.0.0.1:56722 - "GET /api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e/messages HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e/messages", "status_code": 200, "duration_ms": 207.51, "event": "request_completed", "timestamp": "2026-07-27T01:34:25.186063Z"}
+INFO:     127.0.0.1:56722 - "POST /api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 16.65, "event": "request_completed", "timestamp": "2026-07-27T01:34:25.859998Z"}
+INFO:     127.0.0.1:56727 - "GET /api/v1/datasources?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/query", "status_code": 200, "duration_ms": 708.77, "event": "request_completed", "timestamp": "2026-07-27T01:34:26.571236Z"}
+INFO:     127.0.0.1:56727 - "POST /api/v1/ai/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/polish", "status_code": 200, "duration_ms": 1363.96, "event": "request_completed", "timestamp": "2026-07-27T01:34:27.936880Z"}
+INFO:     127.0.0.1:56727 - "POST /api/v1/ai/polish HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/insights", "status_code": 200, "duration_ms": 645.98, "event": "request_completed", "timestamp": "2026-07-27T01:34:28.584672Z"}
+INFO:     127.0.0.1:56727 - "POST /api/v1/ai/insights HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/clean", "status_code": 200, "duration_ms": 9.25, "event": "request_completed", "timestamp": "2026-07-27T01:34:28.595562Z"}
+INFO:     127.0.0.1:56727 - "POST /api/v1/ai/clean HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 4.83, "event": "request_completed", "timestamp": "2026-07-27T01:34:28.602437Z"}
+INFO:     127.0.0.1:56727 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 7.39, "event": "request_completed", "timestamp": "2026-07-27T01:34:29.480711Z"}
+INFO:     127.0.0.1:56733 - "GET /api/v1/canvases?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 201.55, "event": "request_completed", "timestamp": "2026-07-27T01:34:29.684100Z"}
+INFO:     127.0.0.1:56733 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e", "status_code": 200, "duration_ms": 10.53, "event": "request_completed", "timestamp": "2026-07-27T01:34:30.396336Z"}
+INFO:     127.0.0.1:56736 - "DELETE /api/v1/ai/sessions/838e16e5-b358-4ae8-bed6-2183c702162e HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.32, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.035001Z"}
+INFO:     127.0.0.1:56990 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.92, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.037465Z"}
+INFO:     127.0.0.1:56994 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.5, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.038121Z"}
+INFO:     127.0.0.1:56991 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.92, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.038576Z"}
+INFO:     127.0.0.1:56992 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.37, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.039058Z"}
+INFO:     127.0.0.1:56993 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 2.86, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.039869Z"}
+INFO:     127.0.0.1:56995 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 3.86, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.040799Z"}
+INFO:     127.0.0.1:56990 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 401, "duration_ms": 1.56, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.043035Z"}
+INFO:     127.0.0.1:56994 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 2.02, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.044429Z"}
+INFO:     127.0.0.1:56995 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 401, "duration_ms": 1.63, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.047109Z"}
+INFO:     127.0.0.1:56994 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 1.94, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.048392Z"}
+INFO:     127.0.0.1:56995 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 0.92, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.051580Z"}
+INFO:     127.0.0.1:56995 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "OPTIONS", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.057922Z"}
+INFO:     127.0.0.1:56995 - "OPTIONS /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 1.41, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.061224Z"}
+INFO:     127.0.0.1:56994 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 1.07, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.115785Z"}
+INFO:     127.0.0.1:56997 - "OPTIONS /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.07, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.117438Z"}
+INFO:     127.0.0.1:56998 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 4.35, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.120027Z"}
+INFO:     127.0.0.1:56999 - "OPTIONS /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 4.98, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.122185Z"}
+INFO:     127.0.0.1:57000 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 401, "duration_ms": 8.45, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.131917Z"}
+INFO:     127.0.0.1:56997 - "GET /api/v1/ai/sessions HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 5.37, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.132935Z"}
+INFO:     127.0.0.1:56998 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 61.0, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.136201Z"}
+INFO:     127.0.0.1:56995 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 401, "duration_ms": 3.02, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.137350Z"}
+INFO:     127.0.0.1:57000 - "GET /api/v1/ai/sessions HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 401, "duration_ms": 3.42, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.138940Z"}
+INFO:     127.0.0.1:56997 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 401 Unauthorized
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.88, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.148653Z"}
+INFO:     127.0.0.1:56990 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 0.44, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.151258Z"}
+INFO:     127.0.0.1:56997 - "OPTIONS /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/refresh", "status_code": 200, "duration_ms": 2.68, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.156245Z"}
+INFO:     127.0.0.1:57000 - "POST /api/v1/auth/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.22, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.163419Z"}
+INFO:     127.0.0.1:56990 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.2, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.175516Z"}
+INFO:     127.0.0.1:56990 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 114.61, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.186580Z"}
+INFO:     127.0.0.1:56994 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 39.65, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.217945Z"}
+INFO:     127.0.0.1:57000 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 32.54, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.221356Z"}
+INFO:     127.0.0.1:56994 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.59, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.228757Z"}
+INFO:     127.0.0.1:57000 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 70.42, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.250346Z"}
+INFO:     127.0.0.1:56997 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 6.26, "event": "request_completed", "timestamp": "2026-07-27T01:35:07.258090Z"}
+INFO:     127.0.0.1:56997 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T01:35:09.289116Z"}
+INFO:     127.0.0.1:56994 - "OPTIONS /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 8.97, "event": "request_completed", "timestamp": "2026-07-27T01:35:09.300068Z"}
+INFO:     127.0.0.1:56994 - "PUT /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/auth/login", "status_code": 200, "duration_ms": 213.33, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.269310Z"}
+INFO:     127.0.0.1:53447 - "POST /api/v1/auth/login HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 5.2, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.276903Z"}
+INFO:     127.0.0.1:53447 - "GET /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions", "status_code": 201, "duration_ms": 12.02, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.290753Z"}
+INFO:     127.0.0.1:53447 - "POST /api/v1/ai/sessions HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4", "status_code": 200, "duration_ms": 17.39, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.309833Z"}
+INFO:     127.0.0.1:53447 - "GET /api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4/messages", "status_code": 200, "duration_ms": 18.28, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.329900Z"}
+INFO:     127.0.0.1:53447 - "GET /api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4/messages HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4/messages", "status_code": 200, "duration_ms": 191.02, "event": "request_completed", "timestamp": "2026-07-27T01:55:21.522650Z"}
+INFO:     127.0.0.1:53447 - "POST /api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.65, "event": "request_completed", "timestamp": "2026-07-27T01:55:22.868399Z"}
+INFO:     127.0.0.1:53452 - "GET /api/v1/datasources?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/query", "status_code": 200, "duration_ms": 2277.79, "event": "request_completed", "timestamp": "2026-07-27T01:55:25.147755Z"}
+INFO:     127.0.0.1:53452 - "POST /api/v1/ai/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/polish", "status_code": 200, "duration_ms": 1624.96, "event": "request_completed", "timestamp": "2026-07-27T01:55:26.774515Z"}
+INFO:     127.0.0.1:53452 - "POST /api/v1/ai/polish HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/insights", "status_code": 200, "duration_ms": 5565.44, "event": "request_completed", "timestamp": "2026-07-27T01:55:32.341597Z"}
+INFO:     127.0.0.1:53452 - "POST /api/v1/ai/insights HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/clean", "status_code": 200, "duration_ms": 7.61, "event": "request_completed", "timestamp": "2026-07-27T01:55:32.351241Z"}
+INFO:     127.0.0.1:53452 - "POST /api/v1/ai/clean HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 4.79, "event": "request_completed", "timestamp": "2026-07-27T01:55:32.357819Z"}
+INFO:     127.0.0.1:53452 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 6.81, "event": "request_completed", "timestamp": "2026-07-27T01:55:49.087682Z"}
+INFO:     127.0.0.1:61080 - "GET /api/v1/canvases?page=1&pageSize=5 HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/canvas/chat", "status_code": 200, "duration_ms": 238.04, "event": "request_completed", "timestamp": "2026-07-27T01:55:49.327794Z"}
+INFO:     127.0.0.1:61080 - "POST /api/v1/ai/canvas/chat HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4", "status_code": 200, "duration_ms": 73.51, "event": "request_completed", "timestamp": "2026-07-27T01:55:54.744189Z"}
+INFO:     127.0.0.1:61085 - "DELETE /api/v1/ai/sessions/33e5ecc2-f8cf-427c-af4a-97688c7ad2f4 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T01:57:20.922073Z"}
+INFO:     127.0.0.1:50450 - "OPTIONS /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 14.48, "event": "request_completed", "timestamp": "2026-07-27T01:57:20.938870Z"}
+INFO:     127.0.0.1:50450 - "PUT /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.26, "event": "request_completed", "timestamp": "2026-07-27T01:57:22.012342Z"}
+INFO:     127.0.0.1:50450 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 33.95, "event": "request_completed", "timestamp": "2026-07-27T01:57:22.049929Z"}
+INFO:     127.0.0.1:50450 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 19.77, "event": "request_completed", "timestamp": "2026-07-27T01:57:22.072045Z"}
+INFO:     127.0.0.1:50450 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 0.28, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.388432Z"}
+INFO:     127.0.0.1:50450 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 0.63, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.392100Z"}
+INFO:     127.0.0.1:50450 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 1.47, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.393360Z"}
+INFO:     127.0.0.1:60200 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 21.76, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.418579Z"}
+INFO:     127.0.0.1:50450 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 25.62, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.419869Z"}
+INFO:     127.0.0.1:60201 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 7.83, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.429834Z"}
+INFO:     127.0.0.1:60201 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 12.4, "event": "request_completed", "timestamp": "2026-07-27T01:57:23.433305Z"}
+INFO:     127.0.0.1:50450 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 35.94, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.047775Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 14.76, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.064606Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.556328Z"}
+INFO:     127.0.0.1:60208 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.558146Z"}
+INFO:     127.0.0.1:60212 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 1.65, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.560902Z"}
+INFO:     127.0.0.1:60213 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 2.42, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.561747Z"}
+INFO:     127.0.0.1:60214 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 15.91, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.575288Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 14.37, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.576884Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 10.49, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.588442Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 11.86, "event": "request_completed", "timestamp": "2026-07-27T01:57:25.591289Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.61, "event": "request_completed", "timestamp": "2026-07-27T01:57:26.807992Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.16, "event": "request_completed", "timestamp": "2026-07-27T01:57:26.821847Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T01:57:29.559068Z"}
+INFO:     127.0.0.1:60212 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T01:57:29.561024Z"}
+INFO:     127.0.0.1:60208 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 24.1, "event": "request_completed", "timestamp": "2026-07-27T01:57:29.586310Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.33, "event": "request_completed", "timestamp": "2026-07-27T01:57:29.600130Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 13.03, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.208045Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.55, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.218545Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.67, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.228695Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.07, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.238271Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.37, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.250361Z"}
+INFO:     127.0.0.1:60212 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.35, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.251562Z"}
+INFO:     127.0.0.1:60208 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 6.37, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.258934Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 5.13, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.265617Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.81, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.888995Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.49, "event": "request_completed", "timestamp": "2026-07-27T01:57:32.903153Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.47, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.870802Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.87, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.882544Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.65, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.895672Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 8.43, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.898444Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 7.33, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.907435Z"}
+INFO:     127.0.0.1:60208 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.49, "event": "request_completed", "timestamp": "2026-07-27T01:57:33.908747Z"}
+INFO:     127.0.0.1:60212 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 6.92, "event": "request_completed", "timestamp": "2026-07-27T01:57:35.400615Z"}
+INFO:     127.0.0.1:52474 - "PUT /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T01:57:36.747614Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases?page=1&pageSize=10 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 13.33, "event": "request_completed", "timestamp": "2026-07-27T01:57:36.762784Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/canvases?page=1&pageSize=10 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/82b1ac4e-70b6-4447-bb68-6548843bcc86", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.577740Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/82b1ac4e-70b6-4447-bb68-6548843bcc86 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/82b1ac4e-70b6-4447-bb68-6548843bcc86", "status_code": 200, "duration_ms": 9.42, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.588462Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/82b1ac4e-70b6-4447-bb68-6548843bcc86 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.590960Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa", "status_code": 200, "duration_ms": 8.02, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.600128Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/0658fbe1-a55d-469e-ac9c-90eb326a5f4b", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.602910Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/0658fbe1-a55d-469e-ac9c-90eb326a5f4b HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/0658fbe1-a55d-469e-ac9c-90eb326a5f4b", "status_code": 200, "duration_ms": 8.65, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.612755Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/0658fbe1-a55d-469e-ac9c-90eb326a5f4b HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/5baff7a1-af5f-43de-9544-9d6584db4014", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.615283Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/5baff7a1-af5f-43de-9544-9d6584db4014 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/5baff7a1-af5f-43de-9544-9d6584db4014", "status_code": 200, "duration_ms": 7.3, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.623829Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/5baff7a1-af5f-43de-9544-9d6584db4014 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/5b013acd-4f31-41ac-bf1a-8a9de22ef884", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.626373Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/5b013acd-4f31-41ac-bf1a-8a9de22ef884 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/5b013acd-4f31-41ac-bf1a-8a9de22ef884", "status_code": 200, "duration_ms": 7.23, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.634807Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/5b013acd-4f31-41ac-bf1a-8a9de22ef884 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/39b78b93-5202-49b2-82c0-858ead947dcc", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.637179Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/39b78b93-5202-49b2-82c0-858ead947dcc HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/39b78b93-5202-49b2-82c0-858ead947dcc", "status_code": 200, "duration_ms": 7.48, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.645890Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/39b78b93-5202-49b2-82c0-858ead947dcc HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/46687307-09bc-41c1-9b46-0feb5c0d3adf", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.648292Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/46687307-09bc-41c1-9b46-0feb5c0d3adf HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/46687307-09bc-41c1-9b46-0feb5c0d3adf", "status_code": 200, "duration_ms": 7.07, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.656694Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/46687307-09bc-41c1-9b46-0feb5c0d3adf HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/0f5dbbdc-ab8c-4ee7-a7bb-cfc4c8278181", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.659123Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/0f5dbbdc-ab8c-4ee7-a7bb-cfc4c8278181 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/0f5dbbdc-ab8c-4ee7-a7bb-cfc4c8278181", "status_code": 200, "duration_ms": 6.85, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.667398Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/0f5dbbdc-ab8c-4ee7-a7bb-cfc4c8278181 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/b37d027f-f7f9-49e0-a996-71c170dcac24", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.669796Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/b37d027f-f7f9-49e0-a996-71c170dcac24 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/b37d027f-f7f9-49e0-a996-71c170dcac24", "status_code": 200, "duration_ms": 6.96, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.677867Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/b37d027f-f7f9-49e0-a996-71c170dcac24 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/195bb926-108e-4a36-b3c2-f9eecbbe6058", "status_code": 200, "duration_ms": 0.16, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.680408Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/195bb926-108e-4a36-b3c2-f9eecbbe6058 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/195bb926-108e-4a36-b3c2-f9eecbbe6058", "status_code": 200, "duration_ms": 7.31, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.689013Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/195bb926-108e-4a36-b3c2-f9eecbbe6058 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/72cdac87-a838-4863-bd51-3e18eaaadb5e", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.691210Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/72cdac87-a838-4863-bd51-3e18eaaadb5e HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/72cdac87-a838-4863-bd51-3e18eaaadb5e", "status_code": 200, "duration_ms": 7.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.699361Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/72cdac87-a838-4863-bd51-3e18eaaadb5e HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/bfab4255-be92-4a4d-96b9-f6e180ac6ac0", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.701693Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/bfab4255-be92-4a4d-96b9-f6e180ac6ac0 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/bfab4255-be92-4a4d-96b9-f6e180ac6ac0", "status_code": 200, "duration_ms": 7.32, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.710118Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/bfab4255-be92-4a4d-96b9-f6e180ac6ac0 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/ac87841c-1df8-456d-9b52-06f140b84088", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.712475Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/ac87841c-1df8-456d-9b52-06f140b84088 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/ac87841c-1df8-456d-9b52-06f140b84088", "status_code": 200, "duration_ms": 7.36, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.721007Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/ac87841c-1df8-456d-9b52-06f140b84088 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/f2f74ec1-0b40-41b5-9344-1ff2f931a507", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.723598Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/f2f74ec1-0b40-41b5-9344-1ff2f931a507 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/f2f74ec1-0b40-41b5-9344-1ff2f931a507", "status_code": 200, "duration_ms": 7.33, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.732138Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/f2f74ec1-0b40-41b5-9344-1ff2f931a507 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/ac21805a-79f5-46dc-bc11-840e95327e04", "status_code": 200, "duration_ms": 0.17, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.734435Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/ac21805a-79f5-46dc-bc11-840e95327e04 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/ac21805a-79f5-46dc-bc11-840e95327e04", "status_code": 200, "duration_ms": 7.1, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.742958Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/ac21805a-79f5-46dc-bc11-840e95327e04 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/97f763ee-ccc4-46a1-bde1-763284fb493c", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.745384Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/97f763ee-ccc4-46a1-bde1-763284fb493c HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/97f763ee-ccc4-46a1-bde1-763284fb493c", "status_code": 200, "duration_ms": 7.33, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.753900Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/97f763ee-ccc4-46a1-bde1-763284fb493c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/91611a82-0811-493b-84f8-036260a05263", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.756155Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/91611a82-0811-493b-84f8-036260a05263 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/91611a82-0811-493b-84f8-036260a05263", "status_code": 200, "duration_ms": 7.11, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.764258Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/91611a82-0811-493b-84f8-036260a05263 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/4601a978-c083-4f95-bdf7-658f5acb4d68", "status_code": 200, "duration_ms": 0.16, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.766746Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/4601a978-c083-4f95-bdf7-658f5acb4d68 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/4601a978-c083-4f95-bdf7-658f5acb4d68", "status_code": 200, "duration_ms": 7.37, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.775247Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/4601a978-c083-4f95-bdf7-658f5acb4d68 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/f3374a79-a2cd-4c75-8a37-38335cd8bcc7", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.778330Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/f3374a79-a2cd-4c75-8a37-38335cd8bcc7 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/f3374a79-a2cd-4c75-8a37-38335cd8bcc7", "status_code": 200, "duration_ms": 7.26, "event": "request_completed", "timestamp": "2026-07-27T01:57:37.786773Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/f3374a79-a2cd-4c75-8a37-38335cd8bcc7 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.88, "event": "request_completed", "timestamp": "2026-07-27T01:57:39.910081Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 15.6, "event": "request_completed", "timestamp": "2026-07-27T01:57:39.927734Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.84, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.198683Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.38, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.210927Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.71, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.225319Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.38, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.238655Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 7.25, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.263104Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 5.74, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.270242Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 7.95, "event": "request_completed", "timestamp": "2026-07-27T01:57:40.716293Z"}
+INFO:     127.0.0.1:52474 - "GET /api/v1/canvases?page=1&pageSize=10 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks", "status_code": 200, "duration_ms": 9.21, "event": "request_completed", "timestamp": "2026-07-27T01:57:41.744538Z"}
+INFO:     127.0.0.1:52474 - "PUT /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/0300c847-9988-443b-8580-91c1d1fa6db9", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.290667Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/0300c847-9988-443b-8580-91c1d1fa6db9 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/0300c847-9988-443b-8580-91c1d1fa6db9", "status_code": 200, "duration_ms": 7.66, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.299754Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/0300c847-9988-443b-8580-91c1d1fa6db9 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/c2e1cecb-401d-458d-93ae-7f100b7b0f92", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.302437Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/c2e1cecb-401d-458d-93ae-7f100b7b0f92 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/c2e1cecb-401d-458d-93ae-7f100b7b0f92", "status_code": 200, "duration_ms": 7.85, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.311473Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/c2e1cecb-401d-458d-93ae-7f100b7b0f92 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.314750Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c", "status_code": 200, "duration_ms": 7.4, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.323365Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/e1818a8d-62b1-4312-80f7-6b5a65b45377", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.325778Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/e1818a8d-62b1-4312-80f7-6b5a65b45377 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/e1818a8d-62b1-4312-80f7-6b5a65b45377", "status_code": 200, "duration_ms": 7.55, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.334516Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/e1818a8d-62b1-4312-80f7-6b5a65b45377 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/b2895054-3610-4981-bcc8-025a05fbbcfa", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.337200Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/b2895054-3610-4981-bcc8-025a05fbbcfa HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/b2895054-3610-4981-bcc8-025a05fbbcfa", "status_code": 200, "duration_ms": 7.52, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.345887Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/b2895054-3610-4981-bcc8-025a05fbbcfa HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/05460594-2fa3-434d-8a7b-d843252b9220", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.348599Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/05460594-2fa3-434d-8a7b-d843252b9220 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/05460594-2fa3-434d-8a7b-d843252b9220", "status_code": 200, "duration_ms": 6.79, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.356503Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/05460594-2fa3-434d-8a7b-d843252b9220 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/47aaeeac-afcd-4b3c-979e-47279b423a1b", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.359066Z"}
+INFO:     127.0.0.1:52474 - "OPTIONS /api/v1/canvases/47aaeeac-afcd-4b3c-979e-47279b423a1b HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/47aaeeac-afcd-4b3c-979e-47279b423a1b", "status_code": 200, "duration_ms": 7.38, "event": "request_completed", "timestamp": "2026-07-27T01:57:42.367662Z"}
+INFO:     127.0.0.1:52474 - "DELETE /api/v1/canvases/47aaeeac-afcd-4b3c-979e-47279b423a1b HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T01:57:46.471405Z"}
+INFO:     127.0.0.1:55448 - "OPTIONS /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf", "status_code": 200, "duration_ms": 8.44, "event": "request_completed", "timestamp": "2026-07-27T01:57:46.481118Z"}
+INFO:     127.0.0.1:55448 - "DELETE /api/v1/canvases/44c8d3e2-ab6e-442c-973d-9aac085949cf HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 0.23, "event": "request_completed", "timestamp": "2026-07-27T01:57:54.819574Z"}
+INFO:     127.0.0.1:53552 - "OPTIONS /api/v1/canvases HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases", "status_code": 201, "duration_ms": 10.3, "event": "request_completed", "timestamp": "2026-07-27T01:57:54.831782Z"}
+INFO:     127.0.0.1:53552 - "POST /api/v1/canvases HTTP/1.1" 201 Created
+{"method": "OPTIONS", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:57:54.834929Z"}
+INFO:     127.0.0.1:53552 - "OPTIONS /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 1522.57, "event": "request_completed", "timestamp": "2026-07-27T01:57:56.358728Z"}
+INFO:     127.0.0.1:53554 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T01:57:57.900222Z"}
+INFO:     127.0.0.1:53554 - "OPTIONS /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 12.66, "event": "request_completed", "timestamp": "2026-07-27T01:57:57.914167Z"}
+INFO:     127.0.0.1:53554 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 12.73, "event": "request_completed", "timestamp": "2026-07-27T01:58:02.138664Z"}
+INFO:     127.0.0.1:53554 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T01:58:04.747116Z"}
+INFO:     127.0.0.1:53554 - "OPTIONS /api/v1/dashboards?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 9.35, "event": "request_completed", "timestamp": "2026-07-27T01:58:04.758362Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/pin-to-dashboard", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:58:07.058784Z"}
+INFO:     127.0.0.1:53554 - "OPTIONS /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/pin-to-dashboard HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/pin-to-dashboard", "status_code": 201, "duration_ms": 33.17, "event": "request_completed", "timestamp": "2026-07-27T01:58:07.094030Z"}
+INFO:     127.0.0.1:53554 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/pin-to-dashboard HTTP/1.1" 201 Created
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 25.74, "event": "request_completed", "timestamp": "2026-07-27T01:58:09.665634Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.47, "event": "request_completed", "timestamp": "2026-07-27T01:58:09.678852Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 13.53, "event": "request_completed", "timestamp": "2026-07-27T01:58:11.131527Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 12.68, "event": "request_completed", "timestamp": "2026-07-27T01:58:11.146124Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 33.07, "event": "request_completed", "timestamp": "2026-07-27T01:58:11.152621Z"}
+INFO:     127.0.0.1:51344 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 10.36, "event": "request_completed", "timestamp": "2026-07-27T01:58:11.164882Z"}
+INFO:     127.0.0.1:51344 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/refresh", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T01:58:13.908487Z"}
+INFO:     127.0.0.1:51344 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/refresh HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/refresh", "status_code": 200, "duration_ms": 76.81, "event": "request_completed", "timestamp": "2026-07-27T01:58:13.986720Z"}
+INFO:     127.0.0.1:53554 - "POST /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/refresh HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 47.47, "event": "request_completed", "timestamp": "2026-07-27T01:58:17.896223Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 26.14, "event": "request_completed", "timestamp": "2026-07-27T01:58:17.925092Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 16.02, "event": "request_completed", "timestamp": "2026-07-27T01:58:19.184213Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 81.49, "event": "request_completed", "timestamp": "2026-07-27T01:58:19.251388Z"}
+INFO:     127.0.0.1:59502 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 10.53, "event": "request_completed", "timestamp": "2026-07-27T01:58:19.260412Z"}
+INFO:     127.0.0.1:53554 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 8.4, "event": "request_completed", "timestamp": "2026-07-27T01:58:19.261611Z"}
+INFO:     127.0.0.1:59502 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 18.93, "event": "request_completed", "timestamp": "2026-07-27T01:58:31.196952Z"}
+INFO:     127.0.0.1:55772 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 15.94, "event": "request_completed", "timestamp": "2026-07-27T01:58:31.214888Z"}
+INFO:     127.0.0.1:55772 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 16.3, "event": "request_completed", "timestamp": "2026-07-27T01:58:33.422769Z"}
+INFO:     127.0.0.1:55772 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 13.88, "event": "request_completed", "timestamp": "2026-07-27T01:58:33.424145Z"}
+INFO:     127.0.0.1:56497 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 13.18, "event": "request_completed", "timestamp": "2026-07-27T01:58:33.438559Z"}
+INFO:     127.0.0.1:55772 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 12.35, "event": "request_completed", "timestamp": "2026-07-27T01:58:33.439334Z"}
+INFO:     127.0.0.1:56497 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/share", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T01:58:34.343981Z"}
+INFO:     127.0.0.1:56497 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/share HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/share", "status_code": 200, "duration_ms": 17.61, "event": "request_completed", "timestamp": "2026-07-27T01:58:34.363053Z"}
+INFO:     127.0.0.1:55772 - "POST /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/share HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.96, "event": "request_completed", "timestamp": "2026-07-27T01:58:40.690811Z"}
+INFO:     127.0.0.1:58484 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.0, "event": "request_completed", "timestamp": "2026-07-27T01:58:40.704407Z"}
+INFO:     127.0.0.1:58484 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 16.69, "event": "request_completed", "timestamp": "2026-07-27T01:58:46.018988Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 18.96, "event": "request_completed", "timestamp": "2026-07-27T01:58:46.023099Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 13.35, "event": "request_completed", "timestamp": "2026-07-27T01:58:46.034270Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 10.72, "event": "request_completed", "timestamp": "2026-07-27T01:58:46.035847Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 14.12, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.100843Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.25, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.115233Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 11.27, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.750428Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 9.35, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.751625Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 9.86, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.762802Z"}
+INFO:     127.0.0.1:54815 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 10.26, "event": "request_completed", "timestamp": "2026-07-27T01:58:47.764645Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 14.73, "event": "request_completed", "timestamp": "2026-07-27T01:58:49.602597Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 14.03, "event": "request_completed", "timestamp": "2026-07-27T01:58:49.618507Z"}
+INFO:     127.0.0.1:54814 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 10.24, "event": "request_completed", "timestamp": "2026-07-27T01:58:50.147048Z"}
+INFO:     127.0.0.1:53946 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 15.6, "event": "request_completed", "timestamp": "2026-07-27T01:58:50.148555Z"}
+INFO:     127.0.0.1:53945 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 13.22, "event": "request_completed", "timestamp": "2026-07-27T01:58:50.163244Z"}
+INFO:     127.0.0.1:53946 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 14.63, "event": "request_completed", "timestamp": "2026-07-27T01:58:50.166555Z"}
+INFO:     127.0.0.1:53945 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.4, "event": "request_completed", "timestamp": "2026-07-27T01:58:58.449453Z"}
+INFO:     127.0.0.1:53956 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.85, "event": "request_completed", "timestamp": "2026-07-27T01:58:58.463210Z"}
+INFO:     127.0.0.1:53956 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 13.8, "event": "request_completed", "timestamp": "2026-07-27T01:59:00.053436Z"}
+INFO:     127.0.0.1:53956 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 13.34, "event": "request_completed", "timestamp": "2026-07-27T01:59:00.054768Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 15.52, "event": "request_completed", "timestamp": "2026-07-27T01:59:00.071542Z"}
+INFO:     127.0.0.1:53956 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 15.37, "event": "request_completed", "timestamp": "2026-07-27T01:59:00.072975Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.13, "event": "request_completed", "timestamp": "2026-07-27T01:59:01.261135Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 13.13, "event": "request_completed", "timestamp": "2026-07-27T01:59:01.276163Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.24, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.072482Z"}
+INFO:     127.0.0.1:59744 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 43.23, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.119952Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 27.93, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.150025Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.805590Z"}
+INFO:     127.0.0.1:59744 - "OPTIONS /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.806920Z"}
+INFO:     127.0.0.1:53956 - "OPTIONS /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 18.31, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.826309Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 9.57, "event": "request_completed", "timestamp": "2026-07-27T01:59:02.837658Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 11.59, "event": "request_completed", "timestamp": "2026-07-27T01:59:05.648460Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 14.81, "event": "request_completed", "timestamp": "2026-07-27T01:59:05.665712Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 0.49, "event": "request_completed", "timestamp": "2026-07-27T01:59:06.589036Z"}
+INFO:     127.0.0.1:59744 - "OPTIONS /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 0.25, "event": "request_completed", "timestamp": "2026-07-27T01:59:06.590901Z"}
+INFO:     127.0.0.1:53956 - "OPTIONS /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 14.91, "event": "request_completed", "timestamp": "2026-07-27T01:59:06.607031Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 9.61, "event": "request_completed", "timestamp": "2026-07-27T01:59:06.618504Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 11.75, "event": "request_completed", "timestamp": "2026-07-27T01:59:08.044759Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 10.94, "event": "request_completed", "timestamp": "2026-07-27T01:59:08.057783Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 6.43, "event": "request_completed", "timestamp": "2026-07-27T01:59:08.748141Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340", "status_code": 200, "duration_ms": 7.35, "event": "request_completed", "timestamp": "2026-07-27T01:59:08.757029Z"}
+INFO:     127.0.0.1:59744 - "GET /api/v1/reports/f107bbc1-1011-46fb-a6ff-4dc4ff7a8340 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 14.57, "event": "request_completed", "timestamp": "2026-07-27T01:59:13.220772Z"}
+INFO:     127.0.0.1:64493 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 11.75, "event": "request_completed", "timestamp": "2026-07-27T01:59:13.234669Z"}
+INFO:     127.0.0.1:64493 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 0.3, "event": "request_completed", "timestamp": "2026-07-27T01:59:14.289048Z"}
+INFO:     127.0.0.1:64493 - "OPTIONS /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 7.66, "event": "request_completed", "timestamp": "2026-07-27T01:59:14.298527Z"}
+INFO:     127.0.0.1:64493 - "GET /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 8.06, "event": "request_completed", "timestamp": "2026-07-27T01:59:14.308534Z"}
+INFO:     127.0.0.1:64493 - "GET /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 8.71, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.101578Z"}
+INFO:     127.0.0.1:64511 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.68, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.103721Z"}
+INFO:     127.0.0.1:64493 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 9.76, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.113409Z"}
+INFO:     127.0.0.1:64511 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.69, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.118131Z"}
+INFO:     127.0.0.1:64512 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.88, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.131030Z"}
+INFO:     127.0.0.1:64512 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.0, "event": "request_completed", "timestamp": "2026-07-27T01:59:19.142610Z"}
+INFO:     127.0.0.1:64512 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 8.95, "event": "request_completed", "timestamp": "2026-07-27T01:59:20.599149Z"}
+INFO:     127.0.0.1:64516 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 88.34, "event": "request_completed", "timestamp": "2026-07-27T01:59:23.073414Z"}
+INFO:     127.0.0.1:64516 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 12.44, "event": "request_completed", "timestamp": "2026-07-27T01:59:24.612012Z"}
+INFO:     127.0.0.1:64516 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 60.71, "event": "request_completed", "timestamp": "2026-07-27T01:59:25.067910Z"}
+INFO:     127.0.0.1:64516 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.15, "event": "request_completed", "timestamp": "2026-07-27T01:59:26.608627Z"}
+INFO:     127.0.0.1:64516 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 58.21, "event": "request_completed", "timestamp": "2026-07-27T01:59:29.098244Z"}
+INFO:     127.0.0.1:64516 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.21, "event": "request_completed", "timestamp": "2026-07-27T01:59:36.981798Z"}
+INFO:     127.0.0.1:51038 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 45.62, "event": "request_completed", "timestamp": "2026-07-27T01:59:41.751635Z"}
+INFO:     127.0.0.1:51043 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 52.68, "event": "request_completed", "timestamp": "2026-07-27T01:59:45.121080Z"}
+INFO:     127.0.0.1:51043 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.55, "event": "request_completed", "timestamp": "2026-07-27T01:59:46.659859Z"}
+INFO:     127.0.0.1:51043 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.09, "event": "request_completed", "timestamp": "2026-07-27T01:59:50.214738Z"}
+INFO:     127.0.0.1:64273 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 9.65, "event": "request_completed", "timestamp": "2026-07-27T01:59:51.921873Z"}
+INFO:     127.0.0.1:64273 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 47.33, "event": "request_completed", "timestamp": "2026-07-27T01:59:54.806676Z"}
+INFO:     127.0.0.1:64273 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.82, "event": "request_completed", "timestamp": "2026-07-27T01:59:56.339633Z"}
+INFO:     127.0.0.1:64273 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 47.67, "event": "request_completed", "timestamp": "2026-07-27T01:59:58.993148Z"}
+INFO:     127.0.0.1:64273 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.0, "event": "request_completed", "timestamp": "2026-07-27T02:00:00.527943Z"}
+INFO:     127.0.0.1:58990 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 9.49, "event": "request_completed", "timestamp": "2026-07-27T02:00:02.453372Z"}
+INFO:     127.0.0.1:58990 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 47.07, "event": "request_completed", "timestamp": "2026-07-27T02:00:10.578652Z"}
+INFO:     127.0.0.1:59004 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 8.86, "event": "request_completed", "timestamp": "2026-07-27T02:00:12.119276Z"}
+INFO:     127.0.0.1:59004 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 9.22, "event": "request_completed", "timestamp": "2026-07-27T02:00:14.056249Z"}
+INFO:     127.0.0.1:59004 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 47.15, "event": "request_completed", "timestamp": "2026-07-27T02:00:14.336386Z"}
+INFO:     127.0.0.1:59004 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 50.97, "event": "request_completed", "timestamp": "2026-07-27T02:00:17.748723Z"}
+INFO:     127.0.0.1:59004 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.06, "event": "request_completed", "timestamp": "2026-07-27T02:00:19.295618Z"}
+INFO:     127.0.0.1:59004 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 43.62, "event": "request_completed", "timestamp": "2026-07-27T02:00:26.440643Z"}
+INFO:     127.0.0.1:59024 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 52.38, "event": "request_completed", "timestamp": "2026-07-27T02:00:40.128056Z"}
+INFO:     127.0.0.1:59039 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 8.77, "event": "request_completed", "timestamp": "2026-07-27T02:00:44.476815Z"}
+INFO:     127.0.0.1:59039 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 50.58, "event": "request_completed", "timestamp": "2026-07-27T02:00:52.469781Z"}
+INFO:     127.0.0.1:59048 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 45.19, "event": "request_completed", "timestamp": "2026-07-27T02:00:56.178107Z"}
+INFO:     127.0.0.1:59048 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 10.24, "event": "request_completed", "timestamp": "2026-07-27T02:00:57.711872Z"}
+INFO:     127.0.0.1:59048 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 12.54, "event": "request_completed", "timestamp": "2026-07-27T02:01:54.806913Z"}
+INFO:     127.0.0.1:49876 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 14.76, "event": "request_completed", "timestamp": "2026-07-27T02:01:57.503838Z"}
+INFO:     127.0.0.1:49876 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 16.0, "event": "request_completed", "timestamp": "2026-07-27T02:01:59.651869Z"}
+INFO:     127.0.0.1:49876 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.7, "event": "request_completed", "timestamp": "2026-07-27T02:02:57.963510Z"}
+INFO:     127.0.0.1:53357 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query", "status_code": 200, "duration_ms": 52.1, "event": "request_completed", "timestamp": "2026-07-27T02:03:04.684962Z"}
+INFO:     127.0.0.1:53373 - "POST /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 9.76, "event": "request_completed", "timestamp": "2026-07-27T02:03:06.222184Z"}
+INFO:     127.0.0.1:53373 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks", "status_code": 200, "duration_ms": 11.1, "event": "request_completed", "timestamp": "2026-07-27T02:03:08.569523Z"}
+INFO:     127.0.0.1:53373 - "PUT /api/v1/canvases/68d42e4f-5717-434a-b2ec-76adcff002ac/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.28, "event": "request_completed", "timestamp": "2026-07-27T02:51:45.131077Z"}
+INFO:     127.0.0.1:62489 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.35, "event": "request_completed", "timestamp": "2026-07-27T02:51:45.132351Z"}
+INFO:     127.0.0.1:62490 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 22.66, "event": "request_completed", "timestamp": "2026-07-27T02:51:45.156115Z"}
+INFO:     127.0.0.1:62489 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 10.57, "event": "request_completed", "timestamp": "2026-07-27T02:51:45.168586Z"}
+INFO:     127.0.0.1:62489 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.494275Z"}
+INFO:     127.0.0.1:55763 - "OPTIONS /api/v1/ai/sessions HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/sessions", "status_code": 201, "duration_ms": 12.42, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.508242Z"}
+INFO:     127.0.0.1:55763 - "POST /api/v1/ai/sessions HTTP/1.1" 201 Created
+{"method": "OPTIONS", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.511123Z"}
+INFO:     127.0.0.1:55763 - "OPTIONS /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 4.29, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.516707Z"}
+INFO:     127.0.0.1:55764 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.521438Z"}
+INFO:     127.0.0.1:55763 - "OPTIONS /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 214.29, "event": "request_completed", "timestamp": "2026-07-27T02:51:56.737148Z"}
+INFO:     127.0.0.1:55763 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages", "status_code": 200, "duration_ms": 0.16, "event": "request_completed", "timestamp": "2026-07-27T02:51:58.274498Z"}
+INFO:     127.0.0.1:55763 - "OPTIONS /api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages", "status_code": 200, "duration_ms": 11.99, "event": "request_completed", "timestamp": "2026-07-27T02:51:58.288375Z"}
+INFO:     127.0.0.1:55763 - "GET /api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 6.97, "event": "request_completed", "timestamp": "2026-07-27T02:51:58.666819Z"}
+INFO:     127.0.0.1:55763 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages", "status_code": 200, "duration_ms": 8.27, "event": "request_completed", "timestamp": "2026-07-27T02:51:59.512369Z"}
+INFO:     127.0.0.1:55763 - "GET /api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea/messages HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T02:52:03.686841Z"}
+INFO:     127.0.0.1:55763 - "OPTIONS /api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea", "status_code": 200, "duration_ms": 12.95, "event": "request_completed", "timestamp": "2026-07-27T02:52:03.701103Z"}
+INFO:     127.0.0.1:55763 - "DELETE /api/v1/ai/sessions/b5ea1a1a-744c-4dc5-93be-f4080c63abea HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 6.0, "event": "request_completed", "timestamp": "2026-07-27T02:52:04.063575Z"}
+INFO:     127.0.0.1:55763 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530/messages", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T02:52:09.578852Z"}
+INFO:     127.0.0.1:57924 - "OPTIONS /api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530/messages HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530/messages", "status_code": 200, "duration_ms": 6.05, "event": "request_completed", "timestamp": "2026-07-27T02:52:09.586624Z"}
+INFO:     127.0.0.1:57924 - "GET /api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530/messages HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T02:52:11.001554Z"}
+INFO:     127.0.0.1:57924 - "OPTIONS /api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530", "status_code": 200, "duration_ms": 10.12, "event": "request_completed", "timestamp": "2026-07-27T02:52:11.012934Z"}
+INFO:     127.0.0.1:57924 - "DELETE /api/v1/ai/sessions/5e540ad2-0721-4510-b1b1-5d925e1df530 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages", "status_code": 200, "duration_ms": 5.67, "event": "request_completed", "timestamp": "2026-07-27T02:52:11.388097Z"}
+INFO:     127.0.0.1:57924 - "GET /api/v1/ai/sessions/56647088-8d26-4ead-bef8-bd0a5c29e738/messages HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/ai/chat/stream", "status_code": 200, "duration_ms": 4.35, "event": "request_completed", "timestamp": "2026-07-27T02:52:27.825597Z"}
+INFO:     127.0.0.1:49883 - "POST /api/v1/ai/chat/stream HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.5, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.266647Z"}
+INFO:     127.0.0.1:59408 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.09, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.268608Z"}
+INFO:     127.0.0.1:59409 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 1.65, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.269761Z"}
+INFO:     127.0.0.1:59410 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 2.41, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.270931Z"}
+INFO:     127.0.0.1:59411 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.54, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.284513Z"}
+INFO:     127.0.0.1:59408 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.09, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.299262Z"}
+INFO:     127.0.0.1:59408 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 1.02, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.307488Z"}
+INFO:     127.0.0.1:59411 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.39, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.308880Z"}
+INFO:     127.0.0.1:59410 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 19.33, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.320485Z"}
+INFO:     127.0.0.1:59408 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 19.66, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.330293Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 18.76, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.341644Z"}
+INFO:     127.0.0.1:59408 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 10.03, "event": "request_completed", "timestamp": "2026-07-27T02:53:23.342904Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.22, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.102548Z"}
+INFO:     127.0.0.1:59411 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.103921Z"}
+INFO:     127.0.0.1:59408 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.69, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.117687Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 9.38, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.128551Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.62, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.762065Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.91, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.771828Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.74, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.781025Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.81, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.789187Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 5.17, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.802118Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.73, "event": "request_completed", "timestamp": "2026-07-27T02:53:24.808294Z"}
+INFO:     127.0.0.1:59411 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T02:53:27.793761Z"}
+INFO:     127.0.0.1:59430 - "OPTIONS /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.72, "event": "request_completed", "timestamp": "2026-07-27T02:53:27.804858Z"}
+INFO:     127.0.0.1:59430 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 12.4, "event": "request_completed", "timestamp": "2026-07-27T02:53:28.571392Z"}
+INFO:     127.0.0.1:59430 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.11, "event": "request_completed", "timestamp": "2026-07-27T02:53:28.581728Z"}
+INFO:     127.0.0.1:59430 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.27, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.032509Z"}
+INFO:     127.0.0.1:59430 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.034596Z"}
+INFO:     127.0.0.1:59430 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 16.39, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.051845Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.05, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.063000Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.6, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.271937Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 11.62, "event": "request_completed", "timestamp": "2026-07-27T02:53:29.285575Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 0.21, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.012730Z"}
+INFO:     127.0.0.1:59437 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 0.24, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.017827Z"}
+INFO:     127.0.0.1:59430 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 1.69, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.022969Z"}
+INFO:     127.0.0.1:50895 - "OPTIONS /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 17.13, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.032274Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 67.19, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.088732Z"}
+INFO:     127.0.0.1:50896 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 60.57, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.095025Z"}
+INFO:     127.0.0.1:59437 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 7.49, "event": "request_completed", "timestamp": "2026-07-27T02:53:30.097945Z"}
+INFO:     127.0.0.1:50896 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 10.36, "event": "request_completed", "timestamp": "2026-07-27T02:53:35.765660Z"}
+INFO:     127.0.0.1:63946 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.76, "event": "request_completed", "timestamp": "2026-07-27T02:53:35.780356Z"}
+INFO:     127.0.0.1:63946 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.660723Z"}
+INFO:     127.0.0.1:63946 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 0.38, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.663718Z"}
+INFO:     127.0.0.1:60915 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 2.44, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.666056Z"}
+INFO:     127.0.0.1:60916 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 3.11, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.666774Z"}
+INFO:     127.0.0.1:60917 - "OPTIONS /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 14.6, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.679406Z"}
+INFO:     127.0.0.1:63946 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 12.3, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.680989Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948", "status_code": 200, "duration_ms": 10.97, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.693146Z"}
+INFO:     127.0.0.1:63946 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data", "status_code": 200, "duration_ms": 11.09, "event": "request_completed", "timestamp": "2026-07-27T02:53:36.694278Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/dashboards/1e0ef7a6-73d0-4d79-ac38-7b657c759948/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 9.07, "event": "request_completed", "timestamp": "2026-07-27T02:53:37.503710Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 9.54, "event": "request_completed", "timestamp": "2026-07-27T02:53:37.515057Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.82, "event": "request_completed", "timestamp": "2026-07-27T02:53:38.414195Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.5, "event": "request_completed", "timestamp": "2026-07-27T02:53:38.425577Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T02:53:40.769291Z"}
+INFO:     127.0.0.1:60915 - "OPTIONS /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 6.05, "event": "request_completed", "timestamp": "2026-07-27T02:53:40.777422Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc", "status_code": 200, "duration_ms": 7.53, "event": "request_completed", "timestamp": "2026-07-27T02:53:40.786625Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports/01e7b5e2-616d-426a-b914-fe43066be3cc HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 14.48, "event": "request_completed", "timestamp": "2026-07-27T02:53:42.927142Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.05, "event": "request_completed", "timestamp": "2026-07-27T02:53:42.937368Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 0.25, "event": "request_completed", "timestamp": "2026-07-27T02:53:43.917256Z"}
+INFO:     127.0.0.1:60915 - "OPTIONS /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T02:53:43.918732Z"}
+INFO:     127.0.0.1:53172 - "OPTIONS /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 6.57, "event": "request_completed", "timestamp": "2026-07-27T02:53:43.926102Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029", "status_code": 200, "duration_ms": 6.85, "event": "request_completed", "timestamp": "2026-07-27T02:53:43.934725Z"}
+INFO:     127.0.0.1:60915 - "GET /api/v1/reports/24865373-259d-4f8d-8b48-494570cf1029 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.38, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.439520Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.69, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.450987Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.9, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.921859Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.22, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.933261Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 6.97, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.942877Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.81, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.946976Z"}
+INFO:     127.0.0.1:51215 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 6.47, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.952136Z"}
+INFO:     127.0.0.1:51210 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.9, "event": "request_completed", "timestamp": "2026-07-27T02:53:47.955482Z"}
+INFO:     127.0.0.1:51215 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 7.1, "event": "request_completed", "timestamp": "2026-07-27T02:53:49.442476Z"}
+INFO:     127.0.0.1:51215 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T02:53:59.029659Z"}
+INFO:     127.0.0.1:60548 - "OPTIONS /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 54.26, "event": "request_completed", "timestamp": "2026-07-27T02:53:59.085889Z"}
+INFO:     127.0.0.1:60548 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 57.13, "event": "request_completed", "timestamp": "2026-07-27T02:54:06.864986Z"}
+INFO:     127.0.0.1:58504 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 10.64, "event": "request_completed", "timestamp": "2026-07-27T02:54:08.419049Z"}
+INFO:     127.0.0.1:58504 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.68, "event": "request_completed", "timestamp": "2026-07-27T02:54:10.011330Z"}
+INFO:     127.0.0.1:58504 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.99, "event": "request_completed", "timestamp": "2026-07-27T02:54:14.878184Z"}
+INFO:     127.0.0.1:58504 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 54.16, "event": "request_completed", "timestamp": "2026-07-27T02:54:18.826977Z"}
+INFO:     127.0.0.1:57563 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 55.36, "event": "request_completed", "timestamp": "2026-07-27T02:54:27.181096Z"}
+INFO:     127.0.0.1:53227 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 45.36, "event": "request_completed", "timestamp": "2026-07-27T02:54:32.279313Z"}
+INFO:     127.0.0.1:52835 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 65.26, "event": "request_completed", "timestamp": "2026-07-27T02:54:37.264939Z"}
+INFO:     127.0.0.1:52967 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 10.39, "event": "request_completed", "timestamp": "2026-07-27T02:54:38.801686Z"}
+INFO:     127.0.0.1:52967 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 65.38, "event": "request_completed", "timestamp": "2026-07-27T02:54:41.665634Z"}
+INFO:     127.0.0.1:52967 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.98, "event": "request_completed", "timestamp": "2026-07-27T02:54:43.203743Z"}
+INFO:     127.0.0.1:52967 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.45, "event": "request_completed", "timestamp": "2026-07-27T02:54:47.290244Z"}
+INFO:     127.0.0.1:53806 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 67.46, "event": "request_completed", "timestamp": "2026-07-27T02:56:55.960148Z"}
+INFO:     127.0.0.1:53916 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 43.21, "event": "request_completed", "timestamp": "2026-07-27T02:56:58.763049Z"}
+INFO:     127.0.0.1:53916 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.52, "event": "request_completed", "timestamp": "2026-07-27T02:57:00.330008Z"}
+INFO:     127.0.0.1:53916 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 9.78, "event": "request_completed", "timestamp": "2026-07-27T02:57:05.644717Z"}
+INFO:     127.0.0.1:53924 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 52.1, "event": "request_completed", "timestamp": "2026-07-27T02:59:28.741637Z"}
+INFO:     127.0.0.1:49976 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 10.44, "event": "request_completed", "timestamp": "2026-07-27T02:59:31.630784Z"}
+INFO:     127.0.0.1:49976 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 10.06, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.465251Z"}
+INFO:     127.0.0.1:64516 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 14.42, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.468008Z"}
+INFO:     127.0.0.1:64515 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 7.58, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.476660Z"}
+INFO:     127.0.0.1:64516 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 13.54, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.484014Z"}
+INFO:     127.0.0.1:64515 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.39, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.496119Z"}
+INFO:     127.0.0.1:64515 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 13.51, "event": "request_completed", "timestamp": "2026-07-27T03:00:17.511131Z"}
+INFO:     127.0.0.1:64515 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 8.3, "event": "request_completed", "timestamp": "2026-07-27T03:00:18.962033Z"}
+INFO:     127.0.0.1:64515 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 10.75, "event": "request_completed", "timestamp": "2026-07-27T03:00:21.503934Z"}
+INFO:     127.0.0.1:64515 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 72.92, "event": "request_completed", "timestamp": "2026-07-27T03:00:28.812190Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 11.49, "event": "request_completed", "timestamp": "2026-07-27T03:00:30.350494Z"}
+INFO:     127.0.0.1:58972 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 52.26, "event": "request_completed", "timestamp": "2026-07-27T03:00:32.766515Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 60.72, "event": "request_completed", "timestamp": "2026-07-27T03:00:34.662933Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 43.57, "event": "request_completed", "timestamp": "2026-07-27T03:00:34.812271Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 63.12, "event": "request_completed", "timestamp": "2026-07-27T03:00:35.008382Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 43.5, "event": "request_completed", "timestamp": "2026-07-27T03:00:35.170529Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 62.18, "event": "request_completed", "timestamp": "2026-07-27T03:00:35.327587Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 44.77, "event": "request_completed", "timestamp": "2026-07-27T03:00:35.478836Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 48.75, "event": "request_completed", "timestamp": "2026-07-27T03:00:35.668968Z"}
+INFO:     127.0.0.1:58972 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 51.57, "event": "request_completed", "timestamp": "2026-07-27T03:00:40.792606Z"}
+INFO:     127.0.0.1:58986 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 45.94, "event": "request_completed", "timestamp": "2026-07-27T03:00:41.055780Z"}
+INFO:     127.0.0.1:58986 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query", "status_code": 200, "duration_ms": 44.24, "event": "request_completed", "timestamp": "2026-07-27T03:00:41.211344Z"}
+INFO:     127.0.0.1:58986 - "POST /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/query HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 7.51, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.261461Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.41, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.262861Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 6.65, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.270426Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.87, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.274958Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.12, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.285002Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.54, "event": "request_completed", "timestamp": "2026-07-27T03:02:18.295246Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks", "status_code": 200, "duration_ms": 11.43, "event": "request_completed", "timestamp": "2026-07-27T03:02:19.768945Z"}
+INFO:     127.0.0.1:51897 - "PUT /api/v1/canvases/e37c5aa3-8a8e-4107-81ae-998efe9823fa/blocks HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 10.49, "event": "request_completed", "timestamp": "2026-07-27T03:02:21.827697Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 7.87, "event": "request_completed", "timestamp": "2026-07-27T03:02:21.837135Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 10.36, "event": "request_completed", "timestamp": "2026-07-27T03:02:22.633614Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 61.91, "event": "request_completed", "timestamp": "2026-07-27T03:02:22.686253Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50", "status_code": 200, "duration_ms": 7.74, "event": "request_completed", "timestamp": "2026-07-27T03:02:22.693053Z"}
+INFO:     127.0.0.1:51897 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data", "status_code": 200, "duration_ms": 7.46, "event": "request_completed", "timestamp": "2026-07-27T03:02:22.696128Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/dashboards/ddfb381e-3b9c-49cd-ba4d-3a397f804e50/data HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.85, "event": "request_completed", "timestamp": "2026-07-27T03:02:26.234826Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 9.09, "event": "request_completed", "timestamp": "2026-07-27T03:02:26.246139Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.74, "event": "request_completed", "timestamp": "2026-07-27T03:02:26.254327Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.57, "event": "request_completed", "timestamp": "2026-07-27T03:02:26.263485Z"}
+INFO:     127.0.0.1:51898 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.89, "event": "request_completed", "timestamp": "2026-07-27T03:02:37.651378Z"}
+INFO:     127.0.0.1:51938 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 5.42, "event": "request_completed", "timestamp": "2026-07-27T03:02:37.658218Z"}
+INFO:     127.0.0.1:51938 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/ai-recommend", "status_code": 200, "duration_ms": 0.23, "event": "request_completed", "timestamp": "2026-07-27T03:02:52.976991Z"}
+INFO:     127.0.0.1:57919 - "OPTIONS /api/v1/canvases/ai-recommend HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:02:58.397488Z"}
+INFO:     127.0.0.1:57920 - "OPTIONS /api/v1/canvases HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases", "status_code": 201, "duration_ms": 9.93, "event": "request_completed", "timestamp": "2026-07-27T03:02:58.409172Z"}
+INFO:     127.0.0.1:57920 - "POST /api/v1/canvases HTTP/1.1" 201 Created
+{"method": "OPTIONS", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/query", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T03:02:58.411462Z"}
+INFO:     127.0.0.1:57920 - "OPTIONS /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/query", "status_code": 200, "duration_ms": 66.16, "event": "request_completed", "timestamp": "2026-07-27T03:02:58.478736Z"}
+INFO:     127.0.0.1:57926 - "POST /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/query HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/ai-recommend", "status_code": 200, "duration_ms": 7741.85, "event": "request_completed", "timestamp": "2026-07-27T03:03:00.720581Z"}
+INFO:     127.0.0.1:57919 - "POST /api/v1/canvases/ai-recommend HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 9.57, "event": "request_completed", "timestamp": "2026-07-27T03:03:00.818009Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 11.77, "event": "request_completed", "timestamp": "2026-07-27T03:03:00.831712Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.44, "event": "request_completed", "timestamp": "2026-07-27T03:03:01.232882Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.39, "event": "request_completed", "timestamp": "2026-07-27T03:03:01.245660Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 9.92, "event": "request_completed", "timestamp": "2026-07-27T03:03:01.813242Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 8.68, "event": "request_completed", "timestamp": "2026-07-27T03:03:01.823487Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.88, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.164253Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.59, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.172790Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.2, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.180210Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.43, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.187924Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.97, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.210745Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.71, "event": "request_completed", "timestamp": "2026-07-27T03:03:02.216967Z"}
+INFO:     127.0.0.1:57919 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/ai-recommend", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:03:03.621275Z"}
+INFO:     127.0.0.1:57919 - "OPTIONS /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/ai-recommend HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks", "status_code": 200, "duration_ms": 0.17, "event": "request_completed", "timestamp": "2026-07-27T03:03:03.827969Z"}
+INFO:     127.0.0.1:57944 - "OPTIONS /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks", "status_code": 200, "duration_ms": 8.61, "event": "request_completed", "timestamp": "2026-07-27T03:03:03.838315Z"}
+INFO:     127.0.0.1:57944 - "PUT /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/ai-recommend", "status_code": 200, "duration_ms": 4057.92, "event": "request_completed", "timestamp": "2026-07-27T03:03:07.682150Z"}
+INFO:     127.0.0.1:57919 - "POST /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/ai-recommend HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.120121Z"}
+INFO:     127.0.0.1:58006 - "OPTIONS /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.7, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.134633Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/dashboards", "status_code": 200, "duration_ms": 12.59, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.149241Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/dashboards?page=1&pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.23, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.769846Z"}
+INFO:     127.0.0.1:58006 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 0.46, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.771888Z"}
+INFO:     127.0.0.1:58010 - "OPTIONS /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.74, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.780555Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/reports", "status_code": 200, "duration_ms": 8.58, "event": "request_completed", "timestamp": "2026-07-27T03:04:07.790453Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/reports HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:04:08.585281Z"}
+INFO:     127.0.0.1:58006 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 17.36, "event": "request_completed", "timestamp": "2026-07-27T03:04:08.604142Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 10.53, "event": "request_completed", "timestamp": "2026-07-27T03:04:08.617127Z"}
+INFO:     127.0.0.1:58006 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c/sync", "status_code": 200, "duration_ms": 0.12, "event": "request_completed", "timestamp": "2026-07-27T03:04:10.738668Z"}
+INFO:     127.0.0.1:58006 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c/sync HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c/sync", "status_code": 200, "duration_ms": 94.07, "event": "request_completed", "timestamp": "2026-07-27T03:04:10.834170Z"}
+INFO:     127.0.0.1:58010 - "POST /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c/sync HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.43, "event": "request_completed", "timestamp": "2026-07-27T03:04:10.842991Z"}
+INFO:     127.0.0.1:58010 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 0.41, "event": "request_completed", "timestamp": "2026-07-27T03:04:17.391865Z"}
+INFO:     127.0.0.1:58028 - "OPTIONS /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 0.19, "event": "request_completed", "timestamp": "2026-07-27T03:04:17.393340Z"}
+INFO:     127.0.0.1:58029 - "OPTIONS /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 13.06, "event": "request_completed", "timestamp": "2026-07-27T03:04:17.407154Z"}
+INFO:     127.0.0.1:58028 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 12.39, "event": "request_completed", "timestamp": "2026-07-27T03:04:17.421419Z"}
+INFO:     127.0.0.1:58028 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/44c8d3e2-ab6e-442c-973d-9aac085949cf", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:04:26.529404Z"}
+INFO:     127.0.0.1:58040 - "OPTIONS /api/v1/trash/canvas/44c8d3e2-ab6e-442c-973d-9aac085949cf HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/44c8d3e2-ab6e-442c-973d-9aac085949cf", "status_code": 200, "duration_ms": 9.42, "event": "request_completed", "timestamp": "2026-07-27T03:04:26.540198Z"}
+INFO:     127.0.0.1:58040 - "DELETE /api/v1/trash/canvas/44c8d3e2-ab6e-442c-973d-9aac085949cf HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 8.55, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.635934Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 7.52, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.645611Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.36, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.653375Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 6.63, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.661379Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.36, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.676806Z"}
+INFO:     127.0.0.1:58040 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.2, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.678013Z"}
+INFO:     127.0.0.1:58046 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.75, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.683518Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 4.4, "event": "request_completed", "timestamp": "2026-07-27T03:04:30.689254Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
+{"method": "PUT", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks", "status_code": 200, "duration_ms": 6.71, "event": "request_completed", "timestamp": "2026-07-27T03:04:32.167618Z"}
+INFO:     127.0.0.1:58040 - "PUT /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394/blocks HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:04:33.605575Z"}
+INFO:     127.0.0.1:58040 - "OPTIONS /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394", "status_code": 200, "duration_ms": 15.68, "event": "request_completed", "timestamp": "2026-07-27T03:04:33.622754Z"}
+INFO:     127.0.0.1:58040 - "DELETE /api/v1/canvases/36fd0883-93f7-4bf6-bfaf-de7b8c19a394 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 13.47, "event": "request_completed", "timestamp": "2026-07-27T03:04:35.302749Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 10.6, "event": "request_completed", "timestamp": "2026-07-27T03:04:35.314902Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/36fd0883-93f7-4bf6-bfaf-de7b8c19a394", "status_code": 200, "duration_ms": 0.13, "event": "request_completed", "timestamp": "2026-07-27T03:04:38.805905Z"}
+INFO:     127.0.0.1:58040 - "OPTIONS /api/v1/trash/canvas/36fd0883-93f7-4bf6-bfaf-de7b8c19a394 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/36fd0883-93f7-4bf6-bfaf-de7b8c19a394", "status_code": 200, "duration_ms": 10.31, "event": "request_completed", "timestamp": "2026-07-27T03:04:38.817622Z"}
+INFO:     127.0.0.1:58040 - "DELETE /api/v1/trash/canvas/36fd0883-93f7-4bf6-bfaf-de7b8c19a394 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 7.82, "event": "request_completed", "timestamp": "2026-07-27T03:04:40.095657Z"}
+INFO:     127.0.0.1:58040 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 14.09, "event": "request_completed", "timestamp": "2026-07-27T03:08:01.404849Z"}
+INFO:     127.0.0.1:56092 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 12.24, "event": "request_completed", "timestamp": "2026-07-27T03:08:02.258250Z"}
+INFO:     127.0.0.1:56092 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/trash", "status_code": 200, "duration_ms": 11.04, "event": "request_completed", "timestamp": "2026-07-27T03:08:02.270892Z"}
+INFO:     127.0.0.1:56092 - "GET /api/v1/trash HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/47aaeeac-afcd-4b3c-979e-47279b423a1b", "status_code": 200, "duration_ms": 0.11, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.253944Z"}
+INFO:     127.0.0.1:56114 - "OPTIONS /api/v1/trash/canvas/47aaeeac-afcd-4b3c-979e-47279b423a1b HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/05460594-2fa3-434d-8a7b-d843252b9220", "status_code": 200, "duration_ms": 0.6, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.255777Z"}
+INFO:     127.0.0.1:56115 - "OPTIONS /api/v1/trash/canvas/05460594-2fa3-434d-8a7b-d843252b9220 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/b2895054-3610-4981-bcc8-025a05fbbcfa", "status_code": 200, "duration_ms": 1.21, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.256455Z"}
+INFO:     127.0.0.1:56116 - "OPTIONS /api/v1/trash/canvas/b2895054-3610-4981-bcc8-025a05fbbcfa HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/e1818a8d-62b1-4312-80f7-6b5a65b45377", "status_code": 200, "duration_ms": 1.72, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.256991Z"}
+INFO:     127.0.0.1:56117 - "OPTIONS /api/v1/trash/canvas/e1818a8d-62b1-4312-80f7-6b5a65b45377 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c", "status_code": 200, "duration_ms": 2.95, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.258581Z"}
+INFO:     127.0.0.1:56118 - "OPTIONS /api/v1/trash/canvas/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/c2e1cecb-401d-458d-93ae-7f100b7b0f92", "status_code": 200, "duration_ms": 1.88, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.259385Z"}
+INFO:     127.0.0.1:56119 - "OPTIONS /api/v1/trash/canvas/c2e1cecb-401d-458d-93ae-7f100b7b0f92 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/b2895054-3610-4981-bcc8-025a05fbbcfa", "status_code": 200, "duration_ms": 66.36, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.326766Z"}
+INFO:     127.0.0.1:56116 - "DELETE /api/v1/trash/canvas/b2895054-3610-4981-bcc8-025a05fbbcfa HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/05460594-2fa3-434d-8a7b-d843252b9220", "status_code": 200, "duration_ms": 67.43, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.327753Z"}
+INFO:     127.0.0.1:56115 - "DELETE /api/v1/trash/canvas/05460594-2fa3-434d-8a7b-d843252b9220 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/47aaeeac-afcd-4b3c-979e-47279b423a1b", "status_code": 200, "duration_ms": 73.72, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.329426Z"}
+INFO:     127.0.0.1:56114 - "DELETE /api/v1/trash/canvas/47aaeeac-afcd-4b3c-979e-47279b423a1b HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/e1818a8d-62b1-4312-80f7-6b5a65b45377", "status_code": 200, "duration_ms": 94.67, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.355100Z"}
+INFO:     127.0.0.1:56117 - "DELETE /api/v1/trash/canvas/e1818a8d-62b1-4312-80f7-6b5a65b45377 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c", "status_code": 200, "duration_ms": 92.74, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.356708Z"}
+INFO:     127.0.0.1:56118 - "DELETE /api/v1/trash/canvas/be3561ab-2aaa-40ca-9bd7-84d1c88e3b5c HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/c2e1cecb-401d-458d-93ae-7f100b7b0f92", "status_code": 200, "duration_ms": 91.41, "event": "request_completed", "timestamp": "2026-07-27T03:08:13.357291Z"}
+INFO:     127.0.0.1:56119 - "DELETE /api/v1/trash/canvas/c2e1cecb-401d-458d-93ae-7f100b7b0f92 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/0300c847-9988-443b-8580-91c1d1fa6db9", "status_code": 200, "duration_ms": 0.14, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.930859Z"}
+INFO:     127.0.0.1:56128 - "OPTIONS /api/v1/trash/canvas/0300c847-9988-443b-8580-91c1d1fa6db9 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/f3374a79-a2cd-4c75-8a37-38335cd8bcc7", "status_code": 200, "duration_ms": 0.44, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.932410Z"}
+INFO:     127.0.0.1:56129 - "OPTIONS /api/v1/trash/canvas/f3374a79-a2cd-4c75-8a37-38335cd8bcc7 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/4601a978-c083-4f95-bdf7-658f5acb4d68", "status_code": 200, "duration_ms": 0.96, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.932987Z"}
+INFO:     127.0.0.1:56130 - "OPTIONS /api/v1/trash/canvas/4601a978-c083-4f95-bdf7-658f5acb4d68 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/91611a82-0811-493b-84f8-036260a05263", "status_code": 200, "duration_ms": 1.54, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.933595Z"}
+INFO:     127.0.0.1:56131 - "OPTIONS /api/v1/trash/canvas/91611a82-0811-493b-84f8-036260a05263 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/trash/canvas/97f763ee-ccc4-46a1-bde1-763284fb493c", "status_code": 200, "duration_ms": 3.13, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.935423Z"}
+INFO:     127.0.0.1:56132 - "OPTIONS /api/v1/trash/canvas/97f763ee-ccc4-46a1-bde1-763284fb493c HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/0300c847-9988-443b-8580-91c1d1fa6db9", "status_code": 200, "duration_ms": 14.89, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.947232Z"}
+INFO:     127.0.0.1:56128 - "DELETE /api/v1/trash/canvas/0300c847-9988-443b-8580-91c1d1fa6db9 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/4601a978-c083-4f95-bdf7-658f5acb4d68", "status_code": 200, "duration_ms": 11.78, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.948407Z"}
+INFO:     127.0.0.1:56129 - "DELETE /api/v1/trash/canvas/4601a978-c083-4f95-bdf7-658f5acb4d68 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/97f763ee-ccc4-46a1-bde1-763284fb493c", "status_code": 200, "duration_ms": 12.05, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.950823Z"}
+INFO:     127.0.0.1:56132 - "DELETE /api/v1/trash/canvas/97f763ee-ccc4-46a1-bde1-763284fb493c HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/f3374a79-a2cd-4c75-8a37-38335cd8bcc7", "status_code": 200, "duration_ms": 14.81, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.951379Z"}
+INFO:     127.0.0.1:56133 - "DELETE /api/v1/trash/canvas/f3374a79-a2cd-4c75-8a37-38335cd8bcc7 HTTP/1.1" 200 OK
+{"method": "DELETE", "path": "/api/v1/trash/canvas/91611a82-0811-493b-84f8-036260a05263", "status_code": 200, "duration_ms": 15.34, "event": "request_completed", "timestamp": "2026-07-27T03:08:26.952005Z"}
+INFO:     127.0.0.1:56130 - "DELETE /api/v1/trash/canvas/91611a82-0811-493b-84f8-036260a05263 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 0.18, "event": "request_completed", "timestamp": "2026-07-27T03:09:35.858696Z"}
+INFO:     127.0.0.1:63714 - "OPTIONS /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 36.33, "event": "request_completed", "timestamp": "2026-07-27T03:09:35.898033Z"}
+INFO:     127.0.0.1:63714 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources", "status_code": 200, "duration_ms": 11.42, "event": "request_completed", "timestamp": "2026-07-27T03:09:35.912242Z"}
+INFO:     127.0.0.1:63714 - "GET /api/v1/datasources?pageSize=100 HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f", "status_code": 200, "duration_ms": 0.25, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.597807Z"}
+INFO:     127.0.0.1:63714 - "OPTIONS /api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 0.35, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.599283Z"}
+INFO:     127.0.0.1:63719 - "OPTIONS /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 2.17, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.601307Z"}
+INFO:     127.0.0.1:63720 - "OPTIONS /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f", "status_code": 200, "duration_ms": 8.63, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.607899Z"}
+INFO:     127.0.0.1:63714 - "GET /api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 21.18, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.623791Z"}
+INFO:     127.0.0.1:63721 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 21.95, "event": "request_completed", "timestamp": "2026-07-27T03:09:37.624986Z"}
+INFO:     127.0.0.1:63719 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/0525a532-08e3-48dc-813f-9234d269c4b5", "status_code": 200, "duration_ms": 0.67, "event": "request_completed", "timestamp": "2026-07-27T03:09:40.608014Z"}
+INFO:     127.0.0.1:63719 - "OPTIONS /api/v1/datasources/0525a532-08e3-48dc-813f-9234d269c4b5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63714 - "POST /api/v1/statistics/describe HTTP/1.1" 500 Internal Server Error
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 203.93, "event": "request_completed", "timestamp": "2026-07-27T03:09:40.812949Z"}
+INFO:     127.0.0.1:63721 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/0525a532-08e3-48dc-813f-9234d269c4b5", "status_code": 200, "duration_ms": 204.17, "event": "request_completed", "timestamp": "2026-07-27T03:09:40.814028Z"}
+INFO:     127.0.0.1:63719 - "GET /api/v1/datasources/0525a532-08e3-48dc-813f-9234d269c4b5 HTTP/1.1" 200 OK
+{"method": "GET", "path": "/api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f", "status_code": 200, "duration_ms": 8.78, "event": "request_completed", "timestamp": "2026-07-27T03:09:42.847092Z"}
+INFO:     127.0.0.1:57447 - "GET /api/v1/datasources/1ee37cba-c84a-409d-b7c8-219c4f63048f HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/summary", "status_code": 200, "duration_ms": 18.22, "event": "request_completed", "timestamp": "2026-07-27T03:09:42.852397Z"}
+INFO:     127.0.0.1:63719 - "POST /api/v1/statistics/summary HTTP/1.1" 200 OK
+{"method": "POST", "path": "/api/v1/statistics/describe", "status_code": 200, "duration_ms": 19.6, "event": "request_completed", "timestamp": "2026-07-27T03:09:42.854792Z"}
+INFO:     127.0.0.1:63721 - "POST /api/v1/statistics/describe HTTP/1.1" 200 OK
+{"method": "OPTIONS", "path": "/api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c", "status_code": 200, "duration_ms": 0.34, "event": "request_completed", "timestamp": "2026-07-27T03:09:45.942771Z"}
+INFO:     127.0.0.1:63721 - "OPTIONS /api/v1/datasources/15e54427-0602-4384-9b7c-da11655ad30c HTTP/1.1" 200 OK
