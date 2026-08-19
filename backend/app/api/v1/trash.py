@@ -72,6 +72,8 @@ async def list_trash(
             "deletedAt": r.updated_at.isoformat() if r.updated_at else None,
         })
 
+    # 注意：数据源采用硬删除（不可恢复），不进回收站
+
     return SuccessResponse(data={"items": items, "total": len(items)})
 
 
@@ -96,6 +98,7 @@ async def restore_trash_item(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该画布"})
         canvas.deleted_at = None
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "画布已恢复"})
 
     elif item_type == "dashboard":
@@ -111,6 +114,7 @@ async def restore_trash_item(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该仪表盘"})
         dashboard.deleted_at = None
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "仪表盘已恢复"})
 
     elif item_type == "report":
@@ -126,6 +130,7 @@ async def restore_trash_item(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该报表"})
         report.status = ReportStatus.draft
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "报表已恢复"})
 
     else:
@@ -158,6 +163,7 @@ async def permanent_delete(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该画布"})
         await db.delete(canvas)
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "画布已彻底删除"})
 
     elif item_type == "dashboard":
@@ -173,6 +179,7 @@ async def permanent_delete(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该仪表盘"})
         await db.delete(dashboard)
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "仪表盘已彻底删除"})
 
     elif item_type == "report":
@@ -188,6 +195,7 @@ async def permanent_delete(
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "未找到该报表"})
         await db.delete(report)
         await db.flush()
+        await db.commit()
         return SuccessResponse(data={"message": "报表已彻底删除"})
 
     else:

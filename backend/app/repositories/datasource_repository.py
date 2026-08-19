@@ -127,10 +127,11 @@ class SQLAlchemyDataSourceRepository(DataSourceRepository):
         return datasource
 
     async def delete(self, datasource: DataSource) -> None:
-        """删除数据源"""
+        """物理删除数据源（真正从数据库移除）"""
         logger.debug(f"delete: id={datasource.id}")
 
         self.db.delete(datasource)
         await self.db.flush()
+        await self.db.commit()
 
-        logger.debug("delete: deleted")
+        logger.debug("delete: committed")

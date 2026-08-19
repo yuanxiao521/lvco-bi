@@ -387,10 +387,18 @@ export default function DataSource() {
     if (!deleteTarget) return;
     setDeleting(true);
     setDeleteError(null);
+    const targetName = deleteTarget.name;
     try {
       await deleteDatasource(deleteTarget.id);
       setDeleteTarget(null);
       await refetch();
+      toast.success(`数据源 "${targetName}" 已删除`);
+      pushNotification({
+        type: "system",
+        title: "数据源已删除",
+        body: `"${targetName}" 已成功删除`,
+        resourceType: "datasource",
+      }).catch(() => {});
     } catch (err) {
       const msg =
         err instanceof Error
@@ -399,6 +407,7 @@ export default function DataSource() {
             ? err
             : "删除失败";
       setDeleteError(msg);
+      toast.error(`删除失败：${msg}`);
     } finally {
       setDeleting(false);
     }
