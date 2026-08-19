@@ -87,6 +87,7 @@ class UserUpdate(CamelModel):
 
 class DataSourceCreate(CamelModel):
     name: str = Field(..., max_length=200)
+    description: str | None = Field(None, max_length=500)
     source_type: SourceType
     connection_config: dict | None = None
     file_path: str | None = None
@@ -94,6 +95,7 @@ class DataSourceCreate(CamelModel):
 
 class DataSourceUpdate(CamelModel):
     name: str | None = Field(None, max_length=200)
+    description: str | None = Field(None, max_length=500)
     status: DatasourceStatus | None = None
     schema_meta: dict | None = None
 
@@ -102,6 +104,7 @@ class DataSourceResponse(CamelModel):
     id: UUID
     user_id: UUID
     name: str
+    description: str | None
     source_type: SourceType
     connection_config: dict | None
     file_path: str | None

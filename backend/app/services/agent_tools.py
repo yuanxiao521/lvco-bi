@@ -380,16 +380,27 @@ class ListDatasourcesTool(BaseTool):
         返回：
             JSON 字符串，包含数据源总数、总行数估计值、数据源详情列表以及查询提示
         """
-        from sqlalchemy import select
-        from app.models.datasource import DataSource, SourceType
+        import uuid
+        from app.models.datasource import SourceType
+        from app.repositories.datasource_repository import SQLAlchemyDataSourceRepository
 
         if db_session is None:
             return json.dumps({"error": "数据库会话不可用"}, ensure_ascii=False)
 
-        result = await db_session.execute(
-            select(DataSource).where(DataSource.user_id == user_id)
-        )
-        datasources = list(result.scalars().all())
+        # 使用 Repository 查询（严格模式，要求 user_id 是合法 UUID）
+        repo = SQLAlchemyDataSourceRepository(db_session)
+        try:
+            user_uuid = uuid.UUID(user_id)
+            datasources, _ = await repo.list_datasources(
+                user_id=user_uuid,
+                page=1,
+                page_size=100,
+                source_type=None,
+                status=None,
+                search=None,
+            )
+        except ValueError:
+            return json.dumps({"error": f"无效的用户 ID: {user_id}"}, ensure_ascii=False)
 
         summary = []
         for ds in datasources:
@@ -421,6 +432,7 @@ class ListDatasourcesTool(BaseTool):
             summary.append({
                 "id": str(ds.id),
                 "name": ds.name,
+                "description": ds.description,
                 "type": ds.source_type.value if ds.source_type else "unknown",
                 "row_count": ds.row_count,
                 "columns": columns,

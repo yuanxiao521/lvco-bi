@@ -895,21 +895,37 @@ class AIService:
             # 获取可用数据源列表（供 Planner 规划时引用真实 datasource_id）
             available_datasources = []
             try:
+                import uuid
                 from app.repositories.datasource_repository import (
                     SQLAlchemyDataSourceRepository,
                 )
                 ds_repo = SQLAlchemyDataSourceRepository(db_session)
-                datasources, _ = await ds_repo.list_datasources(user_id, page=1, page_size=100, source_type=None, status=None, search=None)
+                user_uuid = uuid.UUID(user_id)
+                datasources, _ = await ds_repo.list_datasources(user_uuid, page=1, page_size=100, source_type=None, status=None, search=None)
+                from app.services.agent_tools import duckdb_client
+                from app.models.datasource import SourceType
                 for ds in datasources:
                     schema_meta = ds.schema_meta or {}
                     fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
+                    # 构建 table_ref，让 Planner/Executor 知道 FROM 后面写什么
+                    conn_cfg = dict(ds.connection_config) if ds.connection_config else {}
+                    schema_name = duckdb_client.get_schema_name(user_id, str(ds.id), ds.name, db_name=conn_cfg.get("db_name", ""))
+                    if ds.source_type in (SourceType.postgresql, SourceType.mysql):
+                        table_name = schema_meta.get("table_name", "data") if isinstance(schema_meta, dict) else "data"
+                        table_ref = f'"{schema_name}".public."{table_name}"'
+                    else:
+                        table_ref = f'"{schema_name}"."data"'
                     available_datasources.append({
                         "id": str(ds.id),
                         "name": ds.name,
+                        "description": ds.description,
                         "type": ds.source_type.value if ds.source_type else "unknown",
                         "fields": fields,
+                        "table_ref": table_ref,
                     })
                 log.info(f"[agent_stream] loaded_datasources count={len(available_datasources)}")
+            except ValueError as e:
+                log.error(f"[agent_stream] load_datasources_failed invalid_user_id: {user_id}")
             except Exception as e:
                 log.error(f"[agent_stream] load_datasources_failed error={e}")
 

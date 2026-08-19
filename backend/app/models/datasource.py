@@ -32,6 +32,7 @@ class DataSource(TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_type: Mapped[SourceType] = mapped_column(
         Enum(SourceType, name="source_type"), nullable=False
     )

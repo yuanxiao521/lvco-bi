@@ -40,6 +40,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
+# 开启 orchestrator 的 DEBUG 日志
+logging.getLogger("lvco.agent.orchestrator").setLevel(logging.DEBUG)
 log = logging.getLogger("lvco.agent_evals")
 
 from tests.agent_evals.judge import (
@@ -73,7 +75,7 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 
-async def run_agent(question: dict[str, Any], user_id: str = "eval-user", mode: str = "real") -> AttemptTrace:
+async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108-b721-d8448db678e4", mode: str = "real") -> AttemptTrace:
     """运行一次 Agent，返回完整轨迹。
 
     默认使用真实 AIService，通过 --user-id 指定评测账号（数据源归属于该账号）。
@@ -379,7 +381,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--user-id",
-        default="eval-user",
+        default="21bee02f-dcb3-4108-b721-d8448db678e4",
         help="real 模式下 Agent 使用的用户 ID（数据源归属于该账号）",
     )
     args = parser.parse_args()

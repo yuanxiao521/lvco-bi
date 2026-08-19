@@ -1,6 +1,12 @@
 """进程内准备评测环境：注册 eval 用户 + 上传 ecommerce_orders 数据源（无需后端 HTTP）。"""
 import asyncio
 import io
+import sys
+from pathlib import Path
+
+# 确保 backend/ 在 sys.path 最前面
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 from fastapi import UploadFile
 

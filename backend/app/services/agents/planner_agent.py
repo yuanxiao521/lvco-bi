@@ -23,6 +23,38 @@ _ORCHESTRATOR_TOOLS = frozenset({
 
 MAX_STEPS = 8
 
+# 字段关键词 → 表描述关键词映射（用于自动推断表描述）
+_FIELD_KEYWORD_MAP = {
+    "order": "订单", "sale": "销售", "amount": "金额", "price": "价格",
+    "revenue": "收入", "profit": "利润", "cost": "成本",
+    "customer": "客户", "user": "用户", "member": "会员",
+    "product": "商品", "item": "商品", "sku": "库存",
+    "employee": "员工", "staff": "员工",
+    "inventory": "库存", "stock": "库存",
+    "payment": "支付", "transaction": "交易",
+    "shipping": "物流", "delivery": "配送",
+    "date": "时间", "time": "时间", "created": "创建时间",
+    "region": "地区", "city": "城市", "country": "国家",
+    "category": "分类", "type": "类型", "status": "状态",
+}
+
+
+def _infer_table_description(ds: dict) -> str:
+    """根据数据源名称和字段信息自动推断表描述。"""
+    name = ds.get("name", "")
+    fields = ds.get("fields", [])
+    field_names = [f.get("name", "").lower() for f in (fields if isinstance(fields, list) else [])]
+    all_text = (name + " " + " ".join(field_names)).lower()
+
+    keywords_found = []
+    for keyword, desc in _FIELD_KEYWORD_MAP.items():
+        if keyword in all_text and desc not in keywords_found:
+            keywords_found.append(desc)
+
+    if keywords_found:
+        return f"包含{'、'.join(keywords_found[:4])}等信息的数据表"
+    return "数据表"
+
 
 class PlannerAgent(BaseAgent):
     """任务规划 Agent：分析用户意图，动态生成工具调用计划"""
@@ -49,8 +81,13 @@ class PlannerAgent(BaseAgent):
                 try:
                     plan_prompt = self._build_plan_prompt(user_msg, history, available_datasources)
                     with observe_llm_call(trace, "planner_llm_call", messages=plan_prompt, model="planner") as llm_span:
-                        response = await self.llm.complete(plan_prompt, temperature=0.2, max_tokens=1500)
+                        response = await self.llm.complete(plan_prompt, temperature=0.2, max_tokens=3000)
                         llm_span.update(output=response[:500])
+
+                    # 空响应重试：thinking 模式偶尔返回空 content，重试一次
+                    if not response.strip():
+                        self.log_warning("Planner 返回空响应，重试一次")
+                        response = await self.llm.complete(plan_prompt, temperature=0.3, max_tokens=3000)
 
                     plan = self._parse_plan(response)
                     steps_count = len(plan.get("steps", []))
@@ -79,9 +116,18 @@ class PlannerAgent(BaseAgent):
         if available_datasources:
             lines = []
             for ds in available_datasources[:20]:
+                ds_name = ds.get("name", "")
+                ds_desc = ds.get("description") or _infer_table_description(ds)
                 fields = ds.get("fields", [])
-                field_str = ", ".join(f.get("name", "?") for f in fields[:10]) if isinstance(fields, list) else ""
-                lines.append(f"- id={ds.get('id')} name={ds.get('name')} type={ds.get('type')} 字段: {field_str}")
+                field_parts = []
+                for f in (fields[:15] if isinstance(fields, list) else []):
+                    name = f.get("name", "?")
+                    dtype = f.get("data_type", "")
+                    samples = f.get("sample", [])
+                    sample_str = f" 示例值={samples}" if samples else ""
+                    field_parts.append(f"{name}({dtype}{sample_str})" if dtype else name)
+                field_str = ", ".join(field_parts)
+                lines.append(f"- id={ds.get('id')} name={ds_name} 描述={ds_desc} type={ds.get('type')} 字段: {field_str}")
             ds_info = "\n".join(lines)
         else:
             ds_info = "（无数据源信息，第 1 步应规划 list_datasources）"
@@ -98,14 +144,27 @@ class PlannerAgent(BaseAgent):
 
     def _parse_plan(self, response: str) -> dict[str, Any]:
         """解析并校验 LLM 返回的计划 JSON。"""
-        try:
-            if "```json" in response:
-                json_str = response.split("```json")[1].split("```")[0]
-            elif "```" in response:
-                json_str = response.split("```")[1].split("```")[0]
-            else:
-                json_str = response
+        json_str = response.strip()
 
+        # 1. 尝试从代码块中提取 JSON
+        if "```json" in response:
+            json_str = response.split("```json")[1].split("```")[0]
+        elif "```" in response:
+            parts = response.split("```")
+            for part in parts[1::2]:  # 奇数索引是代码块内容
+                part = part.strip()
+                if part.startswith("{") or part.startswith("["):
+                    json_str = part
+                    break
+
+        # 2. 如果直接解析失败，尝试找第一个 { 到最后一个 } 之间的内容
+        if not json_str.strip().startswith("{"):
+            first_brace = json_str.find("{")
+            last_brace = json_str.rfind("}")
+            if first_brace != -1 and last_brace > first_brace:
+                json_str = json_str[first_brace:last_brace + 1]
+
+        try:
             plan = json.loads(json_str)
 
             # 校验结构

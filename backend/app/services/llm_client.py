@@ -164,6 +164,7 @@ class LLMClient:
         )
 
         tool_calls_acc: dict[int, dict] = {}
+        reasoning_content: str = ""  # DeepSeek reasoning 模式需要保存该字段
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             async with client.stream(
@@ -190,6 +191,7 @@ class LLMClient:
                                     "id": tc["id"] or "",
                                     "name": tc["name"] or "",
                                     "arguments": tc.get("arguments", ""),
+                                    "reasoning_content": reasoning_content,
                                 }
                             tool_calls_acc.clear()
                             yield {"type": "done"}
@@ -206,6 +208,11 @@ class LLMClient:
                         continue
 
                     delta = choices[0].get("delta") or {}
+
+                    # 捕获 reasoning_content（DeepSeek reasoning 模式）
+                    rc = choices[0].get("delta", {}).get("reasoning_content")
+                    if isinstance(rc, str) and rc:
+                        reasoning_content = rc
 
                     tc_deltas = delta.get("tool_calls")
                     if tc_deltas:

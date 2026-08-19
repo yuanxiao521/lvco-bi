@@ -24,7 +24,7 @@ import logging
 from typing import Any, AsyncIterator
  
 from app.services.agents.base_agent import AgentResult
-from app.services.agents.planner_agent import PlannerAgent
+from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
 from app.services.agents.graph import Graph
 from app.services.agent_tools import ToolRegistry
 from app.services.context_utils import compact_result_json
@@ -118,14 +118,46 @@ class AgentOrchestrator:
     async def _plan_node(self, state: dict, **shared) -> dict:
         emit = shared["emit"]
         await emit({"type": "status", "message": "正在分析需求并生成执行计划..."})
+        
+        # [DEBUG] 记录 Planner 输入上下文
+        logger.debug(
+            f"[orchestrator][planner_input]\n"
+            f"  user_msg: {shared['user_msg'][:200]}\n"
+            f"  history_count: {len(shared['history'])}\n"
+            f"  datasources_count: {len(shared['available_datasources'])}\n"
+            f"  datasources: {json.dumps(shared['available_datasources'][:3], ensure_ascii=False)[:500]}"
+        )
+        
         result = await self.planner.execute(
             user_msg=shared["user_msg"],
             history=shared["history"],
             available_datasources=shared["available_datasources"],
         )
+        
+        # [DEBUG] 记录 Planner 输出
+        if result.success:
+            logger.debug(
+                f"[orchestrator][planner_output]\n"
+                f"  task_summary: {result.data.get('task_summary', '')[:200]}\n"
+                f"  expected_output: {result.data.get('expected_output', '')}\n"
+                f"  steps_count: {len(result.data.get('steps', []))}\n"
+                f"  steps: {json.dumps(result.data.get('steps', []), ensure_ascii=False)[:1000]}"
+            )
+        else:
+            logger.debug(f"[orchestrator][planner_failed] error={result.error}")
+        
         if not result.success:
-            logger.error(f"[orchestrator] 规划失败: {result.error}")
-            return {"plan": None, "plan_error": result.error}
+            logger.warning(f"[orchestrator] 规划失败，使用智能降级计划: {result.error}")
+            fallback_plan = self._build_fallback_plan(shared["user_msg"], shared["available_datasources"])
+            steps = fallback_plan.get("steps", [])
+            has_chart = any(s.get("tool") == _CHART_TOOL for s in steps)
+            logger.info(f"[orchestrator] 降级计划完成 steps={len(steps)} has_chart={has_chart}")
+            await emit({"type": "plan", "plan": fallback_plan})
+            return {
+                "plan": fallback_plan,
+                "has_chart_steps": has_chart,
+                "ordered_steps": _topo_sort(steps),
+            }
         plan = result.data
         steps = plan.get("steps", [])
         has_chart = any(s.get("tool") == _CHART_TOOL for s in steps)
@@ -136,6 +168,49 @@ class AgentOrchestrator:
             "has_chart_steps": has_chart,
             "ordered_steps": _topo_sort(steps),
         }
+
+    def _build_fallback_plan(self, user_msg: str, available_datasources: list[dict]) -> dict:
+        """Planner 失败时生成智能降级计划：直接查询数据源。"""
+        ds = available_datasources or []
+        if ds:
+            ds0 = ds[0] if isinstance(ds[0], dict) else {}
+            ds_desc = ds0.get("description") or _infer_table_description(ds0)
+            fields = ds0.get("fields", [])
+            field_parts = []
+            for f in (fields[:10] if isinstance(fields, list) else []):
+                name = f.get("name", "?")
+                dtype = f.get("data_type", "")
+                samples = f.get("sample", [])
+                sample_str = f" 示例={samples}" if samples else ""
+                field_parts.append(f"{name}({dtype}{sample_str})" if dtype else name)
+            field_hint = "，字段：" + "、".join(field_parts) if field_parts else ""
+            steps = [
+                {
+                    "step_id": 1,
+                    "goal": f"查询数据回答用户问题：{user_msg}。数据源为 {ds0.get('name', 'default')}（{ds_desc}）{field_hint}，请根据字段名生成合适的 SQL 查询",
+                    "tool": "query_datasource",
+                    "depends_on": [],
+                    "purpose": "直接查询数据回答用户问题",
+                },
+                {
+                    "step_id": 2,
+                    "goal": f"根据查询结果生成可视化图表，标题与用户问题'{user_msg}'相关",
+                    "tool": "render_chart",
+                    "depends_on": [1],
+                    "purpose": "可视化展示分析结果",
+                },
+            ]
+        else:
+            steps = [
+                {
+                    "step_id": 1,
+                    "goal": "列出所有可用数据源，找到包含相关数据的数据源",
+                    "tool": "list_datasources",
+                    "depends_on": [],
+                    "purpose": "无可用数据源信息，先列出数据源",
+                },
+            ]
+        return {"task_summary": f"智能降级计划：{user_msg}", "steps": steps, "expected_output": "report"}
  
     async def _route_plan(self, state: dict, **shared) -> str:
         if state.get("plan_error"):
@@ -168,7 +243,9 @@ class AgentOrchestrator:
         logger.info(f"[orchestrator] _route_execute has_chart={has_chart}")
         return "chart" if has_chart else "report"
  
-    # ── Agentic 步骤执行：LLM 实时决策 → 执行工具 → 失败 hint 回传重试（≤3 次）──
+    # ── Agentic 步骤执行：mini ReAct 循环（LLM 可多次调用工具，直到输出文本或达到上限）──
+    _MAX_TOOL_CALLS_PER_STEP = 5  # 单步内最多工具调用次数
+
     async def _agentic_run_step(self, step: dict, results: dict, state: dict, **shared) -> None:
         from app.services.ai_prompts import EXECUTOR_SYSTEM
         emit = shared["emit"]
@@ -176,38 +253,85 @@ class AgentOrchestrator:
         user_id = state.get("user_id", "")
         sid = step["step_id"]
         goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
- 
+
         context = self._build_executor_context(state, step, results, **shared)
+
+        # [DEBUG] 记录 Executor 输入上下文
+        logger.debug(
+            f"[orchestrator][executor_input] step_id={sid}\n"
+            f"  goal: {goal[:200]}\n"
+            f"  suggested_tool: {step.get('tool', '')}\n"
+            f"  depends_on: {step.get('depends_on', [])}\n"
+            f"  context_length: {len(context)}\n"
+            f"  context_preview: {context[:500]}"
+        )
+
         messages: list[dict] = [
             {"role": "system", "content": EXECUTOR_SYSTEM},
             {"role": "user", "content": context},
         ]
         all_tools = ToolRegistry.schemas()
- 
-        for attempt in range(_MAX_STEP_RETRIES + 1):
-            if attempt > 0:
-                logger.info(f"[orchestrator] 步骤 {sid} 失败重试 attempt={attempt} goal={goal[:40]}")
-            # 1. 执行 Agent（LLM）实时决策：调用工具或输出文本
+
+        # [DEBUG] 记录可用工具列表
+        logger.debug(
+            f"[orchestrator][executor_tools] step_id={sid}\n"
+            f"  available_tools_count: {len(all_tools)}\n"
+            f"  tool_names: {[t.get('function', {}).get('name', '') for t in all_tools]}"
+        )
+
+        tool_call_count = 0  # 本步骤内已执行的工具调用次数
+        last_result: str = ""  # 最后一次工具执行结果（用于达到上限时兜底）
+        reasoning_content: str = ""  # DeepSeek reasoning 模式需要回传
+        consecutive_errors = 0  # 连续错误计数
+
+        # ── mini ReAct 循环：LLM 决策 → 执行工具 → 结果回传 → 再决策 ──
+        while tool_call_count < self._MAX_TOOL_CALLS_PER_STEP:
+            # 1. LLM 决策：调用工具或输出文本
             tool_calls: list[dict] = []
             text_parts: list[str] = []
-            async for event in self.llm.stream_chat_with_tools(
-                messages, all_tools, temperature=0.3, max_tokens=2000,
-            ):
-                if event["type"] == "text":
-                    text_parts.append(event.get("content", ""))
-                elif event["type"] == "tool_call":
-                    tool_calls.append(event)
- 
-            # 2a. 无需工具：文本回复即为步骤结果
+            try:
+                async for event in self.llm.stream_chat_with_tools(
+                    messages, all_tools, temperature=0.3, max_tokens=2000,
+                ):
+                    if event["type"] == "text":
+                        text_parts.append(event.get("content", ""))
+                    elif event["type"] == "tool_call":
+                        # 保存本轮 LLM 返回的 reasoning_content（DeepSeek 需要回传）
+                        rc = event.get("reasoning_content", "")
+                        if rc:
+                            reasoning_content = rc
+                        tool_calls.append(event)
+            except Exception as e:
+                logger.warning(f"[orchestrator] 步骤 {sid} 流式调用异常: {e}")
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    logger.error(f"[orchestrator] 步骤 {sid} 连续 3 次异常，放弃")
+                    results[sid] = json.dumps({"error": f"连续 3 次 API 调用失败: {e}"}, ensure_ascii=False)
+                    return
+                # 清除 messages 中可能引起问题的 reasoning_content
+                for msg in messages:
+                    msg.pop("reasoning_content", None)
+                continue
+
+            # [DEBUG] 记录 LLM 决策结果
+            logger.debug(
+                f"[orchestrator][executor_decision] step_id={sid} tool_call_count={tool_call_count}\n"
+                f"  tool_calls_count: {len(tool_calls)}\n"
+                f"  text_output_length: {sum(len(t) for t in text_parts)}\n"
+                f"  tool_calls: {json.dumps([{'name': tc.get('name', ''), 'args_preview': str(tc.get('arguments', '{}'))[:200]} for tc in tool_calls], ensure_ascii=False)[:500]}"
+            )
+
+            # 2a. 无工具调用：文本输出即为步骤结果，结束本步骤
             if not tool_calls:
                 text_out = "".join(text_parts)
                 results[sid] = json.dumps({"text": text_out}, ensure_ascii=False)
                 if text_out.strip():
                     await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
                 logger.info(f"[orchestrator] 步骤 {sid} 文本输出 len={len(text_out)}")
-                self._record_step_trace(shared.get("trace"), sid, "text", 1, False)
+                logger.debug(f"[orchestrator][executor_no_tool] step_id={sid} text_preview: {text_out[:300]}")
+                self._record_step_trace(shared.get("trace"), sid, "text", tool_call_count + 1, False)
                 return
- 
+
             # 2b. 执行工具（一次一个调用）
             tc = tool_calls[0]
             tname = tc.get("name", "")
@@ -218,14 +342,15 @@ class AgentOrchestrator:
             if tname in (_CHART_TOOL, "stats_analyzer"):
                 self._fill_step_data(targs, step, results)
             await emit({"type": "tool_call", "name": tname, "args": targs})
- 
+
             tool = ToolRegistry.get(tname)
             if tool is None:
                 err = json.dumps({"error": f"未知工具: {tname}"}, ensure_ascii=False)
                 results[sid] = err
                 await emit({"type": "tool_result", "name": tname, "result": err})
-                self._record_step_trace(shared.get("trace"), sid, tname, attempt + 1, True)
+                self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, True)
                 return
+
             trace = shared.get("trace")
             span_obj = None
             try:
@@ -238,7 +363,7 @@ class AgentOrchestrator:
             except Exception as e:
                 result_str = json.dumps({"error": str(e)}, ensure_ascii=False)
 
-            # 判断工具返回是否含 error（真实工具失败返回 error JSON 而非抛异常）
+            # 判断工具返回是否含 error
             try:
                 parsed_res = json.loads(result_str)
                 is_error = isinstance(parsed_res, dict) and "error" in parsed_res
@@ -247,39 +372,50 @@ class AgentOrchestrator:
 
             await emit({"type": "tool_result", "name": tname, "result": result_str})
 
+            # [DEBUG] 记录工具执行结果
+            logger.debug(
+                f"[orchestrator][tool_result] step_id={sid} tool_call_count={tool_call_count}\n"
+                f"  tool_name: {tname}\n"
+                f"  is_error: {is_error}\n"
+                f"  result_length: {len(result_str)}\n"
+                f"  result_preview: {result_str[:500]}"
+            )
+
             if span_obj is not None:
                 span_obj.update(
                     output=result_str[:300],
-                    metadata={"ok": not is_error, "attempt": attempt},
+                    metadata={"ok": not is_error, "attempt": tool_call_count},
                 )
 
-            if is_error:
-                # 3. 失败兜底：错误+hint 回传执行 Agent，修复重试（≤_MAX_STEP_RETRIES）
-                logger.warning(f"[orchestrator] 步骤 {sid} 工具返回错误 tool={tname} attempt={attempt}")
-                if attempt < _MAX_STEP_RETRIES:
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [{
-                            "id": tc.get("id", "call_1"),
-                            "type": "function",
-                            "function": {"name": tname, "arguments": tc.get("arguments", "{}")},
-                        }],
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", "call_1"),
-                        "content": result_str,
-                    })
-                    continue
-                results[sid] = result_str
-                logger.warning(f"[orchestrator] 步骤 {sid} 超过重试上限 tool={tname}")
-                self._record_step_trace(trace, sid, tname, attempt + 1, True)
-                return
+            tool_call_count += 1
+            last_result = result_str
+            consecutive_errors = 0  # 工具调用成功，重置连续错误计数
 
-            # 成功：结果入 results，chart 步骤发 chart 事件
-            results[sid] = result_str
-            self._record_step_trace(trace, sid, tname, attempt + 1, False)
+            # 3. 把 assistant tool_call + tool result 追加到 messages，让 LLM 看到结果后继续决策
+            assistant_msg: dict = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": tc.get("id", f"call_{tool_call_count}"),
+                    "type": "function",
+                    "function": {"name": tname, "arguments": tc.get("arguments", "{}")},
+                }],
+            }
+            if reasoning_content:
+                assistant_msg["reasoning_content"] = reasoning_content
+            messages.append(assistant_msg)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", f"call_{tool_call_count}"),
+                "content": result_str,
+            })
+
+            if is_error:
+                logger.warning(f"[orchestrator] 步骤 {sid} 工具返回错误 tool={tname} attempt={tool_call_count}")
+                # 错误时继续循环，让 LLM 看到错误后修正（不直接 return）
+                continue
+
+            # 工具成功：如果是 chart 步骤，发 chart 事件
             if tname == _CHART_TOOL:
                 try:
                     cr = json.loads(result_str)
@@ -287,10 +423,14 @@ class AgentOrchestrator:
                         await emit({"type": "chart", "chart_type": cr.get("chart_type", "bar"), "option": cr["option"]})
                 except Exception as ce:
                     logger.warning(f"[orchestrator] chart 事件解析失败: {ce}")
-            logger.info(f"[orchestrator] 步骤 {sid} 成功 tool={tname}")
-            return
- 
-        results[sid] = json.dumps({"error": "步骤执行失败（超过重试上限）"}, ensure_ascii=False)
+
+            logger.info(f"[orchestrator] 步骤 {sid} 工具成功 tool={tname} (第{tool_call_count}次调用)")
+            # 成功后继续循环，让 LLM 决定是否需要更多工具调用
+
+        # 达到工具调用上限，用最后一次工具结果作为步骤结果
+        results[sid] = last_result or json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
+        logger.warning(f"[orchestrator] 步骤 {sid} 达到工具调用上限 {self._MAX_TOOL_CALLS_PER_STEP}")
+        self._record_step_trace(shared.get("trace"), sid, "max_calls", tool_call_count, False)
  
     def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
         """构建执行 Agent 上下文：用户问题 + 当前步骤 + 依赖步骤结果 + 数据源信息。"""
@@ -308,9 +448,18 @@ class AgentOrchestrator:
         if ds:
             ds_lines = []
             for d in ds[:10]:
-                fields = ", ".join(f.get("name", "?") for f in (d.get("fields") or [])[:8])
-                ds_lines.append(f"- id={d.get(_K_ID)} name={d.get(_K_NAME)} type={d.get(_K_TYPE)} 字段: {fields}")
-            parts.append("可用数据源：\n" + "\n".join(ds_lines))
+                ds_desc = d.get("description") or _infer_table_description(d)
+                field_parts = []
+                for f in (d.get("fields") or [])[:15]:
+                    name = f.get("name", "?")
+                    dtype = f.get("data_type", "")
+                    samples = f.get("sample", [])
+                    sample_str = f" 示例值={samples}" if samples else ""
+                    field_parts.append(f"{name}({dtype}{sample_str})" if dtype else name)
+                fields = ", ".join(field_parts)
+                table_ref = d.get("table_ref", "")
+                ds_lines.append(f"- id={d.get(_K_ID)} name={d.get(_K_NAME)} 描述={ds_desc} type={d.get(_K_TYPE)} table_ref={table_ref} 字段: {fields}")
+            parts.append("可用数据源（SQL 的 FROM 必须用 table_ref 原样复制）：\n" + "\n".join(ds_lines))
         return "\n\n".join(parts)
  
     # ── 图节点：报告（ReportAgent）／错误 ──
