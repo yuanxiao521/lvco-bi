@@ -537,6 +537,24 @@ class QueryDatasourceTool(BaseTool):
 
         final_sql = guard.sanitized_sql or sql
 
+        # ── 安全说明 ────────────────────────────────────────────────────────────
+        # 此处使用 raw SQL 执行（duckdb_client.fetchall），而非参数化查询，原因如下：
+        #
+        # 1. SQL 由 LLM 动态生成，字面值（如 WHERE region = 'East'）直接嵌入在语句中，
+        #    无法像传统应用那样将值与模板分离，因此参数化在此场景下不适用。
+        #
+        # 2. 安全防护由多层机制构成，形成纵深防御（defense-in-depth）：
+        #    - AST 层：sql_guard 的 AST 校验已分析 SQL 语法树，确保仅允许 SELECT 语句，
+        #      禁止子查询、SELECT *、危险函数（如 read_parquet / load / ATTACH / DETACH）
+        #      以及非常用聚合函数，并对列名/表名进行引用校验。
+        #    - 正则层（L3）：在 AST 层之前或作为 fallback，通过正则表达式拦截危险模式。
+        #    - LIMIT 注入：AST 防护已在 SQL 末尾注入 LIMIT 子句，防止全表扫描。
+        # 3. duckdb_client.fetchall() 为只读操作，不会修改数据库状态。
+        #
+        # 综上，AST 验证 + L3 正则 + LIMIT 注入 + 只读执行 共同构成充足的安全保障，
+        # 无需对 LLM 生成的 SQL 进行参数化。
+        # ──────────────────────────────────────────────────────────────────────────
+
         from sqlalchemy import select
         from app.models.datasource import DataSource, SourceType
 
