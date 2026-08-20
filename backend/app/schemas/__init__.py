@@ -305,10 +305,11 @@ class PolishRequest(CamelModel):
 
 
 class CanvasChatRequest(CamelModel):
-    datasource_id: str
-    session_id: str
+    datasource_id: str | None = None
+    session_id: str | None = None
     message: str
     canvas_context: dict | None = None  # blocks, current config, etc.
+    canvas_id: str | None = None  # 画布 ID；供前端落块后保存定位（可选）
 
 
 class DataChatRequest(CamelModel):

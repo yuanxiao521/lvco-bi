@@ -1,5 +1,5 @@
 // 导入 React hooks
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 // 导入路由参数 hook
 import { useSearchParams } from "react-router-dom";
 // 导入 Lucide 图标组件
@@ -52,6 +52,10 @@ import type { ReportStatus } from "../../api/types";
 import { useToast } from "../../components/ui/Toast";
 // 导入默认模板工具函数
 import { findDefaultTemplate, isSystemTemplateId } from "../../data/defaultTemplates";
+import { REPORT, nextChartSlot, nextFullWidthSlot, applyReportLayout } from "../../utils/reportLayout";
+// 跨图表联动筛选：图表 → store → 其他图表重查
+import { useCrossFilterStore } from "../../stores/crossFilterStore";
+import { Filter as FilterIcon, RefreshCw } from "lucide-react";
 
 // 默认画布初始块：包含一个一级标题、一段描述文本、一个二级标题
 const DEFAULT_BLOCKS: CanvasBlock[] = [
@@ -208,13 +212,20 @@ export default function FreeCanvas() {
   /** 新块的 Y 坐标：已有块最底端 + 间距，没有块则从偏下开始 */
   const newBlockCenterY = (prevBlocks: CanvasBlock[]) => {
     if (prevBlocks.length === 0) return 180;
-    const maxY = Math.max(...prevBlocks.map((b) => (b.y || 0) + (b.height || 250)));
+    const bottomOf = (b: CanvasBlock) =>
+      (typeof b.y === "number" ? b.y : 0) + (typeof b.height === "number" ? b.height : 250);
+    const maxY = Math.max(...prevBlocks.map(bottomOf));
     return maxY + GAP;
   };
   // 当前数据源的字段元信息（供 AI 助手使用）
   const [fieldMeta, setFieldMeta] = useState<Array<{ name: string; data_type: string }> | null>(null);
   // 所有数据源列表及其字段（供 AI 助手使用）
   const [datasourceList, setDatasourceList] = useState<Array<{id: string; name: string; fields?: Array<{name: string; data_type: string}>}>>([]);
+
+  // Agent 高亮块 ID：流式落块时短暂高亮，用于视觉反馈
+  const [highlightBlockId, setHighlightBlockId] = useState<string | null>(null);
+  // Agent 流式输出中：禁用画布块拖动，防止与自动落块位置冲突
+  const [aiStreaming, setAiStreaming] = useState(false);
 
   // —— 仪表盘弹窗相关状态 ——
   const [showDashboardModal, setShowDashboardModal] = useState(false);
@@ -508,6 +519,86 @@ export default function FreeCanvas() {
     canvasId,
   ]);
 
+  // —— 跨图表联动筛选：单击某图表的维度值 → toggleFilter → 重查所有图表 ——
+  const crossFilter = useCrossFilterStore((s) => s.filter);
+  const clearCrossFilter = useCrossFilterStore((s) => s.clear);
+  // 用 ref 持有最新 chartConfigs，避免 effect 被 chartConfigs 反复触发导致死循环
+  const chartConfigsRef = useRef(chartConfigs);
+  useEffect(() => {
+    chartConfigsRef.current = chartConfigs;
+  }, [chartConfigs]);
+  // 防止同一 filter 重复触发（toggleFilter 切换 / 同值同字段签名）
+  const lastCrossFilterSigRef = useRef<string>("");
+  useEffect(() => {
+    if (!crossFilter) {
+      lastCrossFilterSigRef.current = "";
+      return;
+    }
+    const sig = `${crossFilter.field}__${crossFilter.value}`;
+    if (sig === lastCrossFilterSigRef.current) return;
+    lastCrossFilterSigRef.current = sig;
+    const cid = canvasId;
+    if (!cid) return;
+    const newFilter: FilterConfig = {
+      field: crossFilter.field,
+      op: "eq",
+      value: crossFilter.value,
+    };
+    const entries = Object.entries(chartConfigsRef.current);
+    if (entries.length === 0) return;
+    (async () => {
+      for (const [blockId, cfg] of entries) {
+        const merged: ChartQueryConfig = {
+          ...cfg,
+          filters: [
+            ...((cfg.filters || []).filter((f) => f.field !== crossFilter.field)),
+            newFilter,
+          ],
+        };
+        setChartConfigs((prev) => ({ ...prev, [blockId]: merged }));
+        try {
+          const result = await executeChartQuery(cid, merged);
+          setChartResults((prev) => ({ ...prev, [blockId]: result }));
+        } catch (e) {
+          console.warn("cross-filter re-query failed for", blockId, e);
+        }
+      }
+    })();
+  }, [crossFilter, canvasId]);
+
+  // —— 强制刷新：跳过缓存重查所有图表 + 清掉当前联动筛选 ——
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const handleForceRefresh = useCallback(async () => {
+    if (!canvasId || refreshingAll) return;
+    if (Object.keys(chartConfigs).length === 0) return;
+    setRefreshingAll(true);
+    // 顺手清掉联动筛选，避免 refetch 后 chip 与查询不同步
+    clearCrossFilter();
+    try {
+      const entries = Object.entries(chartConfigsRef.current);
+      const results = await Promise.all(
+        entries.map(([blockId, cfg]) =>
+          executeChartQuery(canvasId, cfg, { force: true })
+            .then((r) => ({ blockId, result: r }))
+            .catch((e) => {
+              console.warn("force-refresh failed for", blockId, e);
+              return null;
+            })
+        )
+      );
+      setChartResults((prev) => {
+        const next = { ...prev };
+        for (const res of results) {
+          if (res) next[res.blockId] = res.result;
+        }
+        return next;
+      });
+      toast.success("已跳过缓存重新查询所有图表");
+    } finally {
+      setRefreshingAll(false);
+    }
+  }, [canvasId, refreshingAll, clearCrossFilter, toast]);
+
   // 后端 autosave：canvasId 存在时，blocks 变化 debounce 1.5s → PUT /canvases/:id/blocks
   useEffect(() => {
     if (!hydrated || !canvasId) return;
@@ -761,18 +852,6 @@ export default function FreeCanvas() {
     });
   };
 
-  // 拖拽排序：将 fromIdx 的 block 移动到 toIdx 位置
-  const handleReorderBlocks = (fromIdx: number, toIdx: number) => {
-    setBlocks((prev) => {
-      if (fromIdx < 0 || fromIdx >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIdx, 1);
-      const adjusted = fromIdx < toIdx ? toIdx - 1 : toIdx;
-      next.splice(Math.max(0, Math.min(next.length, adjusted)), 0, moved);
-      return next;
-    });
-  };
-
   // 修改选中图表块的颜色主题
   const handlePaletteChange = (id: string) => {
     setRenderer((prev) => prev);
@@ -846,6 +925,143 @@ export default function FreeCanvas() {
       const msg = typeof e === "string" ? e : e?.message || "未知错误";
       toast.error(`AI 图表生成失败: ${msg}`);
     }
+  };
+
+  /** Agent 画布工具通过 canvas_action 实时驱动的落块处理 */
+  const handleCanvasAction = async (action: any) => {
+    if (!action || typeof action.action !== "string") return;
+
+    switch (action.action) {
+      // 新增图表块（后端已用真实数据验证并附带 rows）
+      case "add_chart_block": {
+        const block = action.block || {};
+        const dsId = block.datasourceId || selectedDatasourceId;
+        if (!dsId) { toast.warning("需要数据源才能生成图表"); return; }
+        const dims = block.queryConfig?.dimensions || [];
+        const meas = (block.queryConfig?.measures || []) as MeasureConfig[];
+        if (dims.length === 0 || meas.length === 0) return;
+
+        const ct = (block.chartType || "bar") as ChartType;
+        const queryConfig: ChartQueryConfig = {
+          dimensions: dims,
+          measures: meas,
+          filters: [],
+          chartType: ct,
+          limit: block.queryConfig?.limit ?? 20,
+          datasourceId: dsId,
+        };
+        const blockId = `chart_${Date.now()}`;
+        setChartConfigs((prev) => ({ ...prev, [blockId]: queryConfig }));
+        // 优先使用后端已取回的真实数据，避免二次查询；无数据时再查
+        if (Array.isArray(block.rows)) {
+          const result: QueryResult = {
+            columns: Array.isArray(block.columns) ? block.columns : [],
+            rows: block.rows,
+            chartType: ct,
+            queryTimeMs: 0,
+          };
+          setChartResults((prev) => ({ ...prev, [blockId]: result }));
+        } else {
+          try {
+            const cid = await ensureCanvas();
+            const result = await executeChartQuery(cid, queryConfig);
+            setChartResults((prev) => ({ ...prev, [blockId]: result }));
+          } catch (e: any) {
+            toast.error(`图表数据查询失败: ${e?.message || ""}`);
+            return;
+          }
+        }
+        const title = block.title || `${ct} 图表`;
+        setBlocks((prev) => {
+          const { x, y } = nextChartSlot(prev);
+          return [
+            ...prev,
+            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: REPORT.chartW, height: REPORT.chartH, x, y },
+          ];
+        });
+        scrollToBlock(blockId);
+        toast.success(`已添加图表: ${title}`);
+        break;
+      }
+
+      // 新增文本/标题块（通栏落块，叙事紧跟图表区）
+      case "add_text_block": {
+        const block = action.block || {};
+        const content = block.content || "";
+        const blockType = block.blockType || "text";
+        setBlocks((prev) => {
+          const { x, y } = nextFullWidthSlot(prev);
+          const type = blockType === "h1" || blockType === "h2" ? blockType : "text";
+          return [...prev, { type, content, width: REPORT.fullW, x, y }];
+        });
+        break;
+      }
+
+      // 修改已有图表块
+      case "update_chart_block": {
+        const blockId = action.blockId;
+        const idx = blocks.findIndex((b) => b.type === "chart" && "blockId" in b && (b as { blockId: string }).blockId === blockId);
+        if (idx === -1) { toast.warning(`未找到图表块 ${blockId}`); break; }
+        const patch = action.patch || {};
+        const curCfg = chartConfigs[blockId] || { dimensions: [], measures: [] as MeasureConfig[] };
+        const nextConfig: ChartQueryConfig = {
+          dimensions: patch.dimensions ?? curCfg.dimensions ?? [],
+          measures: (patch.measures ?? curCfg.measures ?? []) as MeasureConfig[],
+          filters: curCfg.filters ?? [],
+          chartType: (patch.chartType ?? curCfg.chartType ?? "bar") as ChartType,
+          limit: curCfg.limit ?? 20,
+          datasourceId: curCfg.datasourceId ?? selectedDatasourceId,
+        };
+        setChartConfigs((prev) => ({ ...prev, [blockId]: nextConfig }));
+        setBlocks((prev) => prev.map((b, i) => {
+          if (i !== idx || b.type !== "chart") return b;
+          return {
+            ...b,
+            title: patch.title ?? ((b as ChartBlock).title || `${nextConfig.chartType} 图表`),
+            chartType: (patch.chartType ?? curCfg.chartType ?? "bar") as ChartType,
+          };
+        }));
+        // 查询字段变化则重新取数
+        const needQuery = patch.dimensions || patch.measures || patch.chartType;
+        if (needQuery && nextConfig.datasourceId) {
+          try {
+            const cid = await ensureCanvas();
+            const result = await executeChartQuery(cid, nextConfig);
+            setChartResults((prev) => ({ ...prev, [blockId]: result }));
+          } catch (e: any) {
+            toast.error(`图表更新查询失败: ${e?.message || ""}`);
+          }
+        }
+        scrollToBlock(blockId);
+        break;
+      }
+
+      // 删除块
+      case "remove_block": {
+        const idx = blocks.findIndex((b) => ("blockId" in b) && (b as { blockId: string }).blockId === action.blockId);
+        if (idx !== -1) handleDeleteBlock(idx);
+        break;
+      }
+
+      // 全量重排：报告式布局（h1/h2/text 通栏 + 图表双列网格）
+      case "arrange_layout": {
+        setBlocks((prev) => applyReportLayout(prev));
+        toast.success("已按报告式布局重排画布");
+        break;
+      }
+
+      default:
+        break;
+    }
+  };
+
+  /** 滚动定位到指定块并短暂高亮，强化"Agent 正在落块"的可视反馈 */
+  const scrollToBlock = (blockId: string) => {
+    setHighlightBlockId(blockId);
+    window.setTimeout(() => {
+      document.getElementById(blockId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => setHighlightBlockId(null), 2000);
+    }, 60);
   };
 
   // 手动添加图表块（使用当前配置面板的维度/度量/图表类型）
@@ -1468,7 +1684,38 @@ export default function FreeCanvas() {
             </button>
           </div>
           {/* 工具栏：标题/文本/图片/图表块的添加按钮，可点击或拖拽到画布 */}
-          <div className="flex items-center gap-1 px-3 py-2.5 mb-6 bg-white rounded-[10px] shadow-card">
+          <div className="flex items-center gap-2 px-3 py-2.5 mb-3 bg-white rounded-[10px] shadow-card">
+            {/* 跨图表联动筛选 chip：有 filter 时浮现，点击 × 清除 */}
+            {crossFilter ? (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-primary-light border border-primary/30 rounded-[6px] text-[12px] text-card-foreground">
+                <FilterIcon className="w-3.5 h-3.5 text-primary" />
+                <span className="text-muted-foreground">联动筛选</span>
+                <span className="font-medium text-primary">
+                  {crossFilter.field} = {crossFilter.value}
+                </span>
+                <button
+                  onClick={clearCrossFilter}
+                  className="ml-1 p-0.5 rounded text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
+                  title="清除联动筛选"
+                  type="button"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : null}
+            {/* 强制刷新按钮：force=true 跳过缓存读，并清掉当前联动筛选 */}
+            <button
+              onClick={handleForceRefresh}
+              disabled={refreshingAll || !canvasId}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-border-light rounded-[6px] text-[12px] text-muted-foreground hover:text-primary hover:border-primary/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              title="跳过缓存，重新查询所有图表"
+              type="button"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshingAll ? "animate-spin" : ""}`} />
+              <span>{refreshingAll ? "刷新中..." : "强制刷新"}</span>
+            </button>
+            <div className="h-5 w-px bg-border-light mx-1" />
+
             {toolbarButtons.map(({ icon, label, onClick, dragType }) => (
               <button
                 key={label}
@@ -1512,6 +1759,8 @@ export default function FreeCanvas() {
             onUpdateBlock={handleUpdateBlock}
             selectedBlockIdx={selectedBlockIdx}
             onSelectBlock={setSelectedBlockIdx}
+            highlightBlockId={highlightBlockId}
+            isStreaming={aiStreaming}
           />
         </div>
 
@@ -1572,11 +1821,14 @@ export default function FreeCanvas() {
       <AIAssistant
         datasourceId={selectedDatasourceId}
         fieldMeta={fieldMeta}
+        canvasBlocks={blocks}
         currentDimensions={dimensions}
         currentMeasures={measures}
         currentChartType={chartType}
         allDatasources={datasourceList}
         onApplyChartConfig={handleAIChatConfig}
+        onCanvasAction={handleCanvasAction}
+        onStreamingChange={setAiStreaming}
       />
 
       {/* —— 保存到仪表盘弹窗 —— */}

@@ -1,16 +1,22 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical } from "lucide-react";
 import { tokenStore } from "../../../api/client";
+import { listMessages } from "../../../api/ai";
+import ActivityFeed from "./ActivityFeed";
+import type { FeedStep } from "./ActivityFeed";
 
 // Props 接口：AI 助手组件的所有外部输入属性
 interface AIAssistantProps {
   datasourceId: string | null;                            // 当前选中的数据源 ID
   fieldMeta: Array<{ name: string; data_type: string; category?: string }> | null;  // 当前数据源的字段元信息（名称、类型、分类）
+  canvasBlocks?: Array<Record<string, any>>;              // 画布上已有的块（供 AI 感知现状，避免重复建图/支持改删）
   currentDimensions?: string[];                           // 当前图表中使用的维度字段列表
   currentMeasures?: Array<{ field: string; agg: string }>;  // 当前图表中使用的度量字段及其聚合方式
   currentChartType?: string;                              // 当前图表的类型（柱状图、折线图等）
   allDatasources?: Array<{ id: string; name: string; fields?: Array<{name: string; data_type: string}> }>;  // 所有可选数据源列表
   onApplyChartConfig?: (config: { chartType?: string; dimensions?: string[]; measures?: Array<{ field: string; agg: string }> }) => void;  // 应用 AI 推荐图表配置的回调
+  onCanvasAction?: (action: any) => void;                 // 接收 canvas_action，交由父组件实时落块
+  onStreamingChange?: (streaming: boolean) => void;       // 流式状态变化上报（父组件据此禁用画布拖动）
 }
 
 // 聊天消息的数据结构
@@ -155,14 +161,47 @@ function renderInline(text: string): React.ReactNode {
 }
 
 
+/** 工具名 → 中文名（驱动工作台默认步骤标题） */
+function TOOL_FALLBACK_NAME(name: string): string {
+  const map: Record<string, string> = {
+    add_chart_block: "新增图表", add_text_block: "写文本", add_h1: "写标题",
+    add_h2: "写章节", update_chart_block: "改图表",
+  };
+  return map[name] ?? name;
+}
+
+/** canvas_action 类型 → 动作中文 */
+const ACTION_LABEL: Record<string, string> = {
+  add_chart_block: "添加图表", add_text_block: "添加文本", update_chart_block: "更新图表",
+  remove_block: "删除块", arrange_layout: "自动布局",
+};
+
+/** 根据 canvas_action 生成一段可读的描述文本 */
+function actionDesc(action: any): string {
+  const block = action?.block;
+  const title = block?.title || block?.content || "";
+  const target = action?.blockId || "";
+  switch (action?.action) {
+    case "add_chart_block": return `「${title}」已添加`;
+    case "add_text_block": return `「${title}」已添加`;
+    case "update_chart_block": return `块 ${target} 已更新`;
+    case "remove_block": return `块 ${target} 已删除`;
+    default: return "";
+  }
+}
+
+
 export default memo(function AIAssistant({
   datasourceId,
   fieldMeta,
+  canvasBlocks,
   currentDimensions,
   currentMeasures,
   currentChartType,
   allDatasources,
   onApplyChartConfig,
+  onCanvasAction,
+  onStreamingChange,
 }: AIAssistantProps) {
   // 面板展开/折叠状态
   const [open, setOpen] = useState(false);
@@ -197,9 +236,18 @@ export default memo(function AIAssistant({
   ]);
   const [inputValue, setInputValue] = useState("");       // 输入框当前文本
   const [isStreaming, setIsStreaming] = useState(false);   // 是否正在接收 AI 流式响应
+  {/* 流式状态上报：父组件据此在 Agent 落块期间禁用画布拖动，避免位置冲突 */}
+  useEffect(() => {
+    onStreamingChange?.(isStreaming);
+  }, [isStreaming, onStreamingChange]);
+  // Agent 工作台步骤时间线状态
+  const [steps, setSteps] = useState<FeedStep[]>([]);     // 板内步骤（tool_call/tool_result 驱动）
+  const runSeq = useRef(0);                               // 步骤自增 id 计数器
   const messagesEndRef = useRef<HTMLDivElement>(null);     // 消息列表底部引用，用于自动滚动
   const inputRef = useRef<HTMLInputElement>(null);          // 输入框引用
   const panelRef = useRef<HTMLDivElement>(null);            // 面板容器引用
+  const sessionIdRef = useRef<string | null>(localStorage.getItem("canvas_session_id"));
+  const sessionLoaded = useRef(false);
 
   // 悬浮球鼠标按下事件：进入拖拽状态，记录初始位置
   const onBallMouseDown = useCallback((e: React.MouseEvent) => {
@@ -306,6 +354,29 @@ export default memo(function AIAssistant({
     }
   }, [datasourceId, fieldMeta, allDatasources]);
 
+  // 加载已有会话的历史消息（页面刷新后恢复）
+  useEffect(() => {
+    if (sessionLoaded.current) return;
+    sessionLoaded.current = true;
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    (async () => {
+      try {
+        const msgs = await listMessages(sid);
+        if (msgs.length > 0) {
+          setMessages(msgs.map(m => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })));
+        }
+      } catch {
+        sessionIdRef.current = null;
+        localStorage.removeItem("canvas_session_id");
+      }
+    })();
+  }, []);
+
   // 新消息到达时自动滚动到消息列表底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -354,6 +425,20 @@ export default memo(function AIAssistant({
     }
     // 始终传递完整字段列表，即使没有选中图表，AI 也能据此智能推荐
     canvasContext.availableFields = (fieldMeta ?? []).map(f => ({ name: f.name, data_type: f.data_type, category: f.category }));
+    // 传递画布已有块摘要，让 AI 感知现状（避免重复建图、支持改/删已有块）
+    if (Array.isArray(canvasBlocks) && canvasBlocks.length) {
+      canvasContext.blocks = canvasBlocks
+        .filter((b) => b && b.type === "chart")
+        .map((b) => ({
+          block_id: b.blockId,
+          title: b.title,
+          chartType: b.chartType,
+          dimensions: b.queryConfig?.dimensions ?? b.dimensions ?? [],
+          measures: b.queryConfig?.measures ?? b.measures ?? [],
+        }));
+    }
+    // 每次新任务重置工作台步骤时间线
+    setSteps([]);
 
     try {
       // 发起 POST 请求，后端返回 SSE（Server-Sent Events）流
@@ -362,7 +447,7 @@ export default memo(function AIAssistant({
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           datasource_id: datasourceId,
-          session_id: 'canvas-session',
+          session_id: sessionIdRef.current,
           message: content,
           canvas_context: canvasContext,
         }),
@@ -399,9 +484,64 @@ export default memo(function AIAssistant({
                 assistantContent += event.delta;
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
                 break;
+              // 'tool_call': Agent 开始调用某工具 → 在当前运行步骤挂一个工具 chip（running）
+              case 'tool_call': {
+                const stepId = `${runSeq.current}`;
+                // 若当前还没有运行中的步骤，创建默认步骤
+                setSteps(prev => {
+                  const runIdx = [...prev].reverse().findIndex(s => s.status === "run");
+                  const hasRun = runIdx !== -1;
+                  if (!hasRun) runSeq.current += 1;
+                  const idx = hasRun ? prev.length - 1 - runIdx : prev.length;
+                  const next = prev.slice();
+                  if (!hasRun) {
+                    next.push({ id: `${runSeq.current}`, title: `执行 ${TOOL_FALLBACK_NAME(event?.name ?? "工具")}`, status: "run", tools: [] });
+                    return next;
+                  }
+                  next[idx] = { ...next[idx], tools: [...next[idx].tools, { name: event.name, args: event.args, status: "run" }] };
+                  return next;
+                });
+                void stepId;
+                break;
+              }
+              // 'tool_result': 工具执行完成 → 更新对应 chip 状态
+              case 'tool_result': {
+                const isErr = (() => {
+                  try {
+                    const r = event.result ? JSON.parse(event.result) : null;
+                    return !!(r && r.error);
+                  } catch { return false; }
+                })();
+                setSteps(prev => prev.map((s, i) =>
+                  i === prev.length - 1
+                    ? {
+                        ...s,
+                        tools: s.tools.map((t, j) =>
+                          j === s.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t
+                        ),
+                      }
+                    : s
+                ));
+                break;
+              }
+              // 'canvas_action': Agent 的落块指令 → 转交父组件实时渲染，并给出提示
+              case 'canvas_action': {
+                assistantContent += `\n\n> 已${ACTION_LABEL[event.action] ?? event.action}: ${actionDesc(event)}\n`;
+                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
+                if (onCanvasAction) onCanvasAction(event);
+                break;
+              }
+              // 'step'：后端显式步骤事件（如"正在启动多工具编排"）
+              case 'step':
+                runSeq.current += 1;
+                setSteps(prev => [...prev, { id: `${runSeq.current}`, title: event.title ?? "执行中", status: "run", tools: [] }]);
+                break;
+              // 'chart'：兼容旧行为，保留但不再强制应用，仅作提示
+              case 'chart':
+                break;
+              // 兼容旧事件
               // 'query_result': 查询结果数据，由 AI 自行处理，不显示原始数据表
               case 'query_result': {
-                assistantContent += '';
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
                 break;
               }
@@ -410,7 +550,7 @@ export default memo(function AIAssistant({
                 assistantContent += `\n\n> ${event.message}`;
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
                 break;
-              // 'chart_config': AI 推荐的图表配置到达，显示提示并调用 onApplyChartConfig 回调应用配置
+              // 'chart_config': AI 推荐的图表配置到达，显示提示并调用 onApplyChartConfig 回调应用配置（旧链路兼容）
               case 'chart_config':
                 assistantContent += `\n\n[图表配置已应用]`;
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
@@ -427,6 +567,15 @@ export default memo(function AIAssistant({
               case 'error':
                 assistantContent += `\n\n> ${event.message}`;
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
+                break;
+              // 'session_created': 后端新建了会话，保存 sessionId
+              case 'session_created':
+                sessionIdRef.current = event.session_id;
+                localStorage.setItem("canvas_session_id", event.session_id);
+                break;
+              // 'done': 任务结束，标记当前运行步骤完成
+              case 'done':
+                setSteps(prev => prev.map(s => s.status === "run" ? { ...s, status: "done", tools: s.tools } : s));
                 break;
             }
           } catch { /* 跳过解析失败的非法事件行 */ }
@@ -521,6 +670,7 @@ export default memo(function AIAssistant({
                 </div>
               </div>
             ))}
+            {steps.length > 0 && <ActivityFeed steps={steps} />}
             <div ref={messagesEndRef} />
           </div>
 

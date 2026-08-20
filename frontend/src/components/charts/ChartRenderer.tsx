@@ -55,6 +55,8 @@ interface ChartRendererProps {
   loading?: boolean;
   renderer?: "recharts" | "echarts";
   palette?: string;
+  /** 点击图表维度值回调（用于跨图表联动筛选）；ECharts 渲染时生效 */
+  onDimensionClick?: (dimension: string, value: string) => void;
 }
 
 /** 后端 result_columns 使用原始字段名（非 SQL 别名），直接返回 field */
@@ -68,6 +70,7 @@ export default function ChartRenderer({
   loading,
   renderer = "recharts",
   palette,
+  onDimensionClick,
 }: ChartRendererProps) {
   const COLORS = palette ? getPaletteById(palette) : DEFAULT_COLORS;
 
@@ -99,6 +102,16 @@ export default function ChartRenderer({
     label: `${m.agg}(${m.field})`,
   }));
 
+  // 联动筛选事件绑定：点击柱子/节点/扇区时把维度名+维度值抛给上层
+  const onEvents = onDimensionClick
+    ? {
+        click: (params: unknown) => {
+          const p = params as { name?: unknown };
+          if (p?.name != null && dim) onDimensionClick(dim, String(p.name));
+        },
+      }
+    : undefined;
+
   // --- ECharts 渲染 ---
   if (renderer === "echarts") {
     // 饼图始终用单度量
@@ -110,6 +123,7 @@ export default function ChartRenderer({
           valueField={measureFields[0]?.field ?? measureKey}
           colors={COLORS}
           innerRadius={chartType === "donut" ? 80 : undefined}
+          onEvents={onEvents}
         />
       );
     }
@@ -122,6 +136,7 @@ export default function ChartRenderer({
           nameField={dim}
           valueField={measureFields[0]?.field ?? measureKey}
           colors={COLORS}
+          onEvents={onEvents}
         />
       );
     }
@@ -134,6 +149,7 @@ export default function ChartRenderer({
           nameField={dim}
           measureFields={measureFields.length > 0 ? measureFields : [{ field: measureKey, label: measureKey }]}
           colors={COLORS}
+          onEvents={onEvents}
         />
       );
     }
@@ -171,7 +187,7 @@ export default function ChartRenderer({
             matrix[yi][xi] = Number(row[measureField]) || 0;
           }
         }
-        return <EChartsHeatmap xFields={xVals} yFields={yVals} matrix={matrix} xLabel={dimX} yLabel={dimY} palette={COLORS} />;
+        return <EChartsHeatmap xFields={xVals} yFields={yVals} matrix={matrix} xLabel={dimX} yLabel={dimY} palette={COLORS} onEvents={onEvents} />;
       }
       return (
         <div className="flex items-center justify-center h-full text-[12px] text-muted-foreground">
@@ -186,7 +202,7 @@ export default function ChartRenderer({
       const dimTarget = config?.dimensions[1];
       const valKey = measureFields[0]?.field ?? measureKey;
       if (dimSource && data.length > 0) {
-        return <EChartsSankey data={data} sourceField={dimSource} targetField={dimTarget} valueField={valKey} colors={COLORS} />;
+        return <EChartsSankey data={data} sourceField={dimSource} targetField={dimTarget} valueField={valKey} colors={COLORS} onEvents={onEvents} />;
       }
       return (
         <div className="flex items-center justify-center h-full text-[12px] text-muted-foreground">
@@ -199,7 +215,7 @@ export default function ChartRenderer({
     if (chartType === "scatter") {
       const xKey = measureFields[0]?.field ?? dim;
       const yKey = measureFields[1]?.field ?? measureFields[0]?.field ?? measureKey;
-      return <EChartsScatter data={data} xField={xKey} yField={yKey} colors={COLORS} />;
+      return <EChartsScatter data={data} xField={xKey} yField={yKey} colors={COLORS} onEvents={onEvents} />;
     }
 
     // KPI 卡片：大数字展示
@@ -232,6 +248,7 @@ export default function ChartRenderer({
               measureFields={measureFields}
               colors={COLORS}
               stacked={isStacked}
+              onEvents={onEvents}
             />
           );
         case "horizontal_bar":
@@ -242,6 +259,7 @@ export default function ChartRenderer({
               measureFields={measureFields}
               colors={COLORS}
               stacked={isStacked}
+              onEvents={onEvents}
             />
           );
         case "line":
@@ -250,6 +268,7 @@ export default function ChartRenderer({
               {...commonProps}
               measureFields={measureFields}
               colors={COLORS}
+              onEvents={onEvents}
             />
           );
         case "area":
@@ -258,6 +277,7 @@ export default function ChartRenderer({
               {...commonProps}
               measureFields={measureFields}
               colors={COLORS}
+              onEvents={onEvents}
             />
           );
       }
@@ -268,13 +288,13 @@ export default function ChartRenderer({
       case "bar":
       case "grouped_bar":
       case "stacked_bar":
-        return <EChartsBar data={data} xField={dim} yField={measureKey} color={COLORS[0]} />;
+        return <EChartsBar data={data} xField={dim} yField={measureKey} color={COLORS[0]} onEvents={onEvents} />;
       case "horizontal_bar":
-        return <EChartsHorizontalBar data={data} xField={dim} yField={measureKey} color={COLORS[0]} />;
+        return <EChartsHorizontalBar data={data} xField={dim} yField={measureKey} color={COLORS[0]} onEvents={onEvents} />;
       case "line":
-        return <EChartsLine data={data} xField={dim} yField={measureKey} color={COLORS[0]} />;
+        return <EChartsLine data={data} xField={dim} yField={measureKey} color={COLORS[0]} onEvents={onEvents} />;
       case "area":
-        return <EChartsArea data={data} xField={dim} yField={measureKey} color={COLORS[0]} />;
+        return <EChartsArea data={data} xField={dim} yField={measureKey} color={COLORS[0]} onEvents={onEvents} />;
       default:
         break;
     }

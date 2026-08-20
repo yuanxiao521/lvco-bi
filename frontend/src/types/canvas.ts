@@ -52,26 +52,31 @@ export function getPaletteById(id: string | undefined | null): string[] {
   return found ? found.colors : PALETTE_PRESETS[0].colors;
 }
 
-export interface TextBlock {
+/** 画布自由布局字段：所有块类型共用的可选坐标/尺寸 */
+export interface BlockLayoutFields {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface TextBlock extends BlockLayoutFields {
   type: "text" | "h1" | "h2";
   content: string;
 }
 
-export interface ChartBlock {
+export interface ChartBlock extends BlockLayoutFields {
   type: "chart";
   blockId: string;
   title?: string;
   renderer?: string;
   palette?: string;
-  height?: number;
 }
 
-export interface ImageBlock {
+export interface ImageBlock extends BlockLayoutFields {
   type: "image";
   src: string;
   alt?: string;
-  width?: number;
-  height?: number;
 }
 
 export type CanvasBlock = TextBlock | ChartBlock | ImageBlock | Record<string, unknown>;

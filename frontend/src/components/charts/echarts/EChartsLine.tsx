@@ -11,13 +11,15 @@ interface EChartsLineProps {
   colors?: string[]
   color?: string
   title?: string
+  /** ECharts 事件绑定（如点击节点做联动筛选） */
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
-export default function EChartsLine({ data, xField, yField, measureFields, colors = DEFAULT_COLORS, color, title }: EChartsLineProps) {
+export default function EChartsLine({ data, xField, yField, measureFields, colors = DEFAULT_COLORS, color, title, onEvents }: EChartsLineProps) {
   // 多度量模式
   if (measureFields && measureFields.length > 0) {
     const option = buildMultiMeasureOption('line', data, xField, measureFields, colors, title)
-    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
   }
 
   // 单度量模式（向后兼容）
@@ -34,5 +36,5 @@ export default function EChartsLine({ data, xField, yField, measureFields, color
       itemStyle: { color: color || colors[0] },
     }],
   }
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

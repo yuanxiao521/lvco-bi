@@ -51,6 +51,16 @@ class EvalResult:
     expected_chart_type: str = ""
     actual_chart_type: str = ""
     notes: list[str] = field(default_factory=list)
+    # —— 画布专项打分（category=canvas 时有意义）——
+    is_canvas_question: bool = False
+    canvas_score: bool = False
+    canvas_narrative_present: bool = False
+    canvas_chart_count_ok: bool = False
+    canvas_chart_types_ok: bool = False
+    canvas_arrange_layout_ok: bool = False
+    canvas_block_order_ok: bool = False
+    canvas_actual_chart_types: list[str] = field(default_factory=list)
+    canvas_actual_chart_count: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -187,6 +197,24 @@ def judge_attempt(
         except Exception as e:
             result.notes.append(f"chart_validation_error={e}")
 
+    # ---- 6. 画布专项打分（category=canvas 时触发）----
+    if question.get("category") == "canvas":
+        result.is_canvas_question = True
+        actions = _parse_canvas_actions(attempt.events)
+        sc = _judge_canvas_score(question, actions)
+        for k, v in sc.items():
+            setattr(result, k, v)
+        if not result.canvas_score:
+            result.notes.append(
+                "canvas_subscores: "
+                f"count={result.canvas_chart_count_ok} "
+                f"types={result.canvas_chart_types_ok} "
+                f"narr={result.canvas_narrative_present} "
+                f"arr={result.canvas_arrange_layout_ok} "
+                f"order={result.canvas_block_order_ok} "
+                f"actual={result.canvas_actual_chart_types}"
+            )
+
     return result
 
 
@@ -201,6 +229,13 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
             "chart_type_correct_rate": 0.0,
             "chart_config_valid_rate": 0.0,
             "avg_iterations": 0.0,
+            "canvas_total": 0,
+            "canvas_score_rate": 0.0,
+            "canvas_chart_count_rate": 0.0,
+            "canvas_chart_types_rate": 0.0,
+            "canvas_narrative_rate": 0.0,
+            "canvas_arrange_layout_rate": 0.0,
+            "canvas_block_order_rate": 0.0,
         }
 
     total = len(results)
@@ -211,7 +246,7 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
     chart_cfg_ok = sum(1 for r in results if r.chart_config_valid)
     avg_iter = sum(r.iteration_count for r in results) / total
 
-    return {
+    summary: dict[str, Any] = {
         "total": total,
         "sql_accuracy_rate": round(sql_ok / total, 4),
         "tool_success_rate": round(tool_ok / total, 4),
@@ -225,6 +260,192 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
         "chart_type_correct_count": chart_ok,
         "chart_config_valid_count": chart_cfg_ok,
     }
+
+    # —— 画布专项聚合（仅对 category=canvas 的题）——
+    canvas_results = [r for r in results if r.is_canvas_question]
+    canvas_total = len(canvas_results)
+    summary["canvas_total"] = canvas_total
+    if canvas_total > 0:
+        summary["canvas_score_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_score) / canvas_total, 4
+        )
+        summary["canvas_chart_count_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_chart_count_ok) / canvas_total, 4
+        )
+        summary["canvas_chart_types_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_chart_types_ok) / canvas_total, 4
+        )
+        summary["canvas_narrative_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_narrative_present) / canvas_total, 4
+        )
+        summary["canvas_arrange_layout_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_arrange_layout_ok) / canvas_total, 4
+        )
+        summary["canvas_block_order_rate"] = round(
+            sum(1 for r in canvas_results if r.canvas_block_order_ok) / canvas_total, 4
+        )
+    else:
+        summary["canvas_score_rate"] = 0.0
+        summary["canvas_chart_count_rate"] = 0.0
+        summary["canvas_chart_types_rate"] = 0.0
+        summary["canvas_narrative_rate"] = 0.0
+        summary["canvas_arrange_layout_rate"] = 0.0
+        summary["canvas_block_order_rate"] = 0.0
+
+    return summary
+
+
+# ----------------------------------------------------------------------
+# 画布专项打分（report layout / arrange_layout / 跨图表联动）
+# ----------------------------------------------------------------------
+
+
+def _parse_canvas_actions(events: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """从 agent 事件的 tool_result 中解析所有 canvas_action。
+
+    Returns:
+        {
+          "chart":   [{"chart_type": ..., "title": ...}, ...],  # 顺序与 agent 调用顺序一致
+          "text":    [{"block_type": "h1"|"h2"|"text", "content": ...}, ...],
+          "arrange_layout": [{"layout": ...}],   # 通常只有一个
+          "update":  [...],                       # update_chart_block / remove_block
+          "_ordered": [{"kind": "chart"|"text"|"arrange_layout"|"update", "item": {...}}, ...]
+                      # 保留事件原始顺序，用于"先 X 后 Y"判定
+        }
+    """
+    out: dict[str, list[dict[str, Any]]] = {
+        "chart": [], "text": [], "arrange_layout": [], "update": [], "_ordered": [],
+    }
+    for e in events:
+        if e.get("type") != "tool_result":
+            continue
+        res = e.get("result")
+        if not res:
+            continue
+        # 兼容 result 是字符串（JSON）或 dict
+        parsed: Any = res
+        if isinstance(res, str):
+            s = res.strip()
+            if not s.startswith("{"):
+                continue
+            try:
+                parsed = json.loads(s)
+            except json.JSONDecodeError:
+                continue
+        if not isinstance(parsed, dict):
+            continue
+        action = parsed.get("canvas_action") or {}
+        if not isinstance(action, dict):
+            continue
+        kind = action.get("action", "")
+        block = action.get("block") or {}
+        bucket: str | None = None
+        item: dict[str, Any] = {}
+        if kind == "add_chart_block":
+            ct = block.get("chartType") or block.get("chart_type") or ""
+            title = block.get("title") or ""
+            item = {"chart_type": str(ct), "title": str(title)}
+            out["chart"].append(item)
+            bucket = "chart"
+        elif kind == "add_text_block":
+            bt = block.get("type") or block.get("block_type") or ""
+            content = block.get("content") or ""
+            item = {"block_type": str(bt), "content": str(content)}
+            out["text"].append(item)
+            bucket = "text"
+        elif kind == "arrange_layout":
+            item = {"layout": action.get("layout", {})}
+            out["arrange_layout"].append(item)
+            bucket = "arrange_layout"
+        elif kind in ("update_chart_block", "remove_block"):
+            item = {"action": kind, "block": block}
+            out["update"].append(item)
+            bucket = "update"
+        if bucket is not None:
+            out["_ordered"].append({"kind": bucket, "item": item})
+    return out
+
+
+def _judge_canvas_score(
+    question: dict[str, Any],
+    actions: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """对画布题做 5 子项评分 + 总分（任一子项失败 → 总分失败）。
+
+    子项：
+    1. chart_count_ok:       实际图表数 >= expected_min_chart_count
+    2. chart_types_ok:       实际图表类型集合覆盖 expected_chart_types（≥50% 命中即可，避免过度严格）
+    3. narrative_present:    若 requires_narrative，必须至少出现 1 个 h1/h2/text 块
+    4. arrange_layout_ok:    若 requires_arrange_layout，必须在末尾 1/3 的事件里出现 arrange_layout
+    5. block_order_ok:       若 requires_narrative，最早的 narrative 块（h1/h2/text）必须早于最早的 chart 块
+    """
+    requires_narrative = bool(question.get("requires_narrative"))
+    requires_arrange = bool(question.get("requires_arrange_layout"))
+    expected_min = int(question.get("expected_min_chart_count") or 1)
+    expected_types = question.get("expected_chart_types") or []
+
+    charts = actions["chart"]
+    texts = actions["text"]
+    layouts = actions["arrange_layout"]
+
+    # 1. 图表数
+    chart_count_ok = len(charts) >= expected_min
+    # 2. 图表类型覆盖（按类型 token 比较，agent 可能写 grouped_bar 与 bar 同义，归一化）
+    actual_types = _normalize_chart_types([c["chart_type"] for c in charts])
+    norm_expected = _normalize_chart_types(expected_types)
+    matched = sum(1 for t in norm_expected if t in actual_types)
+    chart_types_ok = (len(norm_expected) == 0) or (matched / len(norm_expected) >= 0.5)
+    # 3. 叙事块存在
+    narrative_blocks = [t for t in texts if t["block_type"] in ("h1", "h2", "text")]
+    narrative_present = (len(narrative_blocks) >= 1) if requires_narrative else True
+
+    # 基于事件原序的索引（_parse_canvas_actions 输出 _ordered）
+    ordered: list[dict[str, Any]] = actions.get("_ordered", []) or []
+    layout_idxs = [i for i, e in enumerate(ordered) if e["kind"] == "arrange_layout"]
+    narrative_idxs = [i for i, e in enumerate(ordered) if e["kind"] == "text"]
+    chart_idxs = [i for i, e in enumerate(ordered) if e["kind"] == "chart"]
+
+    # 4. arrange_layout 在末尾窗口内（最后 1/3）
+    arrange_layout_ok = (len(layouts) >= 1) if requires_arrange else True
+    if requires_arrange and layouts and ordered:
+        tail_window = max(1, len(ordered) // 3)
+        last_layout_idx = max(layout_idxs)
+        arrange_layout_ok = last_layout_idx >= len(ordered) - tail_window
+
+    # 5. 块顺序：要求叙事块先于图表块
+    block_order_ok = True
+    if requires_narrative and narrative_blocks and charts and ordered:
+        block_order_ok = min(narrative_idxs) < min(chart_idxs)
+
+    overall = all([
+        chart_count_ok,
+        chart_types_ok,
+        narrative_present,
+        arrange_layout_ok,
+        block_order_ok,
+    ])
+    return {
+        "canvas_score": overall,
+        "canvas_chart_count_ok": chart_count_ok,
+        "canvas_chart_types_ok": chart_types_ok,
+        "canvas_narrative_present": narrative_present,
+        "canvas_arrange_layout_ok": arrange_layout_ok,
+        "canvas_block_order_ok": block_order_ok,
+        "canvas_actual_chart_count": len(charts),
+        "canvas_actual_chart_types": [c["chart_type"] for c in charts],
+    }
+
+
+def _normalize_chart_types(types: list[str]) -> list[str]:
+    """归一化图表类型 token，去除可能的同义差异（如 grouped_bar 与 bar）。"""
+    alias = {
+        "grouped_bar": "bar",
+        "stacked_bar": "bar",
+        "horizontal_bar": "bar",
+        "area": "line",
+        "stacked_area": "line",
+    }
+    return [alias.get(t, t) for t in types if t]
 
 
 # ----------------------------------------------------------------------

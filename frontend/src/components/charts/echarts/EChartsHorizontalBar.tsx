@@ -13,6 +13,8 @@ interface EChartsHorizontalBarProps {
   title?: string
   /** 堆叠模式（把多个度量堆在同一行） */
   stacked?: boolean
+  /** ECharts 事件绑定（如点击条形做联动筛选） */
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 /**
@@ -30,6 +32,7 @@ export default function EChartsHorizontalBar({
   color,
   title,
   stacked,
+  onEvents,
 }: EChartsHorizontalBarProps) {
   // 多度量模式：复用通用 builder（在 option 中标记 horizontal_bar=true 让 builder 生成水平条形）
   if (measureFields && measureFields.length > 0) {
@@ -43,7 +46,7 @@ export default function EChartsHorizontalBar({
       stacked,
       { horizontal: true },
     )
-    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
   }
 
   // 单度量模式（向后兼容）：y 轴为类目，x 轴为数值
@@ -77,5 +80,5 @@ export default function EChartsHorizontalBar({
       },
     ],
   }
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

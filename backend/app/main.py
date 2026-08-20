@@ -69,9 +69,11 @@ async def health_check() -> dict:
 
 @app.on_event("startup")
 async def startup():
-    from app.services.cache_service import cache
+    from app.api.deps import get_cache_repository
     logger = structlog.get_logger("main")
-    logger.info("redis ping", status="ok" if cache._redis else "fallback_to_dict")
+    cache_repo = get_cache_repository()
+    status = "redis" if getattr(cache_repo, "_use_redis", False) else "fallback_to_dict"
+    logger.info("redis ping", status=status)
 
 
 @app.on_event("shutdown")

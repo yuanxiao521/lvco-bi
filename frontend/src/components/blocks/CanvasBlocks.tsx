@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   MoreHorizontal,
   Trash2,
@@ -23,6 +23,10 @@ import type {
 import ChartRenderer from "../charts/ChartRenderer";
 import { generateInsights, polishText } from "../../api/ai";
 import { useToast } from "../ui/Toast";
+import { detectAlignment } from "../../hooks/useBlockAlignment";
+import type { AlignmentGuide, BlockBounds } from "../../hooks/useBlockAlignment";
+import { estimateBlockHeight } from "../../utils/reportLayout";
+import { useCrossFilterStore } from "../../stores/crossFilterStore";
 
 
 {/* 可编辑文本组件：点击文本进入编辑模式（input/textarea），支持 Enter/Escape 提交或取消 */}
@@ -134,6 +138,12 @@ interface BlockWrapperProps {
   blockY?: number;
   blockType?: string;
   onPositionChange?: (x: number, y: number) => void;
+  /** 其他块的边界（画布坐标系），拖动时用于对齐吸附 */
+  siblings?: BlockBounds[];
+  /** 拖动中实时上报对齐辅助线，松手清空 */
+  onGuidesChange?: (guides: AlignmentGuide[]) => void;
+  /** 禁用位置拖动（如 Agent 流式输出期间，防止落块冲突） */
+  dragDisabled?: boolean;
   /** 未选中时隐藏标签 */
   hideLabelWhenNotSelected?: boolean;
   /** 极简模式：无背景/阴影/内边距 */
@@ -166,8 +176,10 @@ function BlockWrapper({
   defaultBlockWidth,
   blockX,
   blockY,
-  blockType,
   onPositionChange,
+  siblings,
+  onGuidesChange,
+  dragDisabled = false,
   hideLabelWhenNotSelected = false,
   minimal = false,
 }: BlockWrapperProps) {
@@ -245,9 +257,11 @@ function BlockWrapper({
     heightDragState.current = null;
   };
 
-  {/* 自由拖动标题栏鼠标按下：计算 block 相对于父容器的偏移，通过 document 级事件实现自由移动 */}
+  {/* 自由拖动标题栏鼠标按下：计算 block 相对于父容器的偏移，通过 document 级事件实现自由移动
+     - 拖动中调用 detectAlignment 做网格吸附 + 边缘对齐，并实时上报辅助线
+     - 按住 Alt 临时禁用吸附；dragDisabled（流式输出期间）完全禁止拖动 */}
   const handleMoveMouseDown = (e: React.MouseEvent) => {
-    if (!onPositionChange) return;
+    if (!onPositionChange || dragDisabled) return;
     // 只响应鼠标左键
     if (e.button !== 0) return;
     // 阻止文本选中 / 让点击选中
@@ -273,14 +287,24 @@ function BlockWrapper({
       ev.preventDefault();
       const dx = ev.clientX - moveDragState.current.startX;
       const dy = ev.clientY - moveDragState.current.startY;
-      const nextLeft = Math.max(0, moveDragState.current.startLeft + dx);
-      const nextTop = Math.max(0, moveDragState.current.startTop + dy);
-      if (el) {
-        el.style.left = `${nextLeft}px`;
-        el.style.top = `${nextTop}px`;
-      }
+      let nextLeft = Math.max(0, moveDragState.current.startLeft + dx);
+      let nextTop = Math.max(0, moveDragState.current.startTop + dy);
+      {/* 对齐吸附：网格 8px + 其他块边缘 4px 阈值，Alt 按下时跳过 */}
+      const current: BlockBounds = {
+        id: "dragging",
+        x: nextLeft,
+        y: nextTop,
+        width: el.offsetWidth,
+        height: el.offsetHeight,
+      };
+      const aligned = detectAlignment(current, siblings ?? [], ev.altKey);
+      nextLeft = aligned.position.x;
+      nextTop = aligned.position.y;
+      el.style.left = `${nextLeft}px`;
+      el.style.top = `${nextTop}px`;
+      onGuidesChange?.(aligned.guides);
     };
-    {/* 松手：读取最终位置，通过 onPositionChange 回调 commit */}
+    {/* 松手：读取最终位置，通过 onPositionChange 回调 commit，清空辅助线 */}
     const onUp = () => {
       if (!moveDragState.current) return;
       const cur = containerRef.current;
@@ -288,6 +312,7 @@ function BlockWrapper({
       const finalTop = cur ? parseFloat(cur.style.top || "0") : moveDragState.current.startTop;
       onPositionChange(Math.round(finalLeft), Math.round(finalTop));
       moveDragState.current = null;
+      onGuidesChange?.([]);
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
@@ -350,11 +375,11 @@ function BlockWrapper({
       </div>
       {(!hideLabelWhenNotSelected || selected) ? (
         <span
-          onMouseDown={onPositionChange ? handleMoveMouseDown : undefined}
+          onMouseDown={onPositionChange && !dragDisabled ? handleMoveMouseDown : undefined}
           className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium mb-3 ${labelBg} ${labelText} ${
-            onPositionChange ? "cursor-move" : ""
+            onPositionChange && !dragDisabled ? "cursor-move" : ""
           }`}
-          title={onPositionChange ? "按住拖动以自由移动" : undefined}
+          title={onPositionChange && !dragDisabled ? "按住拖动以自由移动（按住 Alt 临时关闭吸附）" : undefined}
         >
           {label}
         </span>
@@ -402,6 +427,9 @@ interface CanvasBlocksProps {
   onUpdateBlock?: (index: number, patch: Record<string, unknown>) => void;
   selectedBlockIdx?: number | null;
   onSelectBlock?: (index: number | null) => void;
+  highlightBlockId?: string | null;
+  /** Agent 流式输出期间为 true：禁止拖动块，防止与落块位置冲突 */
+  isStreaming?: boolean;
 }
 
 {/* 类型守卫：判断 block 是否为 h1/h2/text 文本类型，并收窄类型以访问 content 属性 */}
@@ -730,9 +758,15 @@ export default function CanvasBlocks({
   onUpdateBlock,
   selectedBlockIdx,
   onSelectBlock,
+  highlightBlockId,
+  isStreaming = false,
 }: CanvasBlocksProps) {
   {/* AI 洞察弹窗状态：当前操作的 block 索引、加载中、错误信息和洞察列表 */}
   const [insightsModalBlockIdx, setInsightsModalBlockIdx] = useState<number | null>(null);
+  {/* 对齐辅助线：拖动中由 BlockWrapper 实时上报，松手清空 */}
+  const [guides, setGuides] = useState<AlignmentGuide[]>([]);
+  {/* 跨图表联动筛选：点击维度值时切换全局 filter */}
+  const toggleCrossFilter = useCrossFilterStore((s) => s.toggleFilter);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [insightsList, setInsightsList] = useState<
@@ -835,6 +869,23 @@ export default function CanvasBlocks({
     setPolishError(null);
   };
 
+  {/* 所有块的边界（画布坐标系），供拖动中的块做对齐吸附；无 width/height 的块用估算值 */}
+  const allBounds: BlockBounds[] = useMemo(
+    () =>
+      (blocks ?? []).map((b, i) => {
+        const d = b as Record<string, unknown>;
+        const hasXY = typeof d.x === "number" && typeof d.y === "number";
+        return {
+          id: `block_${i}`,
+          x: hasXY ? (d.x as number) : (i % 2) * 420,
+          y: hasXY ? (d.y as number) : Math.floor(i / 2) * 400,
+          width: typeof d.width === "number" ? (d.width as number) : 400,
+          height: typeof d.height === "number" ? (d.height as number) : estimateBlockHeight(b),
+        };
+      }),
+    [blocks],
+  );
+
   if (!blocks || blocks.length === 0) {
     return (
       <div className="text-center py-16 text-muted-foreground text-[13px]">
@@ -862,6 +913,8 @@ export default function CanvasBlocks({
         const onPosChange = onUpdateBlock
           ? (x: number, y: number) => onUpdateBlock(idx, { x, y })
           : undefined;
+        {/* 对齐吸附：其他块的边界 + 辅助线上报；流式输出期间禁拖 */}
+        const siblings = allBounds.filter((_, i) => i !== idx);
         const handleSelect = onSelectBlock
           ? () => onSelectBlock(isSelected ? null : idx)
           : undefined;
@@ -889,6 +942,9 @@ export default function CanvasBlocks({
                 blockY={blockY}
                 blockType="h1"
                 onPositionChange={onPosChange}
+                siblings={siblings}
+                onGuidesChange={setGuides}
+                dragDisabled={isStreaming}
                 hideLabelWhenNotSelected
               >
                 <div>
@@ -920,6 +976,9 @@ export default function CanvasBlocks({
                 blockY={blockY}
                 blockType="h2"
                 onPositionChange={onPosChange}
+                siblings={siblings}
+                onGuidesChange={setGuides}
+                dragDisabled={isStreaming}
                 hideLabelWhenNotSelected
               >
                 <div>
@@ -950,6 +1009,9 @@ export default function CanvasBlocks({
                 blockY={blockY}
                 blockType="text"
                 onPositionChange={onPosChange}
+                siblings={siblings}
+                onGuidesChange={setGuides}
+                dragDisabled={isStreaming}
               hideLabelWhenNotSelected
               extraToolbar={
                 <button
@@ -989,6 +1051,9 @@ export default function CanvasBlocks({
                 blockY={blockY}
                 blockType="image"
                 onPositionChange={onPosChange}
+                siblings={siblings}
+                onGuidesChange={setGuides}
+                dragDisabled={isStreaming}
             >
               <div>
                 <ImageBlockView
@@ -1023,6 +1088,9 @@ export default function CanvasBlocks({
                 blockY={blockY}
                 blockType="chart"
                 onPositionChange={onPosChange}
+                siblings={siblings}
+                onGuidesChange={setGuides}
+                dragDisabled={isStreaming}
                 defaultBlockWidth={400}
                 extraToolbar={
                   <button
@@ -1045,13 +1113,18 @@ export default function CanvasBlocks({
                       />
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0" style={blockH ? undefined : { height }}>
+                  <div
+                    id={block.blockId}
+                    className={`flex-1 min-h-0 rounded-[6px] ${highlightBlockId === block.blockId ? "ring-2 ring-ai" : ""}`}
+                    style={blockH ? undefined : { height }}
+                  >
                     <ChartRenderer
                       config={config}
                       result={result}
                       loading={loading}
                       renderer={renderer}
                       palette={block.palette}
+                      onDimensionClick={(dimension, value) => toggleCrossFilter({ field: dimension, value })}
                     />
                   </div>
                 </div>
@@ -1061,6 +1134,23 @@ export default function CanvasBlocks({
         }
         return null;
       })}
+
+      {/* 对齐辅助线：拖动中由 BlockWrapper 上报，垂直/水平 1px 主色实线 */}
+      {guides.map((g, i) =>
+        g.type === "vertical" ? (
+          <div
+            key={`gv-${i}`}
+            className="absolute bg-primary pointer-events-none z-50"
+            style={{ left: g.position, top: g.start, width: 1, height: g.end - g.start }}
+          />
+        ) : (
+          <div
+            key={`gh-${i}`}
+            className="absolute bg-primary pointer-events-none z-50"
+            style={{ top: g.position, left: g.start, height: 1, width: g.end - g.start }}
+          />
+        ),
+      )}
     </div>
 
     {insightsModalBlockIdx != null ? (

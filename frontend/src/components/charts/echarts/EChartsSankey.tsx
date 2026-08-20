@@ -17,6 +17,7 @@ interface EChartsSankeyProps {
   valueField: string
   colors?: string[]
   title?: string
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 /**
@@ -31,6 +32,7 @@ export default function EChartsSankey({
   valueField,
   colors = DEFAULT_COLORS,
   title,
+  onEvents,
 }: EChartsSankeyProps) {
   // 构建节点和链接
   const nodeSet = new Set<string>()
@@ -84,5 +86,5 @@ export default function EChartsSankey({
     ],
   }
 
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

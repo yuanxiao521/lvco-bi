@@ -64,6 +64,30 @@ class RedisCacheRepository:
         except Exception as e:
             logger.warning("redis_delete_failed key=%s error=%s", key, e)
 
+    def delete_by_prefix(self, prefix: str) -> int:
+        """按前缀清除 Redis 缓存（数据源变更/手动刷新时用）。
+
+        使用 SCAN 避免 KEYS 阻塞。
+        Returns:
+            实际删除的 key 数。
+        """
+        if not self._redis:
+            return 0
+        full_prefix = self._full_key(prefix)
+        deleted = 0
+        try:
+            for batch in self._redis.scan_iter(match=f"{full_prefix}*", count=200):
+                # batch 是 key 列表
+                if isinstance(batch, (list, tuple)):
+                    n = self._redis.delete(*batch)
+                    deleted += int(n) if n else 0
+                else:
+                    n = self._redis.delete(batch)
+                    deleted += int(n) if n else 0
+        except Exception as e:
+            logger.warning("redis_delete_by_prefix_failed prefix=%s error=%s", prefix, e)
+        return deleted
+
     def exists(self, key: str) -> bool:
         if not self._redis:
             return False

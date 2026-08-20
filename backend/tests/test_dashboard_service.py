@@ -88,16 +88,23 @@ def mock_db() -> MagicMock:
 
 
 @pytest.fixture
+def mock_cache_repo() -> MagicMock:
+    """注入的内存缓存 Mock（符合 CacheRepository 协议）。"""
+    return MagicMock()
+
+@pytest.fixture
 def service(
     mock_dashboard_repo: AsyncMock,
     mock_dashboard_chart_repo: AsyncMock,
     mock_db: MagicMock,
+    mock_cache_repo: MagicMock,
 ) -> DashboardService:
-    """构造 DashboardService，注入 Mock Repository。"""
+    """构造 DashboardService，注入 Mock Repository 与缓存仓库。"""
     return DashboardService(
         dashboard_repo=mock_dashboard_repo,
         dashboard_chart_repo=mock_dashboard_chart_repo,
         db=mock_db,
+        cache_repo=mock_cache_repo,
     )
 
 
@@ -399,6 +406,7 @@ class TestDashboardServiceGetData:
         service: DashboardService,
         mock_dashboard_repo: AsyncMock,
         mock_dashboard_chart_repo: AsyncMock,
+        mock_cache_repo: MagicMock,
     ) -> None:
         """测试 use_cache=True 时命中缓存直接返回。"""
         cached_payload = {
@@ -409,12 +417,11 @@ class TestDashboardServiceGetData:
         dashboard = _make_dashboard_mock()
         mock_dashboard_repo.get_by_id.return_value = dashboard
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            mock_cache.get.return_value = json.dumps(cached_payload)
+        mock_cache_repo.get.return_value = json.dumps(cached_payload)
 
-            result = await service.get_dashboard_data(
-                DASHBOARD_ID, USER_ID, use_cache=True
-            )
+        result = await service.get_dashboard_data(
+            DASHBOARD_ID, USER_ID, use_cache=True
+        )
 
         assert result == cached_payload
         mock_dashboard_chart_repo.get_chart_config.assert_not_called()
@@ -433,12 +440,9 @@ class TestDashboardServiceGetData:
         mock_dashboard_repo.get_by_id.return_value = dashboard
         mock_dashboard_chart_repo.get_chart_config.return_value = chart_config
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            mock_cache.get.return_value = None
-
-            result = await service.get_dashboard_data(
-                DASHBOARD_ID, USER_ID, use_cache=False
-            )
+        result = await service.get_dashboard_data(
+            DASHBOARD_ID, USER_ID, use_cache=False
+        )
 
         assert result is not None
         assert result["dashboard_id"] == str(DASHBOARD_ID)
@@ -461,12 +465,9 @@ class TestDashboardServiceGetData:
         mock_dashboard_repo.get_by_id.return_value = dashboard
         mock_dashboard_chart_repo.get_chart_config.return_value = None
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            mock_cache.get.return_value = None
-
-            result = await service.get_dashboard_data(
-                DASHBOARD_ID, USER_ID, use_cache=False
-            )
+        result = await service.get_dashboard_data(
+            DASHBOARD_ID, USER_ID, use_cache=False
+        )
 
         assert result is not None
         assert result["charts"] == []
@@ -494,15 +495,13 @@ class TestDashboardServiceGetData:
         mock_dashboard_repo.get_by_id.return_value = dashboard
         mock_dashboard_chart_repo.get_chart_config.return_value = chart_config
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            mock_cache.get.return_value = None
-            with patch(
-                "app.services.dashboard_service.execute_chart_query",
-                new=AsyncMock(side_effect=QueryEngineError("表不存在")),
-            ):
-                result = await service.get_dashboard_data(
-                    DASHBOARD_ID, USER_ID, use_cache=False
-                )
+        with patch(
+            "app.services.dashboard_service.execute_chart_query",
+            new=AsyncMock(side_effect=QueryEngineError("表不存在")),
+        ):
+            result = await service.get_dashboard_data(
+                DASHBOARD_ID, USER_ID, use_cache=False
+            )
 
         assert result is not None
         assert len(result["charts"]) == 1
@@ -534,15 +533,13 @@ class TestDashboardServiceGetData:
         query_result_mock = MagicMock()
         query_result_mock.model_dump.return_value = {"rows": [{"month": "2024-01", "sales": 1000}]}
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            mock_cache.get.return_value = None
-            with patch(
-                "app.services.dashboard_service.execute_chart_query",
-                new=AsyncMock(return_value=query_result_mock),
-            ):
-                result = await service.get_dashboard_data(
-                    DASHBOARD_ID, USER_ID, use_cache=False
-                )
+        with patch(
+            "app.services.dashboard_service.execute_chart_query",
+            new=AsyncMock(return_value=query_result_mock),
+        ):
+            result = await service.get_dashboard_data(
+                DASHBOARD_ID, USER_ID, use_cache=False
+            )
 
         assert result is not None
         assert len(result["charts"]) == 1
@@ -578,12 +575,12 @@ class TestDashboardServiceRefresh:
         self,
         service: DashboardService,
         mock_dashboard_repo: AsyncMock,
+        mock_cache_repo: MagicMock,
     ) -> None:
         """测试刷新成功（删除缓存）。"""
         mock_dashboard_repo.get_by_id.return_value = _make_dashboard_mock()
 
-        with patch("app.services.cache_service.cache") as mock_cache:
-            result = await service.refresh(DASHBOARD_ID, USER_ID)
+        result = await service.refresh(DASHBOARD_ID, USER_ID)
 
-        mock_cache.delete.assert_called_once_with(f"dashboard:{DASHBOARD_ID}:data")
+        mock_cache_repo.delete.assert_called_once_with(f"dashboard:{DASHBOARD_ID}:data")
         assert result is True

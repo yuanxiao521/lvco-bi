@@ -9,6 +9,7 @@ interface EChartsHeatmapProps {
   yLabel?: string
   title?: string
   palette?: string[]
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 function formatNumber(v: number): string {
@@ -20,7 +21,7 @@ function formatNumber(v: number): string {
 }
 
 export default function EChartsHeatmap({
-  xFields, yFields, matrix, xLabel, yLabel, title, palette,
+  xFields, yFields, matrix, xLabel, yLabel, title, palette, onEvents,
 }: EChartsHeatmapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [, setTick] = useState(0)
@@ -197,6 +198,7 @@ export default function EChartsHeatmap({
         option={option}
         style={{ width: '100%', height: '100%' }}
         notMerge
+        onEvents={onEvents}
       />
     </div>
   )

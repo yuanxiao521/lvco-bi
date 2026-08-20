@@ -8,6 +8,7 @@ interface EChartsScatterProps {
   colors?: string[]
   color?: string
   title?: string
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 /**
@@ -23,6 +24,7 @@ export default function EChartsScatter({
   colors = DEFAULT_COLORS,
   color,
   title,
+  onEvents,
 }: EChartsScatterProps) {
   const y = yField ?? ''
   const points = data.map(d => [Number(d[xField]) || 0, Number(d[y]) || 0])
@@ -56,5 +58,5 @@ export default function EChartsScatter({
       },
     ],
   }
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

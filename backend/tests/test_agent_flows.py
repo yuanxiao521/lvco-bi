@@ -350,4 +350,12 @@ def test_tool_registry_includes_stats_analyzer():
 
     names = [t["function"]["name"] for t in ToolRegistry.schemas()]
     assert "stats_analyzer" in names
-    assert len(names) == 11
+    for tool in (
+        "add_chart_block",
+        "add_text_block",
+        "update_chart_block",
+        "remove_block",
+        "arrange_layout",
+    ):
+        assert tool in names
+    assert len(names) == 16

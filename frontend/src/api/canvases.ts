@@ -55,9 +55,13 @@ export async function updateCanvas(
 
 export async function executeChartQuery(
   canvasId: string,
-  config: ChartQueryConfig
+  config: ChartQueryConfig,
+  options?: { force?: boolean }
 ): Promise<QueryResult> {
-  const response = await apiClient.post(`/canvases/${canvasId}/query`, config);
+  // force=true 时跳过缓存读和缓存写（用户手动刷新用）
+  const response = await apiClient.post(`/canvases/${canvasId}/query`, config, {
+    params: options?.force ? { force: true } : undefined,
+  });
   return unwrapApi<QueryResult>(response.data);
 }
 

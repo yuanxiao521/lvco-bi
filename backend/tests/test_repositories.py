@@ -82,6 +82,33 @@ class TestInMemoryCacheRepository:
         assert self.cache.get("foo") == "bar"
         assert self.cache.exists("foo") is True
 
+    def test_delete_by_prefix_removes_matching_keys(self) -> None:
+        """按前缀删除：只删除匹配的 key，其他 key 保留。"""
+        self.cache.set("query:ds1:user1:hash_a", "v1")
+        self.cache.set("query:ds1:user1:hash_b", "v2")
+        self.cache.set("query:ds2:user1:hash_a", "v3")
+        self.cache.set("dashboard:1:data", "v4")
+        deleted = self.cache.delete_by_prefix("query:ds1:")
+        assert deleted == 2
+        # ds1 的缓存被清
+        assert self.cache.get("query:ds1:user1:hash_a") is None
+        assert self.cache.get("query:ds1:user1:hash_b") is None
+        # ds2 和 dashboard 不受影响
+        assert self.cache.get("query:ds2:user1:hash_a") == "v3"
+        assert self.cache.get("dashboard:1:data") == "v4"
+
+    def test_delete_by_prefix_no_match_returns_zero(self) -> None:
+        self.cache.set("a", "1")
+        assert self.cache.delete_by_prefix("nope_") == 0
+        assert self.cache.get("a") == "1"
+
+    def test_delete_by_prefix_ignores_expired_entries(self) -> None:
+        """已过期的条目不会被计入删除数，也不影响计数。"""
+        self.cache.set("foo:1", "v1", ttl=1)
+        time.sleep(1.1)
+        deleted = self.cache.delete_by_prefix("foo:")
+        assert deleted == 0
+
 
 # ── Protocol runtime_checkable ────────────────────────────────────────────────
 

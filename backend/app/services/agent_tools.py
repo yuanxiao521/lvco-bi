@@ -43,13 +43,23 @@ _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
         "insight",
         "clean_suggest",
         "stats_analyzer",
+        "add_chart_block",
+        "add_text_block",
+        "update_chart_block",
+        "remove_block",
+        "arrange_layout",
     },
     ConversationPhase.GENERATING: {
         "render_chart",
         "validate_chart",
         "recommend_charts",
+        "add_chart_block",
+        "add_text_block",
+        "update_chart_block",
+        "remove_block",
+        "arrange_layout",
     },
-    ConversationPhase.REPORTING: {"polish_text"},
+    ConversationPhase.REPORTING: {"polish_text", "add_text_block", "add_chart_block", "update_chart_block", "remove_block"},
 }
 
 
@@ -1626,4 +1636,6 @@ ToolRegistry.register(clean_suggest_tool)
 ToolRegistry.register(recommend_charts_tool)
 ToolRegistry.register(polish_text_tool)
 ToolRegistry.register(stats_analyzer_tool)
+# 画布操作工具在 app.services.canvas_tools 自身底部注册（避免反向 import 造成循环依赖）。
+# 由 app.services.ai_service 导入 canvas_tools 保证进程启动即注册。
 

@@ -132,36 +132,176 @@ async def run_agent_mock(question: dict[str, Any]) -> AttemptTrace:
         user_msg=question["query"],
     )
 
-    # 模拟一次成功执行：调用 query_datasource + render_chart
-    attempt.events = [
-        {"type": "tool_call", "name": "list_datasources", "args": {}},
-        {"type": "tool_result", "name": "list_datasources", "result": '{"items": []}'},
-        {
-            "type": "tool_call",
-            "name": "query_datasource",
-            "args": {"sql": question.get("expected_sql_template", "SELECT 1")},
-        },
-        {"type": "tool_result", "name": "query_datasource", "result": '{"rows": []}'},
-        {
-            "type": "tool_call",
-            "name": "render_chart",
-            "args": {"chart_type": question.get("expected_chart_type", "bar")},
-        },
-        {
-            "type": "chart",
-            "chart_type": question.get("expected_chart_type", "bar"),
-            "option": {},
-        },
-        {
-            "type": "text",
-            "content": f"分析结果：{question.get('expected_keywords', ['数据'])[0]} 已生成。",
-        },
-        {"type": "done"},
-    ]
-    attempt.final_response = attempt.events[-2]["content"]
-    attempt.iteration_count = 2
+    # 画布题走 canvas_action 协议；非画布题走单图 render_chart 协议。
+    if question.get("category") == "canvas":
+        attempt.events = _build_mock_canvas_events(question)
+    else:
+        # 模拟一次成功执行：调用 query_datasource + render_chart
+        attempt.events = [
+            {"type": "tool_call", "name": "list_datasources", "args": {}},
+            {"type": "tool_result", "name": "list_datasources", "result": '{"items": []}'},
+            {
+                "type": "tool_call",
+                "name": "query_datasource",
+                "args": {"sql": question.get("expected_sql_template", "SELECT 1")},
+            },
+            {"type": "tool_result", "name": "query_datasource", "result": '{"rows": []}'},
+            {
+                "type": "tool_call",
+                "name": "render_chart",
+                "args": {"chart_type": question.get("expected_chart_type", "bar")},
+            },
+            {
+                "type": "chart",
+                "chart_type": question.get("expected_chart_type", "bar"),
+                "option": {},
+            },
+            {
+                "type": "text",
+                "content": f"分析结果：{question.get('expected_keywords', ['数据'])[0]} 已生成。",
+            },
+            {"type": "done"},
+        ]
+    attempt.final_response = _extract_mock_final_response(attempt.events, question)
+    attempt.iteration_count = sum(1 for e in attempt.events if e.get("type") == "tool_call")
 
     return attempt
+
+
+def _build_mock_canvas_events(question: dict[str, Any]) -> list[dict[str, Any]]:
+    """为画布题构造符合 canvas_action 协议的 tool_result 序列。
+
+    协议：add_text_block / add_chart_block / arrange_layout（最后一个出现以触发收尾）
+    """
+    expected_types: list[str] = list(question.get("expected_chart_types") or [])
+    if not expected_types:
+        # 退化：用 expected_chart_type 兜底
+        expected_types = [question.get("expected_chart_type", "bar")]
+    requires_narrative = bool(question.get("requires_narrative"))
+    requires_arrange = bool(question.get("requires_arrange_layout"))
+
+    events: list[dict[str, Any]] = [
+        {"type": "tool_call", "name": "list_datasources", "args": {}},
+        {"type": "tool_result", "name": "list_datasources", "result": '{"items": []}'},
+    ]
+
+    # 叙事先于图表（顺序正确，可过 block_order_ok）
+    if requires_narrative:
+        events.extend([
+            {
+                "type": "tool_call",
+                "name": "add_text_block",
+                "args": {"block_type": "h1", "content": "销售分析报告"},
+            },
+            {
+                "type": "tool_result",
+                "name": "add_text_block",
+                "result": json.dumps({
+                    "canvas_action": {
+                        "action": "add_text_block",
+                        "block": {"type": "h1", "content": "销售分析报告"},
+                    }
+                }),
+            },
+        ])
+
+    # 多图表块
+    for i, ct in enumerate(expected_types):
+        events.extend([
+            {
+                "type": "tool_call",
+                "name": "add_chart_block",
+                "args": {"chart_type": ct, "title": f"{question['id']} 图表{i+1}"},
+            },
+            {
+                "type": "tool_result",
+                "name": "add_chart_block",
+                "result": json.dumps({
+                    "canvas_action": {
+                        "action": "add_chart_block",
+                        "block": {
+                            "chartType": ct,
+                            "title": f"{question['id']} 图表{i+1}",
+                            "datasourceId": "ds-1",
+                            "queryConfig": {"sql": "SELECT 1"},
+                            "columns": [],
+                            "rows": [],
+                        },
+                    }
+                }),
+            },
+        ])
+
+    # 收尾叙事（仅当要求 narrative，给块顺序留下缓冲）
+    if requires_narrative:
+        events.extend([
+            {
+                "type": "tool_call",
+                "name": "add_text_block",
+                "args": {"block_type": "text", "content": "综合结论：以上从趋势、占比、TOP 多角度展开。"},
+            },
+            {
+                "type": "tool_result",
+                "name": "add_text_block",
+                "result": json.dumps({
+                    "canvas_action": {
+                        "action": "add_text_block",
+                        "block": {
+                            "type": "text",
+                            "content": "综合结论：以上从趋势、占比、TOP 多角度展开。",
+                        },
+                    }
+                }),
+            },
+        ])
+
+    # arrange_layout 放在末尾 → 满足"末尾 1/3 窗口"
+    if requires_arrange:
+        events.extend([
+            {"type": "tool_call", "name": "arrange_layout", "args": {"layout": "grid-2col"}},
+            {
+                "type": "tool_result",
+                "name": "arrange_layout",
+                "result": json.dumps({
+                    "canvas_action": {
+                        "action": "arrange_layout",
+                        "layout": {"columns": 2, "gap": 16},
+                    }
+                }),
+            },
+        ])
+
+    events.append({"type": "done"})
+    return events
+
+
+def _extract_mock_final_response(events: list[dict[str, Any]], question: dict[str, Any]) -> str:
+    """Mock 模式下的最终回复：文本块或关键词兜底。"""
+    for e in reversed(events):
+        if e.get("type") == "text":
+            return e.get("content", "")
+        if e.get("type") == "tool_result":
+            res = e.get("result")
+            if isinstance(res, str):
+                try:
+                    parsed = json.loads(res)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    block = (parsed.get("canvas_action") or {}).get("block") or {}
+                    if block.get("content"):
+                        return str(block["content"])
+    kws = question.get("expected_keywords") or ["数据"]
+    return f"分析结果：{kws[0]} 已生成。"
+
+
+def question_expected_types(q: dict[str, Any]) -> list[str]:
+    """从 dataset 中提取期望的图表类型集合（兼容 expected_chart_types / expected_chart_type）。"""
+    if q.get("expected_chart_types"):
+        return [str(t) for t in q["expected_chart_types"]]
+    if q.get("expected_chart_type"):
+        return [str(q["expected_chart_type"])]
+    return []
 
 
 def build_sql_executor(attempt: AttemptTrace):
@@ -263,6 +403,58 @@ def render_markdown_report(
         resp = sum(1 for r in rs if r.final_response_valid)
         lines.append(f"| {cat} | {n} | {sql} | {tool} | {resp} |")
     lines.append("")
+
+    # ---- 画布专项章节 ----
+    if summary.get("canvas_total", 0) > 0:
+        lines.append("## 画布专项")
+        lines.append("")
+        lines.append(f"画布题共 **{summary['canvas_total']}** 道，覆盖多图表 / 叙事 / 布局三维度。")
+        lines.append("")
+        lines.append("| 子项 | 含义 | 通过率 |")
+        lines.append("|---|---|---|")
+        lines.append(
+            f"| canvas_score | 5 子项全部通过 | **{summary['canvas_score_rate'] * 100:.1f}%** |"
+        )
+        lines.append(
+            f"| chart_count | 实际图表数 ≥ 期望最小图表数 | {summary['canvas_chart_count_rate'] * 100:.1f}% |"
+        )
+        lines.append(
+            f"| chart_types | 实际图表类型 ≥ 50% 覆盖期望集合 | {summary['canvas_chart_types_rate'] * 100:.1f}% |"
+        )
+        lines.append(
+            f"| narrative | 含 h1/h2/text 叙事块 | {summary['canvas_narrative_rate'] * 100:.1f}% |"
+        )
+        lines.append(
+            f"| arrange_layout | arrange_layout 出现在末尾 1/3 窗口 | {summary['canvas_arrange_layout_rate'] * 100:.1f}% |"
+        )
+        lines.append(
+            f"| block_order | 叙事块先于最早图表块 | {summary['canvas_block_order_rate'] * 100:.1f}% |"
+        )
+        lines.append("")
+
+        # 画布题逐题明细（仅在数量适中时展示）
+        canvas_results = [r for r in results if r.is_canvas_question]
+        if canvas_results:
+            lines.append("### 画布题明细")
+            lines.append("")
+            lines.append("| 题目 | 期望类型 | 实际类型 | 图表数 | 通过子项 | 总分 |")
+            lines.append("|---|---|---|---|---|---|")
+            for r in canvas_results:
+                q = next((q for q in dataset if q["id"] == r.question_id), {})
+                exp = ",".join(question_expected_types(q))
+                act = ",".join(r.canvas_actual_chart_types) or "-"
+                subs = (
+                    ("count✓ " if r.canvas_chart_count_ok else "count✗ ")
+                    + ("types✓ " if r.canvas_chart_types_ok else "types✗ ")
+                    + ("narr✓ " if r.canvas_narrative_present else "narr✗ ")
+                    + ("arr✓ " if r.canvas_arrange_layout_ok else "arr✗ ")
+                    + ("order✓" if r.canvas_block_order_ok else "order✗")
+                )
+                lines.append(
+                    f"| {r.question_id} | {exp or '-'} | {act} | {r.canvas_actual_chart_count} | {subs} | "
+                    f"{'✅' if r.canvas_score else '❌'} |"
+                )
+            lines.append("")
 
     lines.append("## 失败案例（top 10）")
     lines.append("")

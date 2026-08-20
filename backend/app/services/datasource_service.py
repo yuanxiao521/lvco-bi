@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
@@ -21,9 +22,33 @@ from app.utils.crypto import decrypt_value, get_encryption_key
 
 
 class DataSourceService:
-    def __init__(self, datasource_repo: DataSourceRepository) -> None:
+    def __init__(
+        self,
+        datasource_repo: DataSourceRepository,
+        cache_repo: "FallbackCacheRepository | None" = None,
+    ) -> None:
         self.datasource_repo = datasource_repo
         self.db = datasource_repo.db
+        self.cache_repo = cache_repo
+
+    def _invalidate_query_cache(self, datasource_id) -> None:
+        """数据源变更后清掉该数据源的所有查询缓存（按前缀）。"""
+        if self.cache_repo is None:
+            return
+        try:
+            n = self.cache_repo.delete_by_prefix(f"query:{datasource_id}:")
+            if n > 0:
+                _log = logging.getLogger("lvco.datasources")
+                _log.info(
+                    "query_cache_invalidated datasource_id=%s deleted=%s",
+                    str(datasource_id), n,
+                )
+        except Exception as e:  # noqa: BLE001
+            # 缓存清理失败不影响主链路
+            logging.getLogger("lvco.datasources").warning(
+                "query_cache_invalidate_failed datasource_id=%s error=%s",
+                str(datasource_id), e,
+            )
 
     async def list_datasources(
         self,
@@ -311,6 +336,8 @@ class DataSourceService:
             ds.schema_meta = body.schema_meta
         await self.db.flush()
         await self.db.refresh(ds)
+        # schema 变化可能让字段映射失效，清掉该数据源查询缓存
+        self._invalidate_query_cache(datasource_id)
         return ds
 
     async def delete(self, datasource_id: UUID, user_id: UUID) -> bool:
@@ -326,6 +353,8 @@ class DataSourceService:
                 pass
 
         await self.datasource_repo.delete(ds)
+        # 数据源删除后清掉该数据源查询缓存
+        self._invalidate_query_cache(datasource_id)
         return True
 
     async def preview(

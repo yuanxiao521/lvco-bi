@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.duckdb_client import duckdb_client
 from app.models.datasource import DataSource, SourceType
+from app.repositories.protocols import CacheRepository
 from app.schemas.query import ChartQueryConfig, QueryResult
 from app.utils.crypto import decrypt_value, get_encryption_key
-from app.services.cache_service import cache
 
 ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT_DISTINCT"})
 ALLOWED_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "like"})
@@ -346,6 +346,8 @@ async def execute_chart_query(
     config: ChartQueryConfig,
     user_id: UUID,
     db: AsyncSession | None = None,
+    cache_repo: CacheRepository | None = None,
+    force: bool = False,
 ) -> QueryResult:
     """执行图表查询，返回结构化的查询结果。
 
@@ -361,6 +363,7 @@ async def execute_chart_query(
         config: 图表查询配置，包含维度、度量、筛选条件、图表类型、排序和限制。
         user_id: 用户的 UUID，用于数据隔离查询。
         db: 异步数据库会话，传入时执行数据源查询和 schema 同步；为 None 时仅执行缓存查询。
+        cache_repo: 缓存仓库；为 None 时使用默认的 fallback 缓存（优先 Redis，降级内存）。
 
     Returns:
         QueryResult 对象，包含列名列表、数据行、图表类型和查询耗时（毫秒）。
@@ -368,6 +371,9 @@ async def execute_chart_query(
     Raises:
         QueryEngineError: 数据源不存在、连接失败、字段无效或查询执行出错时抛出。
     """
+    if cache_repo is None:
+        from app.api.deps import get_cache_repository
+        cache_repo = get_cache_repository()
     # 先查询数据源以获取名称，用于生成可读的 schema_name
     datasource = None
     source_type: SourceType | None = None
@@ -436,10 +442,11 @@ async def execute_chart_query(
     config_dict = config.model_dump()
     config_hash = hashlib.md5(json.dumps(config_dict, sort_keys=True, default=str).encode()).hexdigest()
     cache_key = f"query:{datasource_id}:{user_id}:{config_hash}"
-    cached = cache.get(cache_key)
-    if cached:
-        data = json.loads(cached)
-        return QueryResult(**data)
+    if not force:
+        cached = cache_repo.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            return QueryResult(**data)
 
     measure_dicts = [m.model_dump() for m in config.measures]
     filter_dicts = [f.model_dump() for f in config.filters]
@@ -503,6 +510,7 @@ async def execute_chart_query(
     )
 
     # --- cache set ---
-    cache.set(cache_key, json.dumps(result.model_dump(mode="json"), default=str))
+    if not force:
+        cache_repo.set(cache_key, json.dumps(result.model_dump(mode="json"), default=str))
 
     return result

@@ -7,6 +7,7 @@ interface EChartsFunnelProps {
   valueField: string
   colors?: string[]
   title?: string
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 /**
@@ -21,6 +22,7 @@ export default function EChartsFunnel({
   valueField,
   colors = DEFAULT_COLORS,
   title,
+  onEvents,
 }: EChartsFunnelProps) {
   // 按 value 降序排序（漏斗宽 → 漏斗窄）
   const sortedData = [...data].sort(
@@ -63,5 +65,5 @@ export default function EChartsFunnel({
       },
     ],
   }
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

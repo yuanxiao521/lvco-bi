@@ -28,6 +28,7 @@ from app.repositories.fallback_cache import FallbackCacheRepository
 from app.repositories.in_memory_cache import InMemoryCacheRepository
 from app.repositories.notification_repository import SQLAlchemyNotificationRepository
 from app.repositories.protocols import (
+    CacheRepository,
     CanvasRepository,
     ChartConfigRepository,
     DashboardChartRepository,
@@ -167,12 +168,14 @@ def get_dashboard_service(
     dashboard_repo: DashboardRepository = Depends(get_dashboard_repository),
     dashboard_chart_repo: DashboardChartRepository = Depends(get_dashboard_chart_repository),
     db: AsyncSession = Depends(get_db),
+    cache_repo: CacheRepository = Depends(get_cache_repository),
 ) -> DashboardService:
     """获取仪表板服务实例。"""
     return DashboardService(
         dashboard_repo=dashboard_repo,
         dashboard_chart_repo=dashboard_chart_repo,
         db=db,
+        cache_repo=cache_repo,
     )
 
 
@@ -185,9 +188,10 @@ def get_report_service(
 
 def get_datasource_service(
     datasource_repo: DataSourceRepository = Depends(get_datasource_repository),
+    cache_repo: CacheRepository = Depends(get_cache_repository),
 ) -> DataSourceService:
-    """获取数据源服务实例。"""
-    return DataSourceService(datasource_repo=datasource_repo)
+    """获取数据源服务实例（带缓存仓库，变更时自动清缓存）。"""
+    return DataSourceService(datasource_repo=datasource_repo, cache_repo=cache_repo)
 
 
 def get_user_preference_service(

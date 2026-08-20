@@ -293,10 +293,12 @@ async def update_blocks(
 async def query_canvas(
     canvas_id: UUID,
     body: ChartQueryConfig,
+    force: bool = False,
     db: AsyncSession = Depends(get_db),
     service: CanvasService = Depends(get_canvas_service),
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
+    """画布图表查询。force=true 时跳过缓存读和缓存写（用户手动刷新用）。"""
     canvas = await service.get_by_id(canvas_id, current_user.id)
     if canvas is None:
         raise HTTPException(
@@ -340,6 +342,7 @@ async def query_canvas(
             config=body,
             user_id=current_user.id,
             db=db,
+            force=force,
         )
     except QueryEngineError as e:
         raise HTTPException(

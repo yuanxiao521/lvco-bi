@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { snapToGrid, detectAlignment } from '../useBlockAlignment';
 import type { BlockBounds } from '../useBlockAlignment';
 

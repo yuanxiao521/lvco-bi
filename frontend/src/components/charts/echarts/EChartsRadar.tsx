@@ -9,6 +9,7 @@ interface EChartsRadarProps {
   measureFields: MeasureFieldInfo[]
   colors?: string[]
   title?: string
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
 /** 清理维度名称：去前后空格，去掉"市/省/区"后缀避免重复；空值返回 null */
@@ -34,6 +35,7 @@ export default function EChartsRadar({
   measureFields,
   colors = DEFAULT_COLORS,
   title,
+  onEvents,
 }: EChartsRadarProps) {
   // 防御：空数据直接显示占位
   if (!Array.isArray(data) || data.length === 0 || !measureFields || measureFields.length === 0) {
@@ -159,7 +161,7 @@ export default function EChartsRadar({
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
       <div className="flex-1 min-h-0">
-        <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+        <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
       </div>
       {truncated ? (
         <div className="text-[10px] text-muted-foreground text-center pb-1">

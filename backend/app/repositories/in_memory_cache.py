@@ -56,3 +56,18 @@ class InMemoryCacheRepository:
         """返回所有未过期的 key（测试用）。"""
         now = time.time()
         return [k for k, v in self._store.items() if v.expire_at is None or v.expire_at > now]
+
+    def delete_by_prefix(self, prefix: str) -> int:
+        """按前缀清除所有匹配的缓存条目（数据源变更/手动刷新时用）。
+
+        Returns:
+            实际删除的条目数。
+        """
+        now = time.time()
+        keys_to_delete = [
+            k for k, v in self._store.items()
+            if k.startswith(prefix) and (v.expire_at is None or v.expire_at > now)
+        ]
+        for k in keys_to_delete:
+            del self._store[k]
+        return len(keys_to_delete)

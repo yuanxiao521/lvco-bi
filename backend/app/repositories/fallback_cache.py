@@ -34,6 +34,14 @@ class FallbackCacheRepository:
             self._redis.delete(key)
         self._memory.delete(key)
 
+    def delete_by_prefix(self, prefix: str) -> int:
+        """按前缀清除两个层（Redis + 内存）。"""
+        total = 0
+        if self._use_redis:
+            total += self._redis.delete_by_prefix(prefix)
+        total += self._memory.delete_by_prefix(prefix)
+        return total
+
     def exists(self, key: str) -> bool:
         if self._use_redis:
             return self._redis.exists(key)

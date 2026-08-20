@@ -13,13 +13,15 @@ interface EChartsBarProps {
   title?: string
   /** 堆叠模式 */
   stacked?: boolean
+  /** ECharts 事件绑定（如点击柱子做联动筛选） */
+  onEvents?: Record<string, (params: unknown) => void>
 }
 
-export default function EChartsBar({ data, xField, yField, measureFields, colors = DEFAULT_COLORS, color, title, stacked }: EChartsBarProps) {
+export default function EChartsBar({ data, xField, yField, measureFields, colors = DEFAULT_COLORS, color, title, stacked, onEvents }: EChartsBarProps) {
   // 多度量模式
   if (measureFields && measureFields.length > 0) {
     const option = buildMultiMeasureOption('bar', data, xField, measureFields, colors, title, stacked)
-    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+    return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
   }
 
   // 单度量模式（向后兼容）
@@ -35,5 +37,5 @@ export default function EChartsBar({ data, xField, yField, measureFields, colors
       itemStyle: { color: color || colors[0] },
     }],
   }
-  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge />
+  return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />
 }

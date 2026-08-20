@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.dashboard import Dashboard
 from app.models.dashboard_chart import DashboardChart
 from app.models.datasource import DatasourceStatus
-from app.repositories.protocols import DashboardRepository, DashboardChartRepository
+from app.repositories.protocols import DashboardRepository, DashboardChartRepository, CacheRepository
 from app.services.query_engine import QueryEngineError, execute_chart_query
 
 
@@ -23,10 +23,12 @@ class DashboardService:
         dashboard_repo: DashboardRepository,
         dashboard_chart_repo: DashboardChartRepository,
         db: AsyncSession,
+        cache_repo: CacheRepository | None = None,
     ) -> None:
         self.dashboard_repo = dashboard_repo
         self.dashboard_chart_repo = dashboard_chart_repo
         self.db = db  # 保留 db 用于 execute_chart_query
+        self.cache_repo = cache_repo
 
     async def create(self, user_id: UUID, title: str, description: str | None = None) -> Dashboard:
         return await self.dashboard_repo.create(user_id, title, description)
@@ -83,10 +85,9 @@ class DashboardService:
         if dashboard is None:
             return None
 
-        from app.services.cache_service import cache
         cache_key = f"dashboard:{dashboard_id}:data"
-        if use_cache:
-            cached = cache.get(cache_key)
+        if use_cache and self.cache_repo is not None:
+            cached = self.cache_repo.get(cache_key)
             if cached is not None:
                 return json.loads(cached)
 
@@ -117,6 +118,7 @@ class DashboardService:
                     config=query_config,
                     user_id=user_id,
                     db=self.db,
+                    cache_repo=self.cache_repo,
                 )
                 results.append({
                     "chartId": str(dc.id),
@@ -139,14 +141,14 @@ class DashboardService:
             "layout": dashboard.layout,
             "charts": results,
         }
-        if use_cache:
-            cache.set(cache_key, json.dumps(payload), ttl=dashboard.refresh_interval)
+        if use_cache and self.cache_repo is not None:
+            self.cache_repo.set(cache_key, json.dumps(payload), ttl=dashboard.refresh_interval)
         return payload
 
     async def refresh(self, dashboard_id: UUID, user_id: UUID) -> bool:
         dashboard = await self.get_by_id(dashboard_id, user_id)
         if dashboard is None:
             return False
-        from app.services.cache_service import cache
-        cache.delete(f"dashboard:{dashboard_id}:data")
+        if self.cache_repo is not None:
+            self.cache_repo.delete(f"dashboard:{dashboard_id}:data")
         return True

@@ -40,7 +40,7 @@ from app.schemas import (
     SuccessResponse,
 )
 from app.services.ai_service import AIService, VALID_CHART_TYPES
-from app.services.ai_prompts import CANVAS_SYSTEM
+from app.services.ai_prompts import CANVAS_AGENT_SYSTEM, CANVAS_SYSTEM
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 
 router = APIRouter(prefix="/ai", tags=["AI助手"])
@@ -1301,58 +1301,67 @@ async def canvas_ai_chat(
             detail={"code": "AI_NOT_CONFIGURED", "message": "请配置 OPENAI_API_KEY"},
         )
 
-    # Get datasource info
-    ds_result = await db.execute(
-        select(DataSource).where(
-            DataSource.id == body.datasource_id,
-            DataSource.user_id == current_user.id,
-        )
-    )
-    datasource = ds_result.scalar_one_or_none()
-    if not datasource:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "NOT_FOUND", "message": "数据源不存在"},
-        )
-
-    # Build table reference and field info
-    schema_name = duckdb_client.get_schema_name(current_user.id, body.datasource_id, datasource.name)
-
-    fields = (datasource.schema_meta.get("fields") or []) if isinstance(datasource.schema_meta, dict) else []
-    field_lines = []
-    for f in fields:
-        if isinstance(f, dict):
-            name = f.get("name", "")
-            dtype = f.get("data_type", "VARCHAR")
-            cat = f.get("category", "dimension")
-            field_lines.append(f"- {name} ({dtype}, {cat})")
-    field_info = "数据源字段：\n" + "\n".join(field_lines) if field_lines else ""
-
-    # Build table ref
-    from app.models.datasource import SourceType
-
-    if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
-        pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
-        table_ref = f'"{schema_name}".public."{pg_table}"'
-        # Ensure fresh connection
-        from app.utils.crypto import decrypt_value, get_encryption_key
-
+    # Get datasource info (optional — only if datasource_id provided)
+    datasource = None
+    table_ref = ""
+    field_info = ""
+    if body.datasource_id:
         try:
-            duckdb_client.execute(f'DETACH "{schema_name}"')
-        except Exception:
-            pass
-        conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
-        key = get_encryption_key()
-        if key and conn_info.get("password"):
-            conn_info["password"] = decrypt_value(conn_info["password"], key)
-        conn_info["user"] = conn_info.get("username", "postgres")
-        conn_info["database"] = conn_info.get("db_name", "")
-        from app.connectors.postgres_connector import postgres_connector as pg_conn
+            ds_uuid = uuid.UUID(body.datasource_id)
+        except (ValueError, TypeError):
+            ds_uuid = None
+        if ds_uuid:
+            ds_result = await db.execute(
+                select(DataSource).where(
+                    DataSource.id == ds_uuid,
+                    DataSource.user_id == current_user.id,
+                )
+            )
+            datasource = ds_result.scalar_one_or_none()
+            if not datasource:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "数据源不存在"},
+                )
 
-        attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-        duckdb_client.execute(attach_sql)
-    else:
-        table_ref = f'"{schema_name}"."data"'
+        # Build table reference and field info
+        schema_name = duckdb_client.get_schema_name(current_user.id, datasource.id, datasource.name)
+
+        fields = (datasource.schema_meta.get("fields") or []) if isinstance(datasource.schema_meta, dict) else []
+        field_lines = []
+        for f in fields:
+            if isinstance(f, dict):
+                name = f.get("name", "")
+                dtype = f.get("data_type", "VARCHAR")
+                cat = f.get("category", "dimension")
+                field_lines.append(f"- {name} ({dtype}, {cat})")
+        field_info = "数据源字段：\n" + "\n".join(field_lines) if field_lines else ""
+
+        # Build table ref
+        from app.models.datasource import SourceType
+
+        if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
+            pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
+            table_ref = f'"{schema_name}".public."{pg_table}"'
+            # Ensure fresh connection
+            from app.utils.crypto import decrypt_value, get_encryption_key
+
+            try:
+                duckdb_client.execute(f'DETACH "{schema_name}"')
+            except Exception:
+                pass
+            conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
+            key = get_encryption_key()
+            if key and conn_info.get("password"):
+                conn_info["password"] = decrypt_value(conn_info["password"], key)
+            conn_info["user"] = conn_info.get("username", "postgres")
+            conn_info["database"] = conn_info.get("db_name", "")
+            from app.connectors.postgres_connector import postgres_connector as pg_conn
+
+            attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+            duckdb_client.execute(attach_sql)
+        else:
+            table_ref = f'"{schema_name}"."data"'
 
     # Build canvas context
     canvas_ctx = ""
@@ -1377,156 +1386,159 @@ async def canvas_ai_chat(
         if not canvas_ctx.strip():
             canvas_ctx = "当前画布为空，你可以根据数据源字段自由推荐图表配置。\n"
 
-    system_prompt = CANVAS_SYSTEM.format(table_ref=table_ref)
+    # 组装 user_msg：表引用 + 字段信息 + 画布上下文，交给 agent_stream 统一编排
+    canvas_tools_note = (
+        "\n（你可以在画布上直接搭报告：用 add_text_block 写标题/叙事，"
+        "add_chart_block 建图，update_chart_block/remove_block 改删已有块。）"
+    )
+    if datasource:
+        user_msg_parts = [f"已连接数据源：{datasource.name}（FROM 用表引用：{table_ref}）"]
+    else:
+        user_msg_parts = ["当前未连接数据源，你可以与用户就其需求自由对话。"]
+    if field_info:
+        user_msg_parts.append(field_info)
+    if canvas_ctx:
+        user_msg_parts.append(canvas_ctx.strip())
+    user_msg_parts.append(f"用户问题：{body.message}")
+    user_msg = "\n".join(user_msg_parts) + canvas_tools_note
 
-    # Build set of available field names for validation
-    available_fields: set[str] = set()
-    for f in fields:
-        if isinstance(f, dict):
-            name = f.get("name", "")
-            if name:
-                available_fields.add(name)
-                available_fields.add(name.lower())
-
-    # Build messages
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"{field_info}\n{canvas_ctx}\n用户问题：{body.message}"},
-    ]
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
     async def event_generator():
+        from app.schemas import AISessionResponse
+
+        ai_service = AIService(LLMClient(settings))
         full_content = ""
-        sql_has_error = False  # track if SQL execution failed
+        session_id: uuid.UUID | None = None
         try:
-            llm_client = LLMClient(settings)
-
-            # ── 第一轮：LLM 流式回复（可能含 SQL / 图表配置）──
-            async for token in llm_client.stream_chat(messages, temperature=0.5):
-                full_content += token
-                yield f"data: {json.dumps({'type': 'message', 'delta': token}, ensure_ascii=False)}\n\n"
-
-            prev_assistant = full_content  # 最近一次助手回复（供后续轮次拼接上下文）
-
-            # ── SQL 执行 + 同轮自纠错（≤_CANVAS_MAX_RETRIES 次修复）──
-            parsed_sql = None
-            sql_ok = False
-            sql = _extract_sql_block(full_content)
-            if sql:
-                for attempt in range(_CANVAS_MAX_RETRIES + 1):
-                    try:
-                        # 共享工具：QueryDatasourceTool（L3 三层防护 + ATTACH + 失败 hint 回传）
-                        from app.services.agent_tools import QueryDatasourceTool
-                        tool_result = await QueryDatasourceTool().execute(
-                            datasource_id=body.datasource_id,
-                            sql=sql,
-                            user_id=str(current_user.id),
-                            db_session=db,
+            # ---- 1. 解析 / 创建会话 ----
+            if body.session_id:
+                try:
+                    sid_uuid = uuid.UUID(body.session_id)
+                except (ValueError, TypeError):
+                    sid_uuid = None
+                if sid_uuid:
+                    sess = (
+                        await db.execute(
+                            select(AISession).where(
+                                AISession.id == sid_uuid,
+                                AISession.user_id == current_user.id,
+                            )
                         )
-                        parsed_sql = json.loads(tool_result)
-                    except Exception as e:
-                        parsed_sql = {"error": str(e)}
-                    if "error" not in parsed_sql:
-                        sql_ok = True
-                        break
-                    sql_has_error = True
-                    if attempt < _CANVAS_MAX_RETRIES:
-                        hint = parsed_sql.get("hint") or ""
-                        _log.warning("Canvas SQL retry attempt=%d error=%s", attempt + 1, str(parsed_sql.get("error"))[:200])
-                        messages.append({"role": "assistant", "content": prev_assistant})
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"你刚才的 SQL 执行失败了：{parsed_sql.get('error')}\n"
-                                f"提示：{hint}\n"
-                                "请重新生成修正后的 SQL（只输出 ```sql 代码块，不要解释或补充其他内容）。"
-                            ),
-                        })
-                        fix_text = ""
-                        async for token in llm_client.stream_chat(messages, temperature=0.3):
-                            fix_text += token
-                            yield f"data: {json.dumps({'type': 'message', 'delta': token}, ensure_ascii=False)}\n\n"
-                        prev_assistant = fix_text
-                        sql = _extract_sql_block(fix_text)
-                        if not sql:
-                            break
+                    ).scalar_one_or_none()
+                    if sess:
+                        session_id = sess.id
 
-            # ── SQL 结果事件（成功发结果 / 全部失败发错误）──
-            if sql_ok and parsed_sql:
-                yield f"data: {json.dumps({'type': 'query_result', 'columns': parsed_sql.get('columns', []), 'rows': parsed_sql.get('rows', [])}, ensure_ascii=False, default=str)}\n\n"
-            elif sql_has_error:
-                friendly_msg = _sanitize_db_error((parsed_sql or {}).get("error", "查询失败"))
-                hint = (parsed_sql or {}).get("hint") or ""
-                if hint:
-                    hint_summary = hint.split("\n")[0][:120]
-                    friendly_msg = f"{friendly_msg}。提示：{hint_summary}"
-                yield f"data: {json.dumps({'type': 'query_error', 'message': friendly_msg}, ensure_ascii=False)}\n\n"
+            if session_id is None and body.message.strip():
+                sess = AISession(
+                    user_id=current_user.id,
+                    title="画布对话",
+                )
+                db.add(sess)
+                await db.flush()
+                await db.refresh(sess)
+                session_id = sess.id
+                yield _sse({
+                    "type": "session_created",
+                    "session_id": str(session_id),
+                })
 
-            # ── 图表配置：优先取已有回复；查询成功但无配置时回传结果让 LLM 生成（数据驱动 + 自纠错）──
-            if not sql_has_error:
-                chart_source_text = prev_assistant
-                if sql_ok and parsed_sql and _extract_chart_config(chart_source_text) is None:
-                    rows_head = (parsed_sql.get("rows") or [])[:20]
-                    if messages[-1].get("role") != "assistant":
-                        messages.append({"role": "assistant", "content": chart_source_text})
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "查询已成功，结果摘要：\n"
-                            + json.dumps({
-                                "columns": parsed_sql.get("columns", []),
-                                "rows": rows_head,
-                                "row_count": len(parsed_sql.get("rows") or []),
-                            }, ensure_ascii=False, default=str)
-                            + "\n请基于以上真实数据，输出 **1 个**最合适的图表配置（```json 代码块，chart_type/dimensions/measures/filters，chart_type 用英文代码）。"
-                        ),
-                    })
-                    chart_source_text = ""
-                    async for token in llm_client.stream_chat(messages, temperature=0.4):
-                        chart_source_text += token
-                        yield f"data: {json.dumps({'type': 'message', 'delta': token}, ensure_ascii=False)}\n\n"
-                    prev_assistant = chart_source_text
+            # ---- 2. 保存用户消息 ----
+            if session_id:
+                user_msg_model = AIMessage(
+                    session_id=session_id,
+                    role=AIMessageRole.user,
+                    content=body.message,
+                )
+                db.add(user_msg_model)
+                await db.flush()
+                # Auto-title
+                if session_id:
+                    sess_result = await db.execute(
+                        select(AISession).where(AISession.id == session_id)
+                    )
+                    sess = sess_result.scalar_one_or_none()
+                    if sess and sess.title in (None, "新对话", "画布对话"):
+                        title = body.message[:30] + ("..." if len(body.message) > 30 else "")
+                        sess.title = title
+                        db.add(sess)
+                        await db.flush()
 
-                chart_cfg = _extract_chart_config(chart_source_text)
-                for attempt in range(_CANVAS_MAX_RETRIES + 1):
-                    if chart_cfg is None:
-                        break  # LLM 未给配置（用户没要图表）
-                    # 共享校验器：validate_chart_config（与 Agent render_chart 校验同一实现）
-                    from app.services.agent_tools import validate_chart_config
-                    v_result = validate_chart_config(chart_cfg, available_fields)
-                    if v_result["valid"]:
-                        yield f"data: {json.dumps({'type': 'chart_config', 'config': chart_cfg}, ensure_ascii=False)}\n\n"
-                        break
-                    err_msg = "；".join(v_result["errors"])
-                    if attempt < _CANVAS_MAX_RETRIES:
-                        _log.warning("Canvas chart retry attempt=%d errors=%s", attempt + 1, err_msg)
-                        if messages[-1].get("role") != "assistant":
-                            messages.append({"role": "assistant", "content": prev_assistant})
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"你的图表配置校验失败：{err_msg}\n"
-                                "请修正后重新输出 **1 个**图表配置（```json 代码块，字段名必须与数据源字段完全一致）。"
-                            ),
-                        })
-                        chart_source_text = ""
-                        async for token in llm_client.stream_chat(messages, temperature=0.3):
-                            chart_source_text += token
-                            yield f"data: {json.dumps({'type': 'message', 'delta': token}, ensure_ascii=False)}\n\n"
-                        prev_assistant = chart_source_text
-                        chart_cfg = _extract_chart_config(chart_source_text)
-                    else:
-                        yield f"data: {json.dumps({'type': 'chart_config_error', 'message': err_msg}, ensure_ascii=False)}\n\n"
-                        break
+            # ---- 3. 加载历史（最近 6 轮） ----
+            history: list[dict] = []
+            if session_id:
+                prior_msgs = (
+                    await db.execute(
+                        select(AIMessage)
+                        .where(AIMessage.session_id == session_id)
+                        .order_by(AIMessage.created_at.desc())
+                        .limit(12)
+                    )
+                ).scalars().all()
+                prior_msgs.reverse()
+                for pm in prior_msgs:
+                    if pm.role == AIMessageRole.assistant:
+                        # 跳过刚保存的当前 user_msg 后的 assistant 消息（尚未生成）
+                        continue
+                    history.append({"role": pm.role.value, "content": pm.content})
 
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            # ---- 4. Agent 流式执行 ----
+            async for event in ai_service.agent_stream(
+                user_id=str(current_user.id),
+                user_msg=user_msg,
+                history=history,
+                db_session=db,
+                initial_phase="selecting",
+                system_prompt_override=CANVAS_AGENT_SYSTEM,
+            ):
+                ev_type = event.get("type")
+                if ev_type == "text":
+                    delta = event.get("content", "")
+                    full_content += delta
+                    yield _sse({"type": "message", "delta": delta})
+                elif ev_type == "tool_call":
+                    yield _sse({"type": "tool_call", "name": event.get("name", ""), "args": event.get("args", {})})
+                elif ev_type == "tool_result":
+                    name = event.get("name", "")
+                    result_raw = event.get("result", "")
+                    yield _sse({"type": "tool_result", "name": name, "result": result_raw})
+                    try:
+                        r = json.loads(result_raw) if isinstance(result_raw, str) else {}
+                        action = r.get("canvas_action") if isinstance(r, dict) else None
+                        if isinstance(action, dict):
+                            yield _sse({"type": "canvas_action", **action})
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                elif ev_type == "chart":
+                    chart_type = event.get("chart_type")
+                    option = event.get("option")
+                    if option is not None:
+                        yield _sse({"type": "chart", "chart_type": chart_type, "option": option})
+                elif ev_type == "status":
+                    yield _sse({"type": "step", "title": event.get("message", ""), "status": "running"})
+                elif ev_type == "error":
+                    yield _sse({"type": "error", "message": event.get("message", "服务异常")})
+                elif ev_type == "done":
+                    yield _sse({"type": "done"})
+
+            # ---- 5. 保存助手消息 ----
+            if session_id and full_content.strip():
+                assistant_msg = AIMessage(
+                    session_id=session_id,
+                    role=AIMessageRole.assistant,
+                    content=full_content,
+                )
+                db.add(assistant_msg)
+                await db.commit()
 
         except AINotConfiguredError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'AI 未配置'}, ensure_ascii=False)}\n\n"
+            yield _sse({"type": "error", "message": "AI 未配置"})
         except AIUpstreamError as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+            yield _sse({"type": "error", "message": str(e)})
         except Exception as e:
             _log.exception("Canvas AI chat error")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'服务异常: {str(e)}'}, ensure_ascii=False)}\n\n"
+            yield _sse({"type": "error", "message": f"服务异常: {str(e)}"})
 
     return StreamingResponse(
         event_generator(),

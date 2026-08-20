@@ -19,6 +19,8 @@ from app.services.observability import (
     observe_llm_call,
     observe_tool_call,
 )
+# 导入画布操作工具，确保进程启动即注册到 ToolRegistry
+import app.services.canvas_tools  # noqa: E401,F401
 
 log = logging.getLogger("lvco.ai_service")
 
@@ -844,6 +846,7 @@ class AIService:
         history: list[dict[str, str]],
         db_session,
         initial_phase: str = "selecting",
+        system_prompt_override: str | None = None,
     ) -> AsyncIterator[dict]:
         """单 Agent 工具调用模式：Phase 状态机（SELECTING→ANALYZING→GENERATING→REPORTING）+ ToolRegistry。
 
@@ -971,7 +974,7 @@ class AIService:
         ) as agent_trace:
 
             from app.services.context_utils import compress_history
-            messages: list[dict] = [{"role": "system", "content": AGENT_SYSTEM}]
+            messages: list[dict] = [{"role": "system", "content": system_prompt_override or AGENT_SYSTEM}]
             # 历史消息压缩：保留最近 20 条；总长超限时把最早部分折叠为摘要行
             for h in (history or [])[-20:]:
                 if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
