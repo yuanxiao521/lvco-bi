@@ -159,10 +159,12 @@ def _summarize_history_safe(history: list[dict] | None, max_chars: int = 2000) -
 class AgentOrchestrator:
     """多 Agent 协作编排器：PlannerAgent 骨架规划 → ExecutorAgent 逐步执行 → ReportAgent 报告。"""
  
-    def __init__(self, llm: LLMClient, db_session):
+    def __init__(self, llm: LLMClient, db_session, extra_plannable_tools: set[str] | None = None):
         self.llm = llm
         self.db_session = db_session
-        self.planner = PlannerAgent(llm)
+        # 按入口注入的额外可规划工具（如画布工具）→ 透传给 Planner，白名单 = orchestrator_safe ∪ extra
+        self.extra_plannable_tools: set[str] = set(extra_plannable_tools or ())
+        self.planner = PlannerAgent(llm, self.extra_plannable_tools)
         self.graph = self._build_graph()
         logger.info("AgentOrchestrator（多 Agent 协作版）初始化完成")
  

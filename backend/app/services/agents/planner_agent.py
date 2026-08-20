@@ -134,9 +134,11 @@ def _infer_table_description(ds: dict) -> str:
 class PlannerAgent(BaseAgent):
     """任务规划 Agent：分析用户意图，动态生成工具调用计划"""
 
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, extra_plannable_tools: set[str] | None = None):
         super().__init__("planner")
         self.llm = llm
+        # 按入口注入的额外可规划工具（如画布工具）：白名单 = orchestrator_safe ∪ extra
+        self.extra_plannable_tools: set[str] = set(extra_plannable_tools or ())
 
     async def execute(self, **kwargs) -> AgentResult:
         """分析用户输入，生成工具调用计划。"""
@@ -261,7 +263,7 @@ class PlannerAgent(BaseAgent):
         """Schema 校验 + 工具白名单过滤 + 字段规范化。返回规范化后的计划 dict。"""
         structured = PlanOutput.model_validate(plan)  # 抛 ValidationError 时由调用方处理
 
-        safe_tools = _get_cached_orchestrator_tools()
+        safe_tools = _get_cached_orchestrator_tools() | self.extra_plannable_tools
         valid_steps: list[dict] = []
         seen_ids: set[int] = set()
         for s in structured.steps:

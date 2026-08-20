@@ -898,6 +898,7 @@ class AIService:
         db_session,
         initial_phase: str = "selecting",
         system_prompt_override: str | None = None,
+        extra_plannable_tools: set[str] | None = None,
     ) -> AsyncIterator[dict]:
         """单 Agent 工具调用模式：Phase 状态机（SELECTING→ANALYZING→GENERATING→REPORTING）+ ToolRegistry。
 
@@ -1000,7 +1001,7 @@ class AIService:
             # ⚙️ 降级策略：异常时自动 fallback 到单 Agent ReAct 模式
             try:
                 from app.services.agents import AgentOrchestrator
-                orchestrator = AgentOrchestrator(self.llm, db_session)
+                orchestrator = AgentOrchestrator(self.llm, db_session, extra_plannable_tools)
                 async for event in orchestrator.execute_task(
                     user_msg=user_msg,
                     history=history or [],

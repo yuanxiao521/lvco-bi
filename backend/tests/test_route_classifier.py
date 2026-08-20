@@ -44,7 +44,7 @@ class FakeOrchestrator:
 
     instances = 0
 
-    def __init__(self, llm, db_session):
+    def __init__(self, llm, db_session, extra_plannable_tools=None):
         FakeOrchestrator.instances += 1
 
     async def execute_task(self, **kwargs):
