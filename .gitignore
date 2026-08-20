@@ -1,0 +1,190 @@
+# =====================================================================
+# LvcoBI 项目根目录 .gitignore
+# 覆盖: Python (venv/uv) + Node + Docker + IDE + OS
+# =====================================================================
+
+# ── Python 虚拟环境 ─────────────────────────────────────────────────
+# 防止 venv 被误删/误提交的最关键配置
+.venv/
+venv/
+env/
+ENV/
+.venv-*/
+backend/.venv/
+backend/venv/
+backend/env/
+frontend/.venv/
+
+# ── Python 缓存与构建产物 ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.manifest
+*.spec
+
+# ── Python 测试缓存 ───────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.cache
+.mypy_cache/
+.ruff_cache/
+.pyright-cache/
+.pyre/
+.pytype/
+
+# ── uv 工具缓存 ───────────────────────────────────────────────────
+# uv 自己的缓存（不在项目里，但有时会有人创建）
+.uv-cache/
+uv.lock.bak
+
+# ── Node / 前端 ───────────────────────────────────────────────────
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+.pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+npm-debug.log*
+
+# 各种前端框架构建输出
+.next/
+.nuxt/
+.svelte-kit/
+.svelte/
+.vite/
+.parcel-cache/
+.cache/
+.turbo/
+.vercel/
+.netlify/
+out/
+build-storybook/
+
+# 前端项目级环境文件
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# ── 环境变量与密钥（保护） ────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.envrc
+*.pem
+*.key
+*.crt
+secrets/
+config/secrets.*
+
+# 但允许 .env.example 提交（*是常见的例外）
+!.env.example
+!.env.sample
+
+# .env 备份文件（可能包含敏感信息）
+.env.backup
+.env.bak
+*.env.backup
+*.env.bak
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# ── 系统文件 ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ── 日志与数据 ───────────────────────────────────────────────────
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# 数据库与本地数据文件
+*.db
+*.sqlite
+*.sqlite3
+backend/storage/
+backend/data/
+backend/tmp/
+
+# DuckDB 文件
+*.duckdb
+*.duckdb.wal
+
+# 上传文件
+uploads/
+media/
+static/uploads/
+
+# ── Docker 临时文件 ──────────────────────────────────────────────
+.docker/
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ── TRAE 临时分享文件 ───────────────────────────────────────────
+.trae-html-share-packages/
+
+# ── 演示与简历（不在仓库中） ─────────────────────────────────────
+lvco-bi-presentation/
+resume/
+
+# ── 项目专属：测试/调试临时文件 ──────────────────────────────────
+test_venv.py
+check_venv.py
+run_tests.py
+verify_tests.py
+debug_*.py
+tmp_*.py
+
+# ── 已知无用的目录 ───────────────────────────────────────────────
+.travis.yml.bak
+.git.bak
+*.bak
+*.tmp
+*.temp
+*.orig
+
+# ── 文档/交付物（不提交到仓库） ──────────────────────────────────
+docs/
+
+# ── 大文件/可执行文件 ────────────────────────────────────────────
+*.exe
+*.zip
+*.7z
+*.rar
+
+# ── 日志输出文件 ─────────────────────────────────────────────────
+*.err
+*.out
+
+# ── 临时脚本/敏感文件 ────────────────────────────────────────────
+backend/_check_fields.py
+**/reset_pwd*.sql
+**/new_hash.txt
+**/check_hash.py
+**/check_login.py
+**/gen_hash.py
+**/verify_check.py

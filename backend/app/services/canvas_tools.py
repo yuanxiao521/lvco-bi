@@ -10,6 +10,7 @@ from uuid import UUID
 
 from app.services.agent_tools import BaseTool
 from app.schemas.query import ChartQueryConfig, MeasureConfig
+from app.services.metric_service import MetricServiceError
 from app.services.query_engine import QueryEngineError, execute_chart_query
 
 logger = logging.getLogger("lvco.canvas_tools")
@@ -27,6 +28,13 @@ CHART_TYPES = [
 # canvas_action 中携带的最大数据行数，避免 SSE 包过大
 _CANVAS_MAX_ROWS = 50
 
+# 画布工具名：供编排器（Planner）按入口注入为可规划工具。
+# 仅画布接口会注入，普通 AI 对话不注入，避免规划到无画布可落的工具。
+CANVAS_TOOL_NAMES = frozenset({
+    "add_chart_block", "add_text_block",
+    "update_chart_block", "remove_block", "arrange_layout",
+})
+
 
 def _chart_type_schema():
     return {"type": "string", "enum": CHART_TYPES}
@@ -36,12 +44,24 @@ def _measure_schema():
     return {
         "type": "array",
         "items": {
-            "type": "object",
-            "properties": {
-                "field": {"type": "string", "description": "度量字段名，必须与数据源字段完全一致"},
-                "agg": {"type": "string", "enum": ALLOWED_AGGS},
-            },
-            "required": ["field", "agg"],
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "metric_key": {"type": "string", "description": "引用指标中心已定义的命名指标 key，如 sales_amount"},
+                        "field": {"type": "string", "description": "当指标是模板指标（formula 含 {{field}}）时，用于填充其占位字段的字段名"},
+                    },
+                    "required": ["metric_key"],
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "field": {"type": "string", "description": "度量字段名，必须与数据源字段完全一致"},
+                        "agg": {"type": "string", "enum": ALLOWED_AGGS},
+                    },
+                    "required": ["field", "agg"],
+                },
+            ]
         },
     }
 
@@ -84,18 +104,24 @@ class AddChartBlockTool(BaseTool):
                       user_id: str = "", db_session=None, **kwargs) -> str:
         """验证查询可行性并取数，返回 canvas_action。
 
+        measures 支持两种形态：{field, agg}（普通度量）或 {metric_id/metric_key, [field], [agg]}
+        （引用指标中心的命名指标）。指标度量会被解析为当前口径的表达式，前端据此随口径刷新。
+
         查询失败时返回 error（触发 LLM 自纠错）；成功时返回含 rows/columns 的 canvas_action。
         """
         if not dimensions or not measures:
             return json.dumps({"error": "add_chart_block 需要至少一个维度和一个度量"}, ensure_ascii=False)
 
         try:
-            m_list = [MeasureConfig(field=m["field"], agg=m["agg"]) for m in measures if isinstance(m, dict) and m.get("field")]
-            if not m_list:
-                return json.dumps({"error": "度量字段无效，每个度量需包含 field 和 agg"}, ensure_ascii=False)
+            from app.services.metric_service import resolve_measures
+            m_configs, display_measures = await resolve_measures(
+                db_session, UUID(user_id) if user_id else None, measures, dimensions=[str(d) for d in dimensions],
+            )
+            if not m_configs:
+                return json.dumps({"error": "度量字段无效，每个度量需包含 field+agg 或 metric_id"}, ensure_ascii=False)
             config = ChartQueryConfig(
                 dimensions=[str(d) for d in dimensions],
-                measures=m_list,
+                measures=m_configs,
                 filters=[],
                 chart_type=chart_type,
                 datasource_id=datasource_id,
@@ -110,6 +136,9 @@ class AddChartBlockTool(BaseTool):
         except (QueryEngineError, ValueError) as e:
             logger.warning("[add_chart_block] query_failed error=%s", str(e))
             return json.dumps({"error": f"查询验证失败: {str(e)}"}, ensure_ascii=False)
+        except MetricServiceError as e:
+            logger.warning("[add_chart_block] metric_error error=%s", str(e))
+            return json.dumps({"error": f"指标解析失败: {str(e)}"}, ensure_ascii=False)
         except Exception as e:  # noqa: BLE001
             logger.warning("[add_chart_block] unexpected error=%s", str(e))
             return json.dumps({"error": f"生成图表失败: {str(e)}"}, ensure_ascii=False)
@@ -123,7 +152,7 @@ class AddChartBlockTool(BaseTool):
                 "datasourceId": datasource_id,
                 "queryConfig": {
                     "dimensions": [str(d) for d in dimensions],
-                    "measures": [{"field": m.field, "agg": m.agg} for m in m_list],
+                    "measures": display_measures,
                     "filters": [],
                     "limit": _CANVAS_MAX_ROWS,
                 },
@@ -211,8 +240,17 @@ class UpdateChartBlockTool(BaseTool):
         if kwargs.get("dimensions") is not None:
             patch["dimensions"] = [str(d) for d in kwargs["dimensions"]]
         if kwargs.get("measures") is not None:
-            patch["measures"] = [{"field": m["field"], "agg": m["agg"]} for m in kwargs["measures"]
-                                 if isinstance(m, dict) and m.get("field")]
+            patch["measures"] = []
+            for m in kwargs["measures"]:
+                if not isinstance(m, dict):
+                    continue
+                if m.get("metric_id") or m.get("metric_key") or m.get("metricKey"):
+                    patch["measures"].append({
+                        "metric_id": m.get("metric_id") or m.get("metricId"),
+                        "metric_key": m.get("metric_key") or m.get("metric_key"),
+                    })
+                elif m.get("field"):
+                    patch["measures"].append({"field": m["field"], "agg": m.get("agg", "SUM")})
         if not patch:
             return json.dumps({"error": "没有提供任何要修改的字段"}, ensure_ascii=False)
         action = {"action": "update_chart_block", "blockId": block_id, "patch": patch}

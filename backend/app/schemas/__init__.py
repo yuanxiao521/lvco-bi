@@ -319,4 +319,38 @@ class DataChatRequest(CamelModel):
     history: list[dict] | None = None
 
 
+class MetricCreate(CamelModel):
+    key: str = Field(..., min_length=1, max_length=120)
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str | None = Field(None, max_length=1000)
+    formula: str = Field(..., min_length=1)
+    agg_kind: str | None = Field(None, max_length=20)
+    datasource_id: UUID | None = None
+    table_ref: str | None = Field("data", max_length=200)
+
+
+class MetricUpdate(CamelModel):
+    name: str | None = Field(None, max_length=200)
+    description: str | None = Field(None, max_length=1000)
+    formula: str | None = None
+    agg_kind: str | None = Field(None, max_length=20)
+    datasource_id: UUID | None = None
+    table_ref: str | None = Field(None, max_length=200)
+    active: bool | None = None
+
+
+class MetricResponse(CamelModel):
+    id: UUID
+    key: str
+    name: str
+    description: str | None
+    formula: str
+    agg_kind: str | None
+    datasource_id: UUID | None
+    table_ref: str | None
+    active: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+
 AISessionDetail.model_rebuild()

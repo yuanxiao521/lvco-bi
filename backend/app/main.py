@@ -70,10 +70,19 @@ async def health_check() -> dict:
 @app.on_event("startup")
 async def startup():
     from app.api.deps import get_cache_repository
+    from app.core.database import async_session_factory
     logger = structlog.get_logger("main")
     cache_repo = get_cache_repository()
     status = "redis" if getattr(cache_repo, "_use_redis", False) else "fallback_to_dict"
     logger.info("redis ping", status=status)
+    # 幂等写入内置指标模板（指标语义层）；失败不影响应用启动
+    try:
+        from app.services.metric_service import ensure_default_metrics
+        async with async_session_factory() as db:
+            await ensure_default_metrics(db)
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning("seed_default_metrics_failed")
 
 
 @app.on_event("shutdown")

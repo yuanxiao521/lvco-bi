@@ -26,7 +26,7 @@ from app.models.datasource import DataSource
 from app.models.report import Report, ReportSourceType, ReportStatus
 from app.models.user import User
 from app.schemas import CamelModel, CanvasResponse, SuccessResponse
-from app.schemas.query import ChartQueryConfig
+from app.schemas.query import ChartQueryConfig, MeasureConfig
 from app.services.ai_service import AIService
 from app.services.canvas_service import CanvasService
 from app.services.chart_renderer import render_chart
@@ -336,10 +336,55 @@ async def query_canvas(
             detail={"code": "MISSING_DATASOURCE", "message": "画布未绑定数据源，请在请求中指定 datasourceId"},
         )
 
+    # 指标语义层：画布块若以 metric_id 引用命名指标，重查时解析为当前口径的表达式度量，
+    # 实现"指标口径改一处 → 引用它的所有块按新口径刷新"。
+    config_to_run = body
+    has_metric_ref = any(
+        isinstance(m, (MeasureConfig, dict))
+        and (m.get("metric_id") if isinstance(m, dict) else getattr(m, "expression", None) is not None)
+        for m in (body.measures or [])
+    )
+    if has_metric_ref:
+        from app.services.metric_service import MetricServiceError, resolve_measures
+        raw_measures = []
+        for m in (body.measures or []):
+            if isinstance(m, MeasureConfig):
+                raw_measures.append({"field": m.field, "agg": m.agg})
+            else:
+                raw_measures.append(m)
+        try:
+            exec_measures, display_measures = await resolve_measures(
+                db, current_user.id, raw_measures, dimensions=[str(d) for d in (body.dimensions or [])]
+            )
+        except MetricServiceError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_METRIC", "message": str(e)},
+            )
+        # 口径审计：记录命中的指标与本次口径快照（可追溯链路）
+        from app.services.metric_audit import record_metric_query
+        for dm in display_measures:
+            if dm.get("metric_key"):
+                await record_metric_query(
+                    db, current_user.id, metric_key=dm["metric_key"],
+                    formula=dm.get("expression", ""),
+                    metric_id=(_uuid.UUID(dm["metric_id"]) if dm.get("metric_id") else None),
+                    datasource_id=query_datasource_id,
+                    scenario="canvas_query",
+                )
+        config_to_run = ChartQueryConfig(
+            dimensions=body.dimensions,
+            measures=exec_measures,
+            filters=body.filters,
+            chart_type=body.chart_type,
+            datasource_id=body.datasource_id,
+            limit=body.limit,
+        )
+
     try:
         result = await execute_chart_query(
             datasource_id=query_datasource_id,
-            config=body,
+            config=config_to_run,
             user_id=current_user.id,
             db=db,
             force=force,

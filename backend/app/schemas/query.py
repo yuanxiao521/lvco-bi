@@ -7,8 +7,12 @@ from app.schemas import CamelModel
 
 
 class MeasureConfig(CamelModel):
-    field: str
-    agg: str
+    field: str = ""
+    agg: str = "SUM"
+    # 表达式度量（指标语义层）：直接给出聚合 SQL 表达式，如 'SUM("amount")'。
+    # 非空时优先于 field+agg 使用；alias 可选，缺省由引擎从表达式推导。
+    expression: str | None = None
+    alias: str | None = None
 
 
 class FilterConfig(CamelModel):

@@ -173,6 +173,16 @@ def _validate_aggregations(aggs: list[str]) -> None:
             )
 
 
+def _expr_alias(expr: str) -> str:
+    """从一个聚合表达式推导稳定别名，如 'SUM("amount")' -> 'sum_amount'。"""
+    import re as _re
+    inner = _re.sub(r"^[A-Za-z_ ]+\(", "", (expr or "").strip())
+    inner = inner.rstrip(")").strip().strip('"').lstrip('"')
+    name = _re.sub(r"\W+", "_", inner).strip("_")
+    agg = _re.match(r"[A-Za-z_]+", expr or "").group(0).lower() if _re.match(r"[A-Za-z_]+", expr or "") else "agg"
+    return f"{agg}_{name}" if name else f"{agg}_metric"
+
+
 def _build_select(dimensions: list[str], measures: list[dict[str, str]]) -> tuple[str, list[str]]:
     """构建 SQL SELECT 子句。
 
@@ -196,6 +206,13 @@ def _build_select(dimensions: list[str], measures: list[dict[str, str]]) -> tupl
         result_columns.append(dim)
 
     for m in measures:
+        # 表达式度量（指标语义层）：直接用指标口径表达式，如 SUM("amount")
+        if m.get("expression"):
+            expr = m["expression"]
+            alias = m.get("alias") or _expr_alias(expr)
+            parts.append(f"{expr} AS \"{alias}\"")
+            result_columns.append(alias)
+            continue
         field = m["field"]
         agg = m["agg"].upper()
         alias = f"{agg.lower()}_{field}"
@@ -335,7 +352,10 @@ def _build_order_by(sort: dict[str, str] | None, measures: list[dict[str, str]])
 
     if measures:
         first = measures[0]
-        alias = f'{first["agg"].upper().lower()}_{first["field"]}'
+        if first.get("expression"):
+            alias = first.get("alias") or _expr_alias(first["expression"])
+        else:
+            alias = f'{first["agg"].upper().lower()}_{first["field"]}'
         return f'ORDER BY "{alias}" DESC'
 
     return ""
@@ -451,12 +471,21 @@ async def execute_chart_query(
     measure_dicts = [m.model_dump() for m in config.measures]
     filter_dicts = [f.model_dump() for f in config.filters]
 
-    # 校验并修正大小写（DuckDB 列名可能跟前端不一致）
-    dims = _validate_fields(config.dimensions, schema_fields, "维度")
-    meas_fields = _validate_fields([m["field"] for m in measure_dicts], schema_fields, "度量")
-    for i, actual in enumerate(meas_fields):
-        measure_dicts[i]["field"] = actual
-    _validate_aggregations([m["agg"] for m in measure_dicts])
+    # 校验并修正大小写（DuckDB 列名可能跟前端不一致）：普通度量校验字段存在性，
+    # 表达式度量（指标语义层）字段已内联在 expression 中，跳过字段校验、仅校验聚合。
+    plain_measures = [m for m in measure_dicts if not m.get("expression")]
+    if plain_measures:
+        dims = _validate_fields(config.dimensions, schema_fields, "维度")
+        meas_fields = _validate_fields([m["field"] for m in plain_measures], schema_fields, "度量")
+        for i, actual in enumerate(meas_fields):
+            plain_measures[i]["field"] = actual
+        _validate_aggregations([m["agg"] for m in plain_measures])
+        # 将修正后的普通度量写回 measure_dicts（按原位置）
+        plain_iter = iter(plain_measures)
+        measure_dicts = [next(plain_iter) if not m.get("expression") else m for m in measure_dicts]
+        # 无维度时校验也需要跳过空维度错误，交给 _build_select
+    else:
+        dims = _validate_fields(config.dimensions, schema_fields, "维度")
 
     select_clause, result_columns = _build_select(dims, measure_dicts)
 

@@ -41,6 +41,7 @@ from app.schemas import (
 )
 from app.services.ai_service import AIService, VALID_CHART_TYPES
 from app.services.ai_prompts import CANVAS_AGENT_SYSTEM, CANVAS_SYSTEM
+from app.services.canvas_tools import CANVAS_TOOL_NAMES
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 
 router = APIRouter(prefix="/ai", tags=["AI助手"])
@@ -1371,7 +1372,8 @@ async def canvas_ai_chat(
             canvas_ctx = "\n当前画布已有以下图表：\n"
             for b in blocks:
                 if isinstance(b, dict) and b.get("type") == "chart":
-                    canvas_ctx += f"- {b.get('title', '图表')} (类型: {b.get('chartType', '?')}, 维度: {b.get('dimensions', [])}, 度量: {b.get('measures', [])})\n"
+                    bid = b.get("id") or ""
+                    canvas_ctx += f"- id={bid} {b.get('title', '图表')} (类型: {b.get('chartType', '?')}, 维度: {b.get('dimensions', [])}, 度量: {b.get('measures', [])})\n"
         current_cfg = body.canvas_context.get("currentConfig")
         if current_cfg:
             dims = current_cfg.get("dimensions", [])
@@ -1395,6 +1397,19 @@ async def canvas_ai_chat(
         user_msg_parts = [f"已连接数据源：{datasource.name}（FROM 用表引用：{table_ref}）"]
     else:
         user_msg_parts = ["当前未连接数据源，你可以与用户就其需求自由对话。"]
+
+    # 注入指标清单：让 Planner 优先引用命名指标（metric key）而非裸字段聚合，
+    # 从而统一口径、支持随指标定义联动刷新。
+    try:
+        from app.services.metric_service import format_metrics_context, list_metrics_for_user
+
+        metrics = await list_metrics_for_user(db, current_user.id)
+        metric_ctx = format_metrics_context(metrics)
+        if metric_ctx:
+            user_msg_parts.append(metric_ctx)
+    except Exception:
+        _log.info("metrics context injection skipped", exc_info=True)
+
     if field_info:
         user_msg_parts.append(field_info)
     if canvas_ctx:
@@ -1491,6 +1506,7 @@ async def canvas_ai_chat(
                 db_session=db,
                 initial_phase="selecting",
                 system_prompt_override=CANVAS_AGENT_SYSTEM,
+                extra_plannable_tools=CANVAS_TOOL_NAMES,
             ):
                 ev_type = event.get("type")
                 if ev_type == "text":
