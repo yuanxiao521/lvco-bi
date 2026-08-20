@@ -12,6 +12,7 @@ from app.services.ai_prompts import (
     INSIGHTS_SYSTEM,
     POLISH_SYSTEM,
     RECOMMEND_SYSTEM,
+    ROUTE_CLASSIFIER_SYSTEM,
 )
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 from app.services.observability import (
@@ -216,6 +217,27 @@ def _build_config(current_config: dict, chart_type: str) -> dict:
     cfg["chartType"] = chart_type
     cfg["chart_type"] = chart_type
     return cfg
+
+
+def _parse_complexity(reply: str) -> bool | None:
+    """解析任务分类器输出：含 complex 信号返回 True，含 simple 返回 False，否则 None。
+
+    大小写 / 首尾空白 / 换行容错：先转小写并去空白后做子串匹配。
+
+    Args:
+        reply: LLM 原始返回文本。
+
+    Returns:
+        True/False/None（None 表示不可解析，需回退）。
+    """
+    if not reply:
+        return None
+    text = reply.strip().lower()
+    if "complex" in text:
+        return True
+    if "simple" in text:
+        return False
+    return None
 
 
 class AIService:
@@ -839,6 +861,35 @@ class AIService:
             "style": style,
         }
 
+    async def _classify_task_complexity(self, user_msg: str) -> bool | None:
+        """调用 LLM 判断任务复杂度：复杂任务返回 True、简单任务返回 False。
+
+        用于纠正纯长度启发式的误判（短但复杂，长但简单）。
+        智能降级：LLM 异常 / 超时（2s）/ 不可解析时返回 None，由调用方回退到原启发式，
+        保证分类器不可用时路由结果不比现状差，且不阻塞主流程。
+
+        Args:
+            user_msg: 用户原始消息文本。
+
+        Returns:
+            True 表示复杂任务（走编排器），False 表示简单任务（走 ReAct），
+            None 表示分类失败需回退。
+        """
+        try:
+            content = await asyncio.wait_for(
+                self.llm.complete(
+                    [
+                        {"role": "system", "content": ROUTE_CLASSIFIER_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ]
+                ),
+                timeout=2.0,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"[route_classifier] llm_error error={e} fallback_to_heuristic")
+            return None
+        return _parse_complexity(content)
+
     async def agent_stream(
         self,
         user_id: str,
@@ -882,15 +933,28 @@ class AIService:
             yield {"type": "error", "message": guard_result.reason}
             return
 
-        # ── 编排模式：复杂任务走规划-执行编排器（AgentOrchestrator）──
-        # 简单任务（短消息/列数据源）走下方单 Agent ReAct 状态机
-        use_orchestrator = (
-            settings.AGENT_ORCHESTRATOR_ENABLED
-            and initial_phase == "selecting"
-            and len(user_msg) > 20
-            and not user_msg.strip().startswith("列出")
-            and not user_msg.strip().startswith("有哪些")
-        )
+        # ── 路由决策：LLM 分类器 + 长度启发式回退 ────────────────────────────
+        # 编排模式仅当 AGENT_ORCHESTRATOR_ENABLED 且初始 phase 为 selecting 时启用。
+        # 先由 LLM 分类器判断任务复杂度（复杂→编排器、简单→ReAct），纠正长度启发式的误判
+        #（短但复杂、长但简单）；分类器不可用（异常/超时/不可解析返回 None）时回退原长度启发式。
+        route_enabled = settings.AGENT_ORCHESTRATOR_ENABLED and initial_phase == "selecting"
+        if route_enabled:
+            classification = await self._classify_task_complexity(user_msg)
+            if classification is True:
+                log.info("[agent_stream] route_classifier=complex using_orchestrator_mode")
+                use_orchestrator = True
+            elif classification is False:
+                log.info("[agent_stream] route_classifier=simple using_react_mode")
+                use_orchestrator = False
+            else:
+                # 分类器不可用：回退原长度启发式（短消息/列数据源走 ReAct）
+                use_orchestrator = (
+                    len(user_msg) > 20
+                    and not user_msg.strip().startswith("列出")
+                    and not user_msg.strip().startswith("有哪些")
+                )
+        else:
+            use_orchestrator = False
         if use_orchestrator:
             log.info("[agent_stream] using_orchestrator_mode")
             yield {"type": "status", "message": "正在启动多工具编排..."}

@@ -312,6 +312,9 @@ class BaseTool(ABC):
     所有具体工具（如 ListDatasourcesTool、QueryDatasourceTool、RenderChartTool）需继承此类并实现以下抽象方法。
     """
 
+    # 是否允许 Planner/编排器使用（默认 False；安全工具标记为 True）
+    orchestrator_safe: bool = False
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -346,6 +349,14 @@ class ToolRegistry:
     def schemas(cls) -> list[dict]:
         return [t.schema() for t in cls._tools.values()]
 
+    @classmethod
+    def orchestrator_safe_tools(cls) -> set[str]:
+        """返回所有标记为 orchestrator_safe=True 的工具名称集合。"""
+        return {
+            name for name, tool in cls._tools.items()
+            if getattr(tool, "orchestrator_safe", False)
+        }
+
 
 # ==================== 工具实现 ====================
 
@@ -353,6 +364,7 @@ class ListDatasourcesTool(BaseTool):
     """浏览当前用户可用的所有数据源"""
 
     name = "list_datasources"
+    orchestrator_safe = True
     description = "列出当前可用的所有数据源。返回每个数据源的 ID、名称、类型、字段列表和行数。"
 
     def schema(self) -> dict:
@@ -470,6 +482,7 @@ class QueryDatasourceTool(BaseTool):
     """执行 SQL 查询（带三层安全防护）"""
 
     name = "query_datasource"
+    orchestrator_safe = True
     description = (
         "在指定的数据源上执行 DuckDB SQL 查询（仅支持 SELECT）。"
         "传入 datasource_id 和 SQL 语句。返回前 50 行结果。"
@@ -644,6 +657,7 @@ class RenderChartTool(BaseTool):
     """生成 ECharts 图表配置"""
 
     name = "render_chart"
+    orchestrator_safe = True
     description = (
         "根据数据生成 ECharts 图表配置。传入 chart_type 和数据。"
         "返回 ECharts option 配置对象。"
@@ -1001,6 +1015,7 @@ class ValidateChartTool(BaseTool):
     """校验图表配置的合法性（自校验工具，供 Agent 与画布助手复用）"""
 
     name = "validate_chart"
+    orchestrator_safe = True
     description = (
         "校验图表配置是否合法：图表类型白名单、字段引用是否存在、数据行列是否对齐、"
         "ECharts option 结构是否完整。返回 valid + 问题列表 + 修复建议。"
@@ -1049,6 +1064,7 @@ class QueryEngineTool(BaseTool):
     """通过查询引擎执行结构化查询（参数化 SQL，比原生 SQL 更安全）"""
 
     name = "query_engine"
+    orchestrator_safe = True
     description = (
         "结构化安全查询：传入 datasource_id、dimensions（维度）、measures（度量，含聚合方式）、"
         "filters（过滤条件）、sort（排序）、limit，由查询引擎生成参数化 SQL 执行。"
@@ -1141,6 +1157,7 @@ class DataQualityTool(BaseTool):
     """数据质量分析：检查缺失值、异常值、重复行、类型不一致、格式问题"""
 
     name = "data_quality"
+    orchestrator_safe = True
     description = (
         "数据质量分析：对指定数据源执行质量检查（缺失值、IQR 异常值、重复行、"
         "类型不一致、格式问题）。可传 fields 限定检查范围，不传则检查全部字段。"
@@ -1228,6 +1245,7 @@ class InsightTool(BaseTool):
     """自动洞察：聚合查询 + LLM 生成趋势/异常洞察"""
 
     name = "insight"
+    orchestrator_safe = True
     description = (
         "自动洞察：对数据源执行聚合分析（按维度/度量），并生成趋势、异常、分布等数据洞察。"
         "适合用户询问'有什么趋势/异常/发现'的场景。"
@@ -1305,6 +1323,7 @@ class CleanSuggestTool(BaseTool):
     """数据清洗建议：质量检查 + LLM 生成清洗建议"""
 
     name = "clean_suggest"
+    orchestrator_safe = True
     description = (
         "数据清洗建议：对数据源执行质量检查，并生成按严重程度排序的中文清洗建议。"
         "适合用户询问'数据有什么问题/需要怎么清洗'的场景。"
@@ -1384,6 +1403,7 @@ class RecommendChartsTool(BaseTool):
     """图表类型推荐：根据字段特征推荐最合适的图表类型"""
 
     name = "recommend_charts"
+    orchestrator_safe = True
     description = (
         "图表类型推荐：根据数据源字段特征推荐 1-3 个最合适的图表类型，"
         "返回 chart_type + rationale + config。生成图表前可用它辅助选型。"
@@ -1437,6 +1457,7 @@ class PolishTextTool(BaseTool):
     """文本润色：4 种风格转换"""
 
     name = "polish_text"
+    orchestrator_safe = True
     description = (
         "文本润色：将文本转换为指定风格（professional 专业 / casual 轻松 / concise 简洁 / academic 学术）。"
         "适合用户要求改写或润色报告文本的场景。"

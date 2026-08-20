@@ -451,6 +451,30 @@ _CANVAS_AGENT_SYSTEM_FALLBACK = """你是 Lvco BI 的画布智能体，服务对
 7. 全程不要向用户索要字段信息；不要输出"正在查询/生成图表成功"等过程状态文字，图表会自动渲染，你只需专注产出报告内容与结构。"""
 
 
+_ROUTE_CLASSIFIER_SYSTEM_FALLBACK = """你是任务复杂度分类器。判断用户的分析请求属于"简单任务"还是"复杂任务"，并只输出一个英文单词。
+
+## 简单任务（输出 simple）
+- 单个数值/事实查询，如"销售额是多少"、"有多少客户"、"各区域的销售额"（单维度单度量）
+- 单图表需求，如"画一张柱状图"
+- 列出数据源/有哪些数据源
+- 一句话就能完成的单步分析
+
+## 复杂任务（输出 complex）
+- 多表或多维度、多度量对比分析
+- 需要多步骤/多工具编排的复合需求（"对比A、B两个产品的销售趋势"、"做一份完整的销售分析报告"）
+- 涉及同比/环比、跨周期对比、归因、报告/看板搭建等需要规划的任务
+- 需要多次查询、生成多张图表、产出结构化报告的任务
+
+## 判定要点
+- 只看问题本身是否"复杂"（步骤多/维度度量多/需编排），不要被消息长短误导
+- 若无法确定或难以分类，输出 complex（更安全的兜底，交由编排器规划）
+
+## 输出格式
+只输出一个单词，不要任何解释、标点、换行之外的内容：
+- 复杂输出：complex
+- 简单输出：simple"""
+
+
 # ── 向后兼容常量（从 YAML 加载，失败时回退到硬编码） ─────────────────────
 
 CHAT_SYSTEM = _load("chat_system", _CHAT_SYSTEM_FALLBACK)
@@ -465,3 +489,4 @@ AGENT_SYSTEM = _load("agent_system", _AGENT_SYSTEM_FALLBACK)
 INSIGHT_REPORT_SYSTEM = _load("insight_report_system", _INSIGHT_REPORT_SYSTEM_FALLBACK)
 ORCHESTRATOR_SYSTEM = _load("orchestrator_system", _AGENT_SYSTEM_FALLBACK)
 EXECUTOR_SYSTEM = _load("executor_system", _AGENT_SYSTEM_FALLBACK)
+ROUTE_CLASSIFIER_SYSTEM = _load("route_classifier_system", _ROUTE_CLASSIFIER_SYSTEM_FALLBACK)

@@ -24,12 +24,19 @@ from app.services.observability import TraceRecord
 
 
 class MockOrchestratorLLM:
-    """编排器 Mock：Planner 返回骨架计划；Executor 按 step_id 决策；Report 输出文本。"""
+    """编排器 Mock：Planner 返回骨架计划；Executor 按 step_id 决策；Report 输出文本。
+
+    单步为 mini ReAct 循环（优化后编排器按 LLM 纯文本决策终止步骤，见
+    test_orchestrator_advanced 中各 push_tool_call + push_text 的契约）：
+      查询步骤：失败 1 次（broken）→ 重试成功（ok）→ 纯文本结束步骤；
+      图表步骤：调用 render_chart（携带数据）→ 纯文本结束步骤。
+    """
 
     def __init__(self) -> None:
         self.complete_calls = 0
         self.tool_llm_calls = 0
-        self.query_bad = True
+        self._q_calls = 0  # 查询步骤 LLM 决策次数
+        self._c_calls = 0  # 图表步骤 LLM 决策次数
 
     async def complete(self, messages, **kwargs):
         self.complete_calls += 1
@@ -49,17 +56,26 @@ class MockOrchestratorLLM:
         self.tool_llm_calls += 1
         text = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "user")
         if "step_id=2" in text:
-            yield {"type": "tool_call", "name": "render_chart", "id": "call_c1",
-                   "arguments": json.dumps({"chart_type": "bar", "title": "销售额"})}
-        else:
-            if self.query_bad:
-                self.query_bad = False
-                sql = "SELECT broken"
+            # 图表步骤：先 render_chart，再用纯文本结束步骤
+            self._c_calls += 1
+            if self._c_calls == 1:
+                yield {"type": "tool_call", "name": "render_chart", "id": "call_c1",
+                       "arguments": json.dumps({"chart_type": "bar", "title": "销售额",
+                                                "columns": ["region", "amount"],
+                                                "rows": [["A", 100]]})}
             else:
-                sql = "SELECT ok"
-            yield {"type": "tool_call", "name": "query_datasource", "id": "call_q1",
-                   "arguments": json.dumps({"datasource_id": "ds1", "sql": sql})}
-        yield {"type": "text", "content": ""}
+                yield {"type": "text", "content": ""}  # 纯文本（空）结束图表步骤
+        else:
+            # 查询步骤：失败 1 次（broken）→ 重试成功（ok）→ 纯文本结束步骤
+            self._q_calls += 1
+            if self._q_calls == 1:
+                yield {"type": "tool_call", "name": "query_datasource", "id": "call_q1",
+                       "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT broken"})}
+            elif self._q_calls == 2:
+                yield {"type": "tool_call", "name": "query_datasource", "id": "call_q2",
+                       "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT ok"})}
+            else:
+                yield {"type": "text", "content": ""}  # 纯文本（空）结束查询步骤
 
 
 class MockReactLLM:
@@ -271,20 +287,27 @@ async def test_orchestrator_full_flow_with_retry_and_trace(fake_registry):
     ):
         events.append(ev)
 
-    # 事件序列：规划 → 查询失败 → 重试成功 → 图表 → 报告
+    # 事件序列：规划(含 selecting status) → analyzing → 查询失败 → 重试成功 →
+    # generating → 图表 → reporting → 报告。优化后各阶段会 emit 一次 phase status。
     types = [e["type"] for e in events]
-    assert types == ["status", "plan", "tool_call", "tool_result", "tool_call",
-                     "tool_result", "tool_call", "tool_result", "chart",
-                     "status", "text", "done"], str(types)
-    assert fq.calls == 2  # 1 次失败 + 1 次重试成功
-    assert ml.tool_llm_calls == 3  # 查询失败重试 2 次 LLM + 图表 1 次
+    assert types == ["status", "plan", "status", "tool_call", "tool_result",
+                     "tool_call", "tool_result", "status", "tool_call",
+                     "tool_result", "chart", "status", "text", "done"], str(types)
+    # 各阶段 phase 事件齐备（Task 11）
+    phases = [e.get("phase") for e in events if e.get("type") == "status" and "phase" in e]
+    assert phases == ["analyzing", "generating", "reporting"], str(phases)
+    assert fq.calls == 2  # 1 次失败 + 1 次重试成功（行为保留）
+    # 单步为 ReAct 循环，成功后还需一次 LLM 决策以纯文本结束步骤：
+    #   查询步骤 3 次（broken/ok/结束文本）+ 图表步骤 2 次（render_chart/结束文本）
+    assert ml.tool_llm_calls == 5
 
     # trace 观测统计
     tr = capture.trace_record
     assert tr is not None
     stats = tr.metadata.get("step_stats") or {}
-    assert stats["1"]["retries"] == 1 and stats["1"]["failed"] is False
-    assert stats["2"]["attempts"] == 1
+    # attempts 含步骤结束的纯文本决策轮：查询步骤 2 次工具调用+1 结束；图表 1 次调用+1 结束
+    assert stats["1"]["attempts"] == 3 and stats["1"]["retries"] == 2 and stats["1"]["failed"] is False
+    assert stats["2"]["attempts"] == 2
     assert tr.metadata.get("total_steps") == 2
     ok_flags = [s.metadata.get("ok") for s in tr.children if s.span_type == "tool"]
     assert ok_flags == [False, True, True], str(ok_flags)

@@ -19,10 +19,12 @@
 节点通过 emit 回调（asyncio.Queue 桥接）流式输出事件，execute_task 保持 AsyncIterator 接口。
 """
 import asyncio
+import hashlib
 import json
 import logging
 from typing import Any, AsyncIterator
  
+from app.config import settings
 from app.services.agents.base_agent import AgentResult
 from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
 from app.services.agents.graph import Graph
@@ -79,6 +81,79 @@ def _rows_to_2d(columns: list, rows: list) -> list:
     if isinstance(rows[0], dict):
         return [[r.get(c) for c in columns] for r in rows]
     return rows
+
+
+# Task 8 (P1-6)：只读幂等工具集合 —— 这些工具的相同参数结果在同一轮（会话内）可被 memo 缓存复用。
+_IDEMPOTENT_TOOLS = frozenset({
+    "list_datasources",
+    "list_tables",
+    "get_datasource_info",
+    "describe_table",
+    "list_fields",
+    "analyze_column",
+})
+
+
+# Task 2 (P0-2)：失败签名 key —— 同一工具 + 相同参数（JSON 规范化哈希）判定为同一失败签名。
+def _make_fail_key(tool_name: str, args: dict) -> str:
+    """生成失败签名：`tool_name:sha1(args)[:8]`。"""
+    h = hashlib.sha1(json.dumps(args or {}, sort_keys=True).encode("utf-8")).hexdigest()
+    return f"{tool_name}:{h[:8]}"
+
+
+# Task 8 (P1-6)：memo key，与失败签名同构（工具名 + 参数哈希）。
+def _make_memo_key(tool_name: str, args: dict) -> str:
+    return _make_fail_key(tool_name, args)
+
+
+# Task 3 (P0-3)：按 depends_on 依赖关系把步骤分成拓扑层，同层内可并发执行。
+def _group_steps_by_level(steps: list[dict]) -> list[list[dict]]:
+    """按最长依赖链计算每步层级（无依赖=层级 0），返回按层级升序的步骤分组。"""
+    by_id = {s["step_id"]: s for s in steps}
+    level_of: dict[int, int] = {}
+    remaining = set(by_id)
+    while remaining:
+        progressed = False
+        for sid in list(remaining):
+            deps = [d for d in (by_id[sid].get("depends_on") or []) if d in by_id]
+            if any(d not in level_of for d in deps):
+                continue  # 依赖尚未定级
+            level_of[sid] = (max(level_of[d] for d in deps) + 1) if deps else 0
+            remaining.discard(sid)
+            progressed = True
+        if not progressed:  # 存在环或缺失依赖，兜底：其余步骤放入下一层
+            for sid in list(remaining):
+                deps = [d for d in (by_id[sid].get("depends_on") or []) if d in by_id]
+                level_of[sid] = (max((level_of.get(d, -1) for d in deps), default=-1) + 1)
+                remaining.discard(sid)
+    levels: list[list[dict]] = []
+    for s in steps:
+        lv = level_of[s["step_id"]]
+        while len(levels) <= lv:
+            levels.append([])
+        levels[lv].append(s)
+    return levels
+
+
+# Task 9 (P2-11)：异常安全的对话历史摘要（简单截断拼接）。
+def _summarize_history_safe(history: list[dict] | None, max_chars: int = 2000) -> str:
+    if not history:
+        return ""
+    try:
+        parts = []
+        for m in history:
+            role = str(m.get("role", ""))
+            content = str(m.get("content", ""))
+            if content.strip():
+                parts.append(f"{role}: {content.strip()}")
+        joined = "\n".join(parts)
+        if len(joined) > max_chars:
+            joined = joined[:max_chars] + "..."
+        if not joined:
+            return ""
+        return f"[对话历史摘要]\n{joined}"
+    except Exception:
+        return "[对话历史摘要]\n（无法解析历史消息）"
  
  
 class AgentOrchestrator:
@@ -153,6 +228,9 @@ class AgentOrchestrator:
             has_chart = any(s.get("tool") == _CHART_TOOL for s in steps)
             logger.info(f"[orchestrator] 降级计划完成 steps={len(steps)} has_chart={has_chart}")
             await emit({"type": "plan", "plan": fallback_plan})
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["plan"] = fallback_plan
             return {
                 "plan": fallback_plan,
                 "has_chart_steps": has_chart,
@@ -163,6 +241,9 @@ class AgentOrchestrator:
         has_chart = any(s.get("tool") == _CHART_TOOL for s in steps)
         logger.info(f"[orchestrator] 骨架规划完成 steps={len(steps)} has_chart={has_chart}")
         await emit({"type": "plan", "plan": plan})
+        state_sink = shared.get("state_sink")
+        if state_sink is not None:
+            state_sink["plan"] = plan
         return {
             "plan": plan,
             "has_chart_steps": has_chart,
@@ -219,23 +300,42 @@ class AgentOrchestrator:
         return "empty" if not steps else "ok"
  
     # ── 图节点：执行非图表步骤（ExecutorAgent：LLM 实时决策参数 + 失败重试）──
+    # Task 3 (P0-3)：同拓扑层内步骤并发执行；Task 11 (P2-9)：emit analyzing 阶段事件。
     async def _execute_steps_node(self, state: dict, **shared) -> dict:
+        emit = shared["emit"]
+        await emit({"type": "status", "phase": "analyzing", "message": "正在分析并执行数据工具步骤..."})
         results = dict(state.get("results") or {})
         ordered = state.get("ordered_steps") or []
-        for step in ordered:
-            if step["tool"] == _CHART_TOOL:
-                continue  # 图表步骤由 chart_steps 节点执行
-            await self._agentic_run_step(step, results, state, **shared)
+        steps = [s for s in ordered if s.get("tool") != _CHART_TOOL]
+        memo = shared.get("tool_memo")
+        if memo is None:
+            memo = {}
+            shared["tool_memo"] = memo
+        shared.setdefault("tool_memo_lock", asyncio.Lock())
+        levels = _group_steps_by_level(steps)
+        for level in levels:
+            await asyncio.gather(
+                *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
+            )
+        state_sink = shared.get("state_sink")
+        if state_sink is not None:
+            state_sink["results"] = dict(results)
         return {"results": results}
- 
+
     # ── 图节点：执行图表步骤（ExecutorAgent 决策图表类型/标题，数据代码自动填充）──
+    # Task 11 (P2-9)：emit generating 阶段事件。图表步骤保持串行以稳定全局 LLM 响应消费次序。
     async def _chart_steps_node(self, state: dict, **shared) -> dict:
+        emit = shared["emit"]
+        await emit({"type": "status", "phase": "generating", "message": "正在生成可视化图表..."})
         results = dict(state.get("results") or {})
         ordered = state.get("ordered_steps") or []
         for step in ordered:
             if step["tool"] != _CHART_TOOL:
                 continue
-            await self._agentic_run_step(step, results, state, **shared)
+            await self._run_step_with_timeout(step, results, state, **shared)
+        state_sink = shared.get("state_sink")
+        if state_sink is not None:
+            state_sink["results"] = dict(results)
         return {"results": results}
  
     async def _route_execute(self, state: dict, **shared) -> str:
@@ -245,6 +345,31 @@ class AgentOrchestrator:
  
     # ── Agentic 步骤执行：mini ReAct 循环（LLM 可多次调用工具，直到输出文本或达到上限）──
     _MAX_TOOL_CALLS_PER_STEP = 5  # 单步内最多工具调用次数
+
+    # Task 6 (P1-8)：单步骤超时包装 —— 超时标记 skipped/timeout 并继续整体流程，不中断其他步骤。
+    async def _run_step_with_timeout(self, step: dict, results: dict, state: dict, **shared) -> None:
+        emit = shared["emit"]
+        sid = step["step_id"]
+        goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
+        timeout = getattr(settings, "AGENT_STEP_TIMEOUT", 30)
+        try:
+            await asyncio.wait_for(
+                self._agentic_run_step(step, results, state, **shared),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            timeout_result = json.dumps({
+                "skipped": True,
+                "timeout": True,
+                "goal": goal,
+                "skipped_reason": f"步骤 {sid} 执行超时（>{timeout}s），已跳过",
+            }, ensure_ascii=False)
+            results[sid] = timeout_result
+            await emit({"type": "tool_result", "name": goal[:20], "result": timeout_result})
+            logger.warning(f"[orchestrator] 步骤 {sid} 执行超时，标记 skipped/timeout")
+        except asyncio.CancelledError:
+            # 整体超时取消传播至此：不在此吞掉，让取消继续向上冒泡到 wait_for(整体)。
+            raise
 
     async def _agentic_run_step(self, step: dict, results: dict, state: dict, **shared) -> None:
         from app.services.ai_prompts import EXECUTOR_SYSTEM
@@ -283,6 +408,8 @@ class AgentOrchestrator:
         last_result: str = ""  # 最后一次工具执行结果（用于达到上限时兜底）
         reasoning_content: str = ""  # DeepSeek reasoning 模式需要回传
         consecutive_errors = 0  # 连续错误计数
+        # Task 2 (P0-2)：同一步骤内按失败签名（工具+参数哈希）记录连续失败次数。
+        fail_counts: dict[str, int] = {}
 
         # ── mini ReAct 循环：LLM 决策 → 执行工具 → 结果回传 → 再决策 ──
         while tool_call_count < self._MAX_TOOL_CALLS_PER_STEP:
@@ -351,17 +478,38 @@ class AgentOrchestrator:
                 self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, True)
                 return
 
-            trace = shared.get("trace")
-            span_obj = None
-            try:
-                if trace is not None:
-                    with observe_tool_call(trace, tname, args=targs) as span:
-                        span_obj = span
-                        result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-                else:
-                    result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-            except Exception as e:
-                result_str = json.dumps({"error": str(e)}, ensure_ascii=False)
+            # Task 8 (P1-6)：幂等工具结果 memo —— 命中缓存直接复用，不再执行工具。
+            is_idempotent = tname in _IDEMPOTENT_TOOLS
+            mkey = _make_memo_key(tname, targs) if is_idempotent else None
+            memo = shared.get("tool_memo") if is_idempotent else None
+            memo_lock = shared.get("tool_memo_lock") if is_idempotent else None
+
+            result_str: str | None = None
+            if is_idempotent and memo is not None and memo_lock is not None:
+                # 幂等工具：在锁内完成 读-执行-写，保证并发下同一签名仅真实执行一次。
+                async with memo_lock:
+                    if mkey in memo:
+                        cached = memo[mkey]
+                        results[sid] = cached
+                        await emit({"type": "tool_result", "name": tname, "result": cached, "memo": True})
+                        logger.info(f"[orchestrator] 步骤 {sid} 命中 memo tool={tname}")
+                        self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, False)
+                        return
+                    result_str = await self._execute_tool_once(user_id, db_session, tname, targs, tool, shared)
+                    memo[mkey] = result_str
+                # 幂等工具成功结果即为该步骤的权威结果，直接结束步骤，避免被后续文本覆盖。
+                try:
+                    parsed_res = json.loads(result_str)
+                    is_exec_error = isinstance(parsed_res, dict) and "error" in parsed_res
+                except Exception:
+                    is_exec_error = False
+                if not is_exec_error:
+                    results[sid] = result_str
+                    await emit({"type": "tool_result", "name": tname, "result": result_str})
+                    self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, False)
+                    return
+            else:
+                result_str = await self._execute_tool_once(user_id, db_session, tname, targs, tool, shared)
 
             # 判断工具返回是否含 error
             try:
@@ -380,12 +528,6 @@ class AgentOrchestrator:
                 f"  result_length: {len(result_str)}\n"
                 f"  result_preview: {result_str[:500]}"
             )
-
-            if span_obj is not None:
-                span_obj.update(
-                    output=result_str[:300],
-                    metadata={"ok": not is_error, "attempt": tool_call_count},
-                )
 
             tool_call_count += 1
             last_result = result_str
@@ -412,7 +554,26 @@ class AgentOrchestrator:
 
             if is_error:
                 logger.warning(f"[orchestrator] 步骤 {sid} 工具返回错误 tool={tname} attempt={tool_call_count}")
-                # 错误时继续循环，让 LLM 看到错误后修正（不直接 return）
+                # Task 2 (P0-2)：按失败签名计数；达 2 次注入强制换工具指令，达 3 次跳过步骤。
+                fkey = _make_fail_key(tname, targs)
+                fails = fail_counts.get(fkey, 0) + 1
+                fail_counts[fkey] = fails
+                if fails >= 3:
+                    reason = f"同一工具与参数连续失败 3 次（{fails}），跳过步骤 {sid}：{tname}"
+                    results[sid] = json.dumps({"skipped": True, "skipped_reason": reason}, ensure_ascii=False)
+                    await emit({"type": "tool_result", "name": tname, "result": results[sid]})
+                    logger.warning(f"[orchestrator] 步骤 {sid} 因 {reason} 跳过")
+                    self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count, True)
+                    return
+                if fails == 2:
+                    force_msg = (
+                        f"[系统指令] 检测到同一工具与参数连续失败 2 次（工具：{tname}，"
+                        f"参数：{json.dumps(targs, ensure_ascii=False)}）。"
+                        f"请务必更换工具或修改参数后再尝试，不要再调用工具 {tname}。"
+                    )
+                    messages.append({"role": "system", "content": force_msg})
+                    logger.warning(f"[orchestrator] 步骤 {sid} 注入强制换工具指令 (fails={fails})")
+                # 错误时继续循环（含强制换工具指令后），让 LLM 看到错误后修正
                 continue
 
             # 工具成功：如果是 chart 步骤，发 chart 事件
@@ -431,11 +592,50 @@ class AgentOrchestrator:
         results[sid] = last_result or json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
         logger.warning(f"[orchestrator] 步骤 {sid} 达到工具调用上限 {self._MAX_TOOL_CALLS_PER_STEP}")
         self._record_step_trace(shared.get("trace"), sid, "max_calls", tool_call_count, False)
- 
+
+    async def _execute_tool_once(
+        self,
+        user_id: str,
+        db_session,
+        tname: str,
+        targs: dict,
+        tool,
+        shared: dict,
+    ) -> str:
+        """执行单次工具调用并返回结果字符串（含观测 span 与异常兜底）。"""
+        trace = shared.get("trace")
+        span_obj = None
+        try:
+            if trace is not None:
+                with observe_tool_call(trace, tname, args=targs) as span:
+                    span_obj = span
+                    result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
+            else:
+                result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
+        except Exception as e:
+            result_str = json.dumps({"error": str(e)}, ensure_ascii=False)
+        if span_obj is not None:
+            try:
+                parsed_res = json.loads(result_str)
+                is_error = isinstance(parsed_res, dict) and "error" in parsed_res
+            except Exception:
+                is_error = False
+            span_obj.update(
+                output=result_str[:300],
+                metadata={"ok": not is_error, "attempt": 1},
+            )
+        return result_str
+
     def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
         """构建执行 Agent 上下文：用户问题 + 当前步骤 + 依赖步骤结果 + 数据源信息。"""
         parts: list[str] = []
         parts.append(f"用户问题：{shared.get(_K_USER_MSG, _K_EMPTY)}")
+        # Task 9 (P2-11)：注入异常安全的会话历史摘要。
+        hist = shared.get("history")
+        if hist:
+            summary = _summarize_history_safe(hist)
+            if summary:
+                parts.append("对话历史摘要：" + summary.strip())
         parts.append(f"当前步骤（step_id={step[_K_STEP_ID]}）：目标：{step.get(_K_GOAL, _K_EMPTY)}；建议工具：{step.get(_K_TOOL) or _K_NO_TOOL}")
         prior: list[str] = []
         for dep in step.get("depends_on") or []:
@@ -465,13 +665,15 @@ class AgentOrchestrator:
     # ── 图节点：报告（ReportAgent）／错误 ──
     async def _report_node(self, state: dict, **shared) -> dict:
         emit = shared["emit"]
-        await emit({"type": "status", "message": "正在生成分析报告..."})
-        report = await self._generate_report(
+        # Task 11 (P2-9)：reporting 阶段事件。
+        await emit({"type": "status", "phase": "reporting", "message": "正在生成分析报告..."})
+        report, source = await self._generate_report(
             shared["user_msg"],
             state.get("plan") or {},
             state.get("results") or {},
+            history=shared.get("history"),
         )
-        await emit({"type": "text", "content": report})
+        await emit({"type": "text", "content": report, "report_source": source})
         await emit({"type": "done"})
         return {}
  
@@ -524,21 +726,111 @@ class AgentOrchestrator:
         user_msg: str,
         plan: dict,
         results: dict[int, str],
-    ) -> str:
-        """基于计划与各步骤执行结果，生成最终中文分析报告。"""
+        history: list[dict] | None = None,
+    ) -> tuple[str, str]:
+        """基于计划与各步骤执行结果，生成最终中文分析报告。
+
+        返回 `(report, report_source)`：source 为 "llm"（LLM 成功）或
+        "template"（异常/空响应时降级为结构化模板报告）。
+        """
         try:
-            prompt = self._build_report_prompt(user_msg, plan, results)
+            prompt = self._build_report_prompt(user_msg, plan, results, history=history)
             response = await self.llm.complete(prompt, temperature=0.4, max_tokens=1500)
-            return response
+            if not (response or "").strip():
+                raise ValueError("LLM 返回空报告，降级模板")
+            return response, "llm"
         except Exception as e:
-            logger.error(f"生成报告失败: {e}")
-            return "报告生成失败，请稍后重试。"
- 
+            logger.error(f"生成报告失败，降级模板报告: {e}")
+            task_summary = (plan or {}).get("task_summary") or ""
+            steps_info = self._build_steps_info(plan, results)
+            return self._generate_template_report(task_summary, steps_info), "template"
+
+    # Task 1 (P0-4)：模板化报告 —— 不依赖 LLM，直接根据计划与步骤结果生成结构化 Markdown。
+    def _build_steps_info(self, plan: dict, results: dict) -> list[dict]:
+        """把计划步骤与执行结果规整为 `{step_id, goal, result}` 列表（按拓扑序）。"""
+        steps_info: list[dict] = []
+        ordered = _topo_sort(list((plan or {}).get("steps") or []))
+        for s in ordered:
+            steps_info.append({
+                "step_id": s["step_id"],
+                "goal": s.get("goal") or s.get("purpose") or s.get("tool") or "",
+                "result": (results or {}).get(s["step_id"], ""),
+            })
+        return steps_info
+
+    @staticmethod
+    def _infer_step_status(result_str: str) -> str:
+        if not result_str or not result_str.strip():
+            return "未执行"
+        try:
+            parsed = json.loads(result_str)
+        except Exception:
+            return "成功"
+        if isinstance(parsed, dict):
+            if parsed.get("skipped") and parsed.get("timeout"):
+                return "超时"
+            if parsed.get("skipped"):
+                return "跳过"
+            if "error" in parsed:
+                return "失败"
+        return "成功"
+
+    @staticmethod
+    def _format_step_detail(result_str: str) -> str:
+        """步骤结果的简明摘要（数据表前 5 行 / 图表说明 / 文本，暂无则不输出）。"""
+        if not result_str or not result_str.strip():
+            return ""
+        try:
+            parsed = json.loads(result_str)
+        except Exception:
+            return str(result_str)[:300]
+        if not isinstance(parsed, dict):
+            return str(result_str)[:300]
+        if parsed.get("text"):
+            return str(parsed["text"])[:300]
+        if "chart_type" in parsed or "option" in parsed:
+            return f"已生成图表（类型：{parsed.get('chart_type', 'chart')}）"
+        if "columns" in parsed or "rows" in parsed:
+            columns = parsed.get("columns") or []
+            rows = parsed.get("rows") or []
+            out: list[str] = []
+            for row in rows[:5]:
+                if isinstance(row, list):
+                    cells = [f"{columns[i]}={row[i]}" for i in range(min(len(columns), len(row)))]
+                elif isinstance(row, dict):
+                    cells = [f"{c}={row.get(c)}" for c in columns]
+                else:
+                    cells = [str(row)]
+                out.append("- " + ", ".join(cells))
+            out.append(f"... 共 {len(rows)} 行" if len(rows) > 5 else f"共 {len(rows)} 行")
+            return "\n".join(out)
+        if "error" in parsed or parsed.get("skipped"):
+            return ""
+        return str(result_str)[:300]
+
+    def _generate_template_report(self, task_summary: str, steps_info: list[dict]) -> str:
+        """生成纯模板的降级报告：标题 + 各步骤状态/摘要 + 综合说明，零 LLM 依赖。"""
+        title = (task_summary or "").strip() or "任务执行报告"
+        lines: list[str] = [f"# {title}", ""]
+        for info in steps_info or []:
+            sid = info.get("step_id", "?")
+            goal = info.get("goal") or info.get("name") or "未命名步骤"
+            result_str = info.get("result") or ""
+            lines.append(f"步骤 {sid}：{goal}")
+            lines.append(f"状态：{self._infer_step_status(result_str)}")
+            detail = self._format_step_detail(result_str)
+            if detail:
+                lines.append(detail)
+            lines.append("")
+        lines.append("以上为系统自动生成的结构化报告。")
+        return "\n".join(lines)
+
     def _build_report_prompt(
         self,
         user_msg: str,
         plan: dict,
         results: dict[int, str],
+        history: list[dict] | None = None,
     ) -> list[dict[str, str]]:
         """构建报告提示词。"""
         steps_info = []
@@ -569,8 +861,14 @@ class AgentOrchestrator:
 4. 引用真实数据，不编造
 """
  
+        # Task 9 (P2-11)：注入对话历史摘要。
+        history_block = ""
+        if history:
+            summary = _summarize_history_safe(history)
+            if summary:
+                history_block = f"对话历史摘要：\n{summary}\n\n"
         user_prompt = (
-            f"用户问题: {user_msg}\n\n"
+            f"{history_block}用户问题: {user_msg}\n\n"
             f"执行计划: {json.dumps(plan, ensure_ascii=False)}\n\n"
             f"执行结果:\n" + "\n".join(steps_info) + "\n\n请生成分析报告。"
         )
@@ -598,6 +896,7 @@ class AgentOrchestrator:
             await queue.put(ev)
  
         async def run() -> None:
+            state_sink: dict = {}
             try:
                 observer = get_observer()
                 with observer.trace(
@@ -606,15 +905,32 @@ class AgentOrchestrator:
                     session_id=getattr(self.db_session, "session_id", None) if self.db_session else None,
                     metadata={"user_msg_length": len(user_msg), "history_length": len(history or [])},
                 ) as trace:
-                    await self.graph.invoke(
-                        {"user_id": user_id},
-                        user_msg=user_msg,
-                        history=history or [],
-                        available_datasources=available_datasources,
-                        db_session=self.db_session,
-                        emit=emit,
-                        trace=trace,
+                    # Task 6 (P1-8)：整体执行包超时控制，超时后取消并输出已完成结果的模板报告。
+                    await asyncio.wait_for(
+                        self.graph.invoke(
+                            {"user_id": user_id},
+                            user_msg=user_msg,
+                            history=history or [],
+                            available_datasources=available_datasources,
+                            db_session=self.db_session,
+                            emit=emit,
+                            trace=trace,
+                            state_sink=state_sink,
+                        ),
+                        timeout=settings.AGENT_ORCHESTRATOR_TIMEOUT,
                     )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[orchestrator] 整体执行超时（>{settings.AGENT_ORCHESTRATOR_TIMEOUT}s），"
+                    f"输出已完成步骤的模板报告"
+                )
+                plan = state_sink.get("plan") or {}
+                results = state_sink.get("results") or {}
+                task_summary = plan.get("task_summary") or ""
+                steps_info = self._build_steps_info(plan, results)
+                report = self._generate_template_report(task_summary, steps_info)
+                await emit({"type": "text", "content": report, "report_source": "template"})
+                await emit({"type": "done", "timeout": True})
             except Exception as e:
                 logger.exception(f"[orchestrator] 图执行异常: {e}")
                 await emit({"type": "error", "message": f"执行异常: {str(e)}"})

@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # 简单任务（短消息/列数据源）始终走状态机；仅复杂任务进入编排
     AGENT_ORCHESTRATOR_ENABLED: bool = True
 
+    # Task 6 (P1-8)：编排器超时控制
+    AGENT_STEP_TIMEOUT: int = 30  # 单步骤超时（秒）
+    AGENT_ORCHESTRATOR_TIMEOUT: int = 60  # 整个编排流程超时（秒）
+
     @property
     def is_ai_configured(self) -> bool:
         return bool(self.openai_api_key)
