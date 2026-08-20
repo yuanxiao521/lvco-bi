@@ -86,12 +86,14 @@ class GuardResult:
         reason:  拦截原因描述，仅当 allowed=False 时有意义。
         sanitized_input: 经 L1 净化后的用户输入文本。
         sanitized_sql:   经 L3 净化（含自动 LIMIT 注入）后的最终 SQL。
+        ast_details:     AST 语法树校验详细信息（L4），当 AST 未运行时为 None。
     """
     allowed: bool
     layer: int = 0
     reason: str = ""
     sanitized_input: str = ""
     sanitized_sql: str = ""
+    ast_details: dict | None = None  # AST 校验详细信息
 
 
 class SQLGuard:
@@ -187,6 +189,7 @@ class SQLGuard:
         """L3 SQL 输出控制：对最终生成的 SQL 语句做安全校验。
 
         检查要点：
+        0. AST 语法树校验（新增，优先级最高）—— 基于 SQLGlot 解析的精准校验；
         1. 仅允许 SELECT 查询，拒绝其他 DDL/DML 语句；
         2. 检测是否包含黑名单关键字（DROP / DELETE / EXEC 等）；
         3. 去除字符串字面量后检测多语句（分号）；
@@ -199,6 +202,15 @@ class SQLGuard:
             (安全 SQL, 拦截原因或 None)。
             如果返回了拦截原因（str），则表示该 SQL 被 L3 拦截。
         """
+        # 第 0 步：AST 语法树校验（新增，优先级最高）
+        from app.services.sql_guard_ast import ast_full_check
+        ast_allowed, ast_reason, ast_sql, _ = ast_full_check(sql)
+        if not ast_allowed:
+            return sql, f"安全拦截（AST 校验）: {ast_reason}"
+
+        # 使用 AST 注入 LIMIT 后的 SQL 替代原始 SQL，后续正则规则作为兜底
+        sql = ast_sql
+
         # 去除首尾空格和末尾分号，避免干扰后续关键字检测
         sql = sql.strip().rstrip(";").strip()
 
@@ -259,10 +271,16 @@ class SQLGuard:
             final_sql, l3_block = cls.validate_sql(generated_sql)
             if l3_block:
                 return GuardResult(allowed=False, layer=3, reason=l3_block)
+
+            # 运行 AST 校验并获取详细信息（validate_sql 内部已通过，此处仅收集细节）
+            from app.services.sql_guard_ast import ast_full_check
+            _, _, _, ast_details = ast_full_check(final_sql)
+
             return GuardResult(
                 allowed=True, layer=0,
                 sanitized_input=sanitized,
                 sanitized_sql=final_sql,
+                ast_details=ast_details,
             )
 
         # 仅输入校验、无 SQL 的场景，直接放行

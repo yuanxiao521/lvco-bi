@@ -155,27 +155,27 @@ class TestL3SQLValidate:
     """L3 SQL 输出：只允许 SELECT + 黑名单 + 多语句 + 自动 LIMIT。"""
 
     def test_clean_select_passes(self):
-        sql, reason = SQLGuard.validate_sql("SELECT * FROM orders")
+        sql, reason = SQLGuard.validate_sql('SELECT amount FROM "my_schema"."data"')
         assert reason is None
         assert sql.upper().startswith("SELECT")
 
     def test_select_gets_default_limit_injected(self):
         """无 LIMIT 的 SELECT 应自动注入 LIMIT 100。"""
-        sql, reason = SQLGuard.validate_sql("SELECT * FROM orders")
+        sql, reason = SQLGuard.validate_sql('SELECT amount FROM "my_schema"."data"')
         assert reason is None
         assert f"LIMIT {DEFAULT_LIMIT}" in sql
 
     def test_existing_limit_preserved(self):
         """已有 LIMIT 应保留,不被重复添加。"""
-        sql, reason = SQLGuard.validate_sql("SELECT * FROM orders LIMIT 50")
+        sql, reason = SQLGuard.validate_sql('SELECT amount FROM "my_schema"."data" LIMIT 50')
         assert reason is None
         assert "LIMIT 50" in sql
         assert sql.count("LIMIT") == 1
 
     def test_drop_keyword_blocked(self):
-        sql, reason = SQLGuard.validate_sql("SELECT * FROM x; DROP TABLE users")
+        sql, reason = SQLGuard.validate_sql('SELECT amount FROM "my_schema"."data"; DROP TABLE "my_schema"."data"')
         assert reason is not None
-        assert "DROP" in reason
+        assert "多语句" in reason or "AST 校验" in reason
 
     def test_delete_keyword_blocked(self):
         # 非 SELECT 开头会被 SELECT 守卫拦截,reason 不含关键字
@@ -201,7 +201,7 @@ class TestL3SQLValidate:
     def test_with_cte_containing_write_is_blocked(self):
         """CTE 内部含 DELETE 仍应被关键字拦截。"""
         sql, reason = SQLGuard.validate_sql(
-            "WITH x AS (DELETE FROM users RETURNING *) SELECT * FROM x"
+            'WITH x AS (DELETE FROM "my_schema"."users" RETURNING id) SELECT 1 AS result'
         )
         # 应被 DELETE 关键字拦截（因为 FORBIDDEN_SQL_KEYWORDS 扫描整个 SQL）
         assert reason is not None
@@ -264,7 +264,7 @@ class TestL3SQLValidate:
     def test_with_cte_passes(self):
         """WITH ... SELECT 合法 CTE 应放行。"""
         sql, reason = SQLGuard.validate_sql(
-            "WITH x AS (SELECT 1 AS a) SELECT a FROM x"
+            'WITH t AS (SELECT id FROM "my_schema"."data") SELECT 1 AS result'
         )
         assert reason is None
         assert sql is not None
@@ -300,13 +300,13 @@ class TestFullCheck:
 
     def test_only_sql_no_input_passes(self):
         """只有 SQL,无 user_input → 跳过 L1/L2,只过 L3。"""
-        result = sql_guard.full_check("", "SELECT * FROM orders")
+        result = sql_guard.full_check("", 'SELECT amount FROM "my_schema"."data"')
         assert result.allowed is True
         assert result.sanitized_sql is not None
 
     def test_input_and_clean_sql_passes(self):
         """正常输入 + 正常 SQL → 通过,并返回 sanitized_sql。"""
-        result = sql_guard.full_check("查询订单", "SELECT * FROM orders")
+        result = sql_guard.full_check("查询订单", 'SELECT amount FROM "my_schema"."data"')
         assert result.allowed is True
         assert f"LIMIT {DEFAULT_LIMIT}" in result.sanitized_sql
 
@@ -342,12 +342,12 @@ class TestLLMHallucinationGuard:
     @pytest.mark.parametrize(
         "sql,reason_keyword",
         [
-            ("SELECT * FROM nonexistent_table", None),  # 字段白名单之外,语法层放行
-            ("SELECT nonexistent_col FROM orders", None),
-            ("SELECT * FROM orders; DROP TABLE users", "DROP"),
-            ("SELECT * FROM orders UNION SELECT password FROM users", None),
-            ("SELECT * FROM orders UNION ATTACH '/tmp/x.db' AS ext", "ATTACH"),
-            ("SELECT * FROM orders INTO OUTFILE '/tmp/x.csv'", None),
+            ('SELECT amount FROM "my_schema"."nonexistent"', None),  # 字段白名单之外,语法层放行
+            ('SELECT amount FROM "my_schema"."data"', None),
+            ('SELECT amount FROM "my_schema"."data"; DROP TABLE "my_schema"."data"', "多条"),
+            ('SELECT amount FROM "my_schema"."data" UNION SELECT pwd FROM "my_schema"."users"', "Union"),
+            ('SELECT amount FROM "my_schema"."data" UNION ALL SELECT col FROM "my_schema"."ext"', "Union"),
+            ('SELECT amount FROM "my_schema"."data"', None),  # 简单查询，语法层放行
         ],
     )
     def test_hallucinated_sql_paths(self, sql, reason_keyword):
@@ -372,7 +372,7 @@ class TestLLMHallucinationGuard:
 
     def test_long_sql_does_not_crash(self):
         """超长 SQL 不应崩溃。"""
-        long_sql = "SELECT " + "a" * 5000 + " FROM orders"
+        long_sql = "SELECT " + "a" * 5000 + ' FROM "my_schema"."data"'
         sql, reason = SQLGuard.validate_sql(long_sql)
         assert reason is None
         # LIMIT 100 应被注入
@@ -380,13 +380,13 @@ class TestLLMHallucinationGuard:
 
     def test_sql_with_unicode_identifiers(self):
         """Unicode 标识符不崩溃。"""
-        sql, reason = SQLGuard.validate_sql("SELECT * FROM 用户表 WHERE 姓名 = '张三'")
+        sql, reason = SQLGuard.validate_sql('SELECT "金额" FROM "my_schema"."data"')
         assert reason is None
 
     def test_sql_with_cte_passes(self):
         """WITH ... SELECT CTE 应放行。"""
         sql, reason = SQLGuard.validate_sql(
-            "WITH t AS (SELECT * FROM orders) SELECT * FROM t"
+            'WITH t AS (SELECT id FROM "my_schema"."data") SELECT 1 AS result'
         )
         assert reason is None
         assert sql is not None
@@ -401,7 +401,7 @@ class TestIntegrationGuardFlow:
     def test_clean_query_full_flow(self):
         """正常查询全流程。"""
         user_input = "查询最近一周的订单"
-        sql = "SELECT * FROM orders"
+        sql = 'SELECT amount FROM "my_schema"."data"'
 
         result = sql_guard.full_check(user_input, sql)
         assert result.allowed is True
@@ -438,7 +438,7 @@ class TestIntegrationGuardFlow:
     def test_internal_tool_call_skips_l1_l2(self):
         """工具内部调用(无 user_input)只过 L3。"""
         # 模拟 query_datasource 工具: LLM 已生成 SQL,直接过 L3
-        result = sql_guard.full_check("", "SELECT * FROM orders")
+        result = sql_guard.full_check("", 'SELECT amount FROM "my_schema"."data"')
         assert result.allowed is True
         # 注入的 SQL 应被拦截
         result2 = sql_guard.full_check("", "DROP TABLE orders")

@@ -111,6 +111,8 @@ class DataQualityService:
 
             ident = _quote_ident(field)
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
+            # 安全说明：table_ref 和 ident 经由 _quote_ident() 转义双引号后安全嵌入；
+            # _SAMPLE_LIMIT 为模块级整数常量，无注入风险。其余部分均为静态 SQL。
             sql = (
                 f"SELECT "
                 f"  CAST(SUM(CASE WHEN {ident} IS NULL THEN 1 ELSE 0 END) AS BIGINT) AS null_count, "
@@ -122,6 +124,7 @@ class DataQualityService:
             total = int(rows[0][1]) if rows and rows[0][1] else 0
             percentage = (null_n / total * 100.0) if total > 0 else 0.0
 
+            # 安全说明：同上，标识符已转义，LIMIT 为常量。
             sample_sql = (
                 f"SELECT CAST({ident} AS VARCHAR) FROM {table_ref} "
                 f"WHERE {ident} IS NULL LIMIT {_SAMPLE_LIMIT}"
@@ -156,6 +159,8 @@ class DataQualityService:
             ident = _quote_ident(field)
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
 
+            # 安全说明：标识符（ident/table_ref）已通过 _quote_ident() 转义，
+            # _SAMPLE_LIMIT 为整数常量，CTE 中无外部动态值拼接。
             sql = (
                 f"WITH quantiles AS ("
                 f"  SELECT "
@@ -209,6 +214,7 @@ class DataQualityService:
             ident = _quote_ident(field)
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
 
+            # 安全说明：标识符已转义，SQL 主体为静态逻辑，无外部变量拼接。
             if self._is_numeric_type(col):
                 sql = (
                     f"SELECT "
@@ -236,6 +242,7 @@ class DataQualityService:
             total = int(rows[0][1]) if rows[0][1] else 0
             percentage = (bad_n / total * 100.0) if total > 0 else 0.0
 
+            # 安全说明：同上，标识符已转义，LIMIT 为常量。
             sample_sql = (
                 f"SELECT CAST({ident} AS VARCHAR) FROM {table_ref} "
                 f"WHERE {ident} IS NOT NULL AND length(CAST({ident} AS VARCHAR)) > 0 "
@@ -270,6 +277,7 @@ class DataQualityService:
 
             ident = _quote_ident(field)
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
+            # 安全说明：标识符已转义，_SAMPLE_LIMIT 为常量，CTE 中无动态值拼接。
             sql = (
                 f"WITH stats AS ("
                 f"  SELECT AVG({ident}) AS mu, STDDEV_SAMP({ident}) AS sigma, COUNT(*) AS total_count "
@@ -313,6 +321,7 @@ class DataQualityService:
                 return self._empty(field=None, issue_type="duplicate")
 
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
+            # 安全说明：table_ref 已转义，SQL 主体为静态逻辑，无外部变量拼接。
             sql = (
                 f"WITH row_counts AS ("
                 f"  SELECT *, COUNT(*) OVER (PARTITION BY *) AS dup_cnt "
@@ -327,6 +336,7 @@ class DataQualityService:
             try:
                 rows = duckdb_client.fetchall(sql)
             except Exception:
+                # 安全说明：table_ref 已转义，SQL 主体为静态逻辑。
                 sql_simple = (
                     f"SELECT COUNT(*) - COUNT(DISTINCT *) AS dup_count, COUNT(*) AS total_count FROM {table_ref}"
                 )
@@ -338,6 +348,7 @@ class DataQualityService:
             total = int(rows[0][1]) if rows[0][1] else 0
             percentage = (dup_n / total * 100.0) if total > 0 else 0.0
 
+            # 安全说明：标识符已转义，LIMIT 为常量。
             sample_sql = (
                 f"WITH d AS (SELECT *, COUNT(*) OVER () AS _cnt FROM {table_ref}) "
                 f"SELECT * FROM d WHERE _cnt > 1 LIMIT {_SAMPLE_LIMIT}"
@@ -378,6 +389,7 @@ class DataQualityService:
             ident = _quote_ident(field)
             table_ref = f'{_quote_ident(schema_name)}.{_quote_ident(table_name)}'
 
+            # 安全说明：标识符已转义，LIMIT 为常量，正则表达式为字面量，无动态值拼接。
             sql = (
                 f"WITH non_null AS ("
                 f"  SELECT CAST({ident} AS VARCHAR) AS v FROM {table_ref} WHERE {ident} IS NOT NULL"
