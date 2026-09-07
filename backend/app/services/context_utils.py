@@ -22,7 +22,9 @@ def compact_result_json(result_str: str, max_chars: int = _MAX_RESULT_CHARS) -> 
 
     - 输入不是 JSON 或较短时原样返回
     - error 结果完整保留（自纠错依赖错误与 hint）
-    - 成功结果：rows 只留前 _MAX_ROWS 行；insights 等建议列表完整保留，
+    - **元数据类结果（无 rows 键，如 list_datasources 的全量列名）**：不套 1500 一刀切，
+      改用更大的保底上限（RESULT_MAX_META_CHARS），保证 LLM 能拿到完整列名/描述
+    - 查询类结果（含 rows）：rows 只留前 _MAX_ROWS 行；insights 等建议列表完整保留，
       仅受 max_chars 总字符上限兜底
     """
     if not result_str or len(result_str) <= max_chars:
@@ -36,6 +38,10 @@ def compact_result_json(result_str: str, max_chars: int = _MAX_RESULT_CHARS) -> 
     if "error" in obj:
         return result_str  # 错误完整保留，供 LLM 修复
 
+    # 元数据类（无 rows 数据行）→ 用较大的保底上限，避免列名/描述被腰斩
+    has_rows = isinstance(obj.get("rows"), list)
+    cap = max_chars if has_rows else max(max_chars, settings.RESULT_MAX_META_CHARS)
+
     out: dict[str, Any] = {}
     for k, v in obj.items():
         if k == "rows" and isinstance(v, list):
@@ -43,10 +49,10 @@ def compact_result_json(result_str: str, max_chars: int = _MAX_RESULT_CHARS) -> 
             out["rows_total"] = len(v)
             out["rows_truncated"] = len(v) > _MAX_ROWS
         else:
-            out[k] = v  # insights 等建议列表完整保留，仅受 max_chars 兜底
+            out[k] = v  # insights 等建议列表完整保留，仅受 cap 兜底
     s = json.dumps(out, ensure_ascii=False, default=str)
-    if len(s) > max_chars:
-        s = s[:max_chars] + "…(已截断)"
+    if len(s) > cap:
+        s = s[:cap] + "…(已截断)"
     return s
 
 

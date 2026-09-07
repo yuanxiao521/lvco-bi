@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # 完整保留，仅受上方 RESULT_MAX_CHARS 总字符上限兜底）
     RESULT_MAX_CHARS: int = 1500
     RESULT_MAX_ROWS: int = 10
+    # 元数据类结果（无 rows 键，如 list_datasources 的完整列名/描述）保底上限。
+    # 这类结果必须完整进入上下文才能让 LLM 拿到全量列名，不能用 1500 一刀切，
+    # 仅用一个较大的上限防 pathological 超大响应。
+    RESULT_MAX_META_CHARS: int = 8000
 
     @property
     def is_ai_configured(self) -> bool:

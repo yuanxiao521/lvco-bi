@@ -207,6 +207,32 @@ def test_compact_result_json_short_passthrough():
     assert compact_result_json(short) == short
 
 
+def test_compact_metadata_result_not_truncated():
+    """元数据类（无 rows，如 list_datasources 全量列名）即使 >1500 也完整保留，不腰斩。"""
+    from app.services.context_utils import compact_result_json
+
+    meta = {"datasources": [{
+        "name": "ds1",
+        "columns": [f"col_{i}" for i in range(80)],
+        "fields": [f"col_{i}(VARCHAR)" for i in range(80)],
+    }]}
+    big = json.dumps(meta, ensure_ascii=False)
+    assert len(big) > 1500  # 超过查询结果上限
+    assert compact_result_json(big) == big  # 完整保留列名
+
+
+def test_compact_metadata_huge_still_capped():
+    """超大元数据仍受大保底上限封顶（防 pathological，不无限放行）。"""
+    from app.services.context_utils import compact_result_json
+    from app.config import settings
+
+    huge = json.dumps({"datasources": [{"name": "x", "columns": ["c" * 2000] * 50}]})
+    assert len(huge) > settings.RESULT_MAX_META_CHARS
+    out = compact_result_json(huge)
+    assert "已截断" in out
+    assert len(out) <= settings.RESULT_MAX_META_CHARS + 10
+
+
 def test_compress_history_folds_old_messages():
     from app.services.context_utils import compress_history
 
