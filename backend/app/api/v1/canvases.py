@@ -324,7 +324,7 @@ async def query_canvas(
         )
 
     # 优先使用请求中指定的数据源（支持一个画布多个数据源），fallback 到画布绑定的数据源
-    query_datasource_id = canvas.datasource_id
+    chart_datasource_id = canvas.datasource_id
     if body.datasource_id:
         try:
             ds_uuid = UUID(body.datasource_id)
@@ -341,13 +341,13 @@ async def query_canvas(
             )
         )
         if ds_check.scalar_one_or_none() is not None:
-            query_datasource_id = ds_uuid
+            chart_datasource_id = ds_uuid
         else:
             logger.warning(
                 "query_canvas: 图表块 datasource_id=%s 不存在，回退到画布默认 %s",
                 str(ds_uuid), str(canvas.datasource_id),
             )
-    if query_datasource_id is None:
+    if chart_datasource_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "MISSING_DATASOURCE", "message": "画布未绑定数据源，请在请求中指定 datasourceId"},
@@ -392,7 +392,7 @@ async def query_canvas(
                     db, current_user.id, metric_key=dm["metric_key"],
                     formula=dm.get("expression", ""),
                     metric_id=(_uuid.UUID(dm["metric_id"]) if dm.get("metric_id") else None),
-                    datasource_id=query_datasource_id,
+                    datasource_id=chart_datasource_id,
                     scenario="canvas_query",
                 )
         config_to_run = ChartQueryConfig(
@@ -406,7 +406,7 @@ async def query_canvas(
 
     try:
         result = await execute_chart_query(
-            datasource_id=query_datasource_id,
+            datasource_id=chart_datasource_id,
             config=config_to_run,
             user_id=current_user.id,
             db=db,

@@ -14,7 +14,7 @@
         with observe_llm_call(trace, "chat", messages=msgs) as span:
             response = await llm.complete(...)
             span.update(output=response, model=model, tokens=usage)
-        with observe_tool_call(trace, "query_datasource", args={"sql": sql}) as span:
+        with observe_tool_call(trace, "query_sql", args={"sql": sql}) as span:
             result = await tool.execute(...)
             span.update(output=result)
 """

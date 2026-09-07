@@ -81,7 +81,7 @@ def test_observe_tool_call_records_args_and_output():
 
     observer = get_observer()
     with observer.trace("test") as trace:
-        with observe_tool_call(trace, "query_datasource", args={"sql": "SELECT 1"}) as span:
+        with observe_tool_call(trace, "query_sql", args={"sql": "SELECT 1"}) as span:
             span.update(output={"rows": [{"x": 1}]})
 
     assert span.span_type == "tool"
