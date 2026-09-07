@@ -613,3 +613,25 @@ def test_tool_registry_includes_stats_analyzer():
     ):
         assert tool in names
     assert len(names) == 16
+
+
+def test_query_tool_descriptions_draw_clear_boundary():
+    """工具描述边界：标准聚合→query_engine 首选，复杂 SQL→query_datasource 兜底。"""
+    from app.services.agent_tools import ToolRegistry
+
+    desc = {t["function"]["name"]: t["function"]["description"] for t in ToolRegistry.schemas()}
+    # query_engine 明确"首选"；query_datasource 明确"兜底"并指向对端
+    assert "首选" in desc["query_engine"]
+    assert "query_datasource" in desc["query_engine"]
+    assert "query_engine" in desc["query_datasource"]  # 兜底说明引用了对端工具
+
+
+def test_orchestrator_prompt_prefers_query_engine():
+    """Planner 示例去 SQL 化：常规聚合示例已改用 query_engine，且工具清单中其列在 query_datasource 之前。"""
+    from app.services.ai_prompts import ORCHESTRATOR_SYSTEM
+
+    text = str(ORCHESTRATOR_SYSTEM)
+    assert '"tool": "query_engine"' in text
+    idx_qe = text.find("query_engine（标准聚合首选")
+    idx_qd = text.find("query_datasource（高级 SQL 兜底")
+    assert idx_qe != -1 and idx_qd != -1 and idx_qe < idx_qd

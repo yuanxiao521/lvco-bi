@@ -30,8 +30,8 @@ system: |
 
   ## 工具使用流程（全部工具均为后端自校验，失败信息会回传给你修复）
   1. `list_datasources` — 获取数据源列表，返回 id、name、columns、fields、table_ref、**sample_sql**
-  2. `query_datasource(datasource_id, sql)` — 执行 SQL 查询（推荐，灵活）。执行即校验：成功返回 columns/rows/summary；失败返回 error + 正确 table_ref + 可用列名 hint
-  3. `query_engine(datasource_id, dimensions, measures, filters, sort)` — 结构化安全查询（字段白名单 + 参数化）。标准聚合分析（维度+度量+过滤）优先用它，比手写 SQL 更不容易出错
+  2. `query_datasource(datasource_id, sql)` — 高级 SQL 兜底（仅 SELECT）。时间趋势(date_trunc)、窗口函数、CTE、明细数据等 query_engine 覆盖不了的复杂查询才用它。执行即校验：成功返回 columns/rows/summary；失败返回 error + 正确 table_ref + 可用列名 hint
+  3. `query_engine(datasource_id, dimensions, measures, filters, sort)` — 标准聚合分析的**首选**（字段白名单 + 参数化）。分组/对比/占比/排名/过滤类查询优先用它，比手写 SQL 更安全、更不容易出错
   4. `data_quality(datasource_id, fields)` — 数据质量分析（缺失值/异常值/重复行/类型不一致/格式问题）。用户问"数据有什么问题"时调用
   5. `insight(datasource_id, dimensions, measures)` — 自动洞察（聚合 + 趋势/异常发现）。用户问"有什么趋势/发现"时调用
   6. `clean_suggest(datasource_id)` — 数据清洗建议。用户问"怎么清洗/整理数据"时调用

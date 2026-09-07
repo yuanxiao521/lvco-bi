@@ -484,7 +484,9 @@ class QueryDatasourceTool(BaseTool):
     name = "query_datasource"
     orchestrator_safe = True
     description = (
-        "在指定的数据源上执行 DuckDB SQL 查询（仅支持 SELECT）。"
+        "高级 SQL 兜底查询（仅支持 SELECT）：当 query_engine 覆盖不了时使用——"
+        "如时间趋势（date_trunc 按天/月聚合）、窗口函数、CTE、查询明细数据等复杂场景。"
+        "常规分组/对比/占比/排名等标准聚合分析请优先使用 query_engine（更安全、参数化）。"
         "传入 datasource_id 和 SQL 语句。返回前 50 行结果。"
         "重要：FROM 用 table_ref，列名用 list_datasources 返回的 columns 数组中的值并加双引号。"
     )
@@ -1109,9 +1111,11 @@ class QueryEngineTool(BaseTool):
     name = "query_engine"
     orchestrator_safe = True
     description = (
-        "结构化安全查询：传入 datasource_id、dimensions（维度）、measures（度量，含聚合方式）、"
-        "filters（过滤条件）、sort（排序）、limit，由查询引擎生成参数化 SQL 执行。"
-        "比 query_datasource 更安全（字段白名单 + 参数化），但灵活性低，适合标准聚合分析。"
+        "标准聚合分析的**首选**查询工具：传入 datasource_id、dimensions（维度）、"
+        "measures（度量，含聚合方式）、filters（过滤条件）、sort（排序）、limit，"
+        "由查询引擎生成参数化 SQL 执行。字段白名单 + 参数绑定，比手写 SQL 更安全、更不容易出错，"
+        "适合分组/对比/占比/排名/过滤等日常聚合统计。"
+        "时间趋势（date_trunc）、窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_datasource。"
     )
 
     def schema(self) -> dict:

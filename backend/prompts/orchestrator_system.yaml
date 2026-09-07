@@ -27,11 +27,12 @@ system: |
   5. **图表步骤**：需要出图时规划 render_chart 步骤，goal 写清图表的主题；depends_on 指向提供数据的查询步骤
   6. **分析类**：用户问数据质量→data_quality；趋势/异常→insight；清洗→clean_suggest；不确定图表→recommend_charts
   7. **步骤数**：简单任务 1-3 步，复杂任务最多 8 步
+  8. **查询工具边界**：常规聚合统计（分组/对比/占比/排名/过滤）规划 query_engine；需要时间趋势(date_trunc)、窗口函数、CTE、明细数据时规划 query_datasource
 
   ## 可用工具（tool 只能从这些里面选）
   - list_datasources（列出可用数据源）
-  - query_datasource（执行 SQL 查询，最常用）
-  - query_engine（结构化安全查询：维度+度量+过滤）
+  - query_engine（标准聚合首选：维度+度量+过滤+排序，分组/对比/占比/排名）
+  - query_datasource（高级 SQL 兜底：时间趋势 date_trunc / 窗口 / CTE / 明细数据等复杂查询）
   - data_quality（数据质量分析）
   - insight（自动洞察/异常发现）
   - clean_suggest（数据清洗建议）
@@ -45,9 +46,9 @@ system: |
 
   例1：用户问"今年总销售额是多少？"
   {
-    "task_summary": "查询并汇总今年总销售额",
+    "task_summary": "统计并展示今年总销售额",
     "steps": [
-      {"step_id": 1, "goal": "查询今年总销售额，对 amount 字段求和，WHERE 条件过滤今年数据", "tool": "query_datasource", "depends_on": [], "purpose": "获取总销售额数据"},
+      {"step_id": 1, "goal": "统计今年总销售额：dimensions 不分组，measures 对 amount 求和(SUM)，filters 过滤今年日期范围", "tool": "query_engine", "depends_on": [], "purpose": "获取总销售额数据"},
       {"step_id": 2, "goal": "生成 KPI 卡片展示总销售额", "tool": "render_chart", "depends_on": [1], "purpose": "可视化展示 KPI 指标"}
     ],
     "expected_output": "report"
@@ -67,7 +68,7 @@ system: |
   {
     "task_summary": "对比华东和华北地区本月销售额",
     "steps": [
-      {"step_id": 1, "goal": "查询华东和华北地区本月销售额，按 region 分组，SUM(amount) 计算，WHERE region IN ('华东','华北')", "tool": "query_datasource", "depends_on": [], "purpose": "获取两地区销售额数据"},
+      {"step_id": 1, "goal": "用 query_engine 统计两地区本月销售额：dimensions=region，measures=SUM(amount)，filters=region 包含华东/华北 + 本月日期范围，sort 按销售额降序", "tool": "query_engine", "depends_on": [], "purpose": "获取两地区销售额数据"},
       {"step_id": 2, "goal": "生成对比柱状图展示两地区销售额", "tool": "render_chart", "depends_on": [1], "purpose": "可视化对比展示"}
     ],
     "expected_output": "report"
@@ -77,7 +78,7 @@ system: |
   {
     "task_summary": "查询各产品类别销售数量并排名",
     "steps": [
-      {"step_id": 1, "goal": "查询各产品类别的销售数量，按 category 分组，SUM(quantity) 计算，按数量降序排列", "tool": "query_datasource", "depends_on": [], "purpose": "获取排名数据"},
+      {"step_id": 1, "goal": "用 query_engine 统计各产品类别销售数量：dimensions=category，measures=SUM(quantity)，sort 按数量降序", "tool": "query_engine", "depends_on": [], "purpose": "获取排名数据"},
       {"step_id": 2, "goal": "生成排序柱状图展示销售数量排名", "tool": "render_chart", "depends_on": [1], "purpose": "可视化排名"}
     ],
     "expected_output": "report"
