@@ -417,6 +417,128 @@ async def test_react_graph_flow_with_trace(fake_registry):
 
 
 # ======================================================================
+# 防爆：大工具结果压缩进上下文（error 完整保留）
+# ======================================================================
+
+
+class MiniRegistry:
+    """极简工具注册表替身（不依赖共享 FakeRegistry，专用于防爆测试）。"""
+
+    _tools: dict = {}
+
+    @classmethod
+    def register(cls, tool) -> None:
+        cls._tools[tool.name] = tool
+
+    @classmethod
+    def get(cls, name):
+        return cls._tools.get(name)
+
+
+class HugeQueryTool:
+    """返回超长结果（>1500 字符）的查询工具，用于验证防爆压缩。"""
+
+    name = "query_datasource"
+
+    def schema(self):
+        return {"type": "function", "function": {"name": "query_datasource", "description": "q",
+                "parameters": {"type": "object", "properties": {"datasource_id": {"type": "string"},
+                               "sql": {"type": "string"}}, "required": ["datasource_id"]}}}
+
+    async def execute(self, **kwargs):
+        return json.dumps({"columns": ["note", "amount"], "rows": [["x" * 40, i] for i in range(200)],
+                           "summary": {"row_count": 200}}, ensure_ascii=False)
+
+
+class ErrorQueryTool:
+    """返回错误结果的查询工具，验证错误完整保留。"""
+
+    name = "query_datasource"
+
+    def schema(self):
+        return {"type": "function", "function": {"name": "query_datasource", "description": "q",
+                "parameters": {"type": "object", "properties": {"datasource_id": {"type": "string"},
+                               "sql": {"type": "string"}}, "required": ["datasource_id"]}}}
+
+    async def execute(self, **kwargs):
+        return json.dumps({"error": "Binder Error: column x not found",
+                           "hint": "table_ref columns a b"}, ensure_ascii=False)
+
+
+class CallOnceLLM:
+    """防爆测试 Mock：第一轮调工具，第二轮纯文本结束。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream_chat_with_tools(self, messages, tools, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            yield {"type": "tool_call", "name": "query_datasource", "id": "c1",
+                   "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT 1"})}
+        else:
+            yield {"type": "text", "content": "完成"}
+
+
+@pytest.mark.asyncio
+async def test_react_tool_result_compacted_into_messages(monkeypatch):
+    """防爆：大工具结果在 React 路径压缩成摘要进 messages，前端事件仍为全量。"""
+    import app.services.agents.tool_executor as tool_exec_mod
+    from app.services.agents.react_agent import ReactGraphAgent
+
+    MiniRegistry._tools = {}
+    MiniRegistry.register(HugeQueryTool())
+    monkeypatch.setattr(tool_exec_mod, "ToolRegistry", MiniRegistry)
+
+    events = []
+
+    async def emit(ev):
+        events.append(ev)
+
+    react = ReactGraphAgent(CallOnceLLM(), [HugeQueryTool().schema()], None)
+    state = await react.run(
+        messages=[{"role": "system", "content": "助手"}, {"role": "user", "content": "查询"}],
+        user_id="u1", db_session=None, initial_phase="analyzing", emit=emit,
+    )
+
+    # LLM 上下文侧：大结果被压缩（rows 截断 + total/truncated 标记）
+    tool_msgs = [m for m in state["messages"] if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    parsed = json.loads(tool_msgs[0]["content"])
+    assert parsed["rows_truncated"] is True
+    assert len(parsed["rows"]) <= 10
+
+    # 前端事件侧：保持全量（防爆只作用于 LLM 上下文）
+    tr = next(e for e in events if e["type"] == "tool_result")
+    event_data = json.loads(tr["result"])
+    assert event_data["summary"]["row_count"] == 200
+    assert len(event_data["rows"]) == 200
+
+
+@pytest.mark.asyncio
+async def test_react_tool_error_result_kept_full(monkeypatch):
+    """防爆边界：error 结果必须完整保留供 LLM 自纠错。"""
+    import app.services.agents.tool_executor as tool_exec_mod
+    from app.services.agents.react_agent import ReactGraphAgent
+
+    MiniRegistry._tools = {}
+    MiniRegistry.register(ErrorQueryTool())
+    monkeypatch.setattr(tool_exec_mod, "ToolRegistry", MiniRegistry)
+
+    react = ReactGraphAgent(CallOnceLLM(), [ErrorQueryTool().schema()], None)
+    state = await react.run(
+        messages=[{"role": "system", "content": "助手"}, {"role": "user", "content": "查询"}],
+        user_id="u1", db_session=None, initial_phase="analyzing", emit=None,
+    )
+
+    tool_msgs = [m for m in state["messages"] if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    parsed = json.loads(tool_msgs[0]["content"])
+    assert parsed["error"] == "Binder Error: column x not found"
+    assert parsed["hint"] == "table_ref columns a b"
+
+
+# ======================================================================
 # 画布提取辅助函数
 # ======================================================================
 

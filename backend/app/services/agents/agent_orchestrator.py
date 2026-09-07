@@ -536,7 +536,8 @@ class AgentOrchestrator:
                 messages.append({
                     "role": "tool",
                     "tool_call_id": pr.tc.get("id", f"call_{tool_call_count + i}"),
-                    "content": pr.result,
+                    # 防爆：大结果压缩后进上下文（error 结果由 compact_result_json 完整保留供自纠错）
+                    "content": compact_result_json(pr.result),
                 })
                 self._record_step_trace(shared.get("trace"), sid, pr.name, tool_call_count + i + 1, _is_error or _is_fatal)
 

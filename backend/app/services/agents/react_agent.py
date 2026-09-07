@@ -19,6 +19,7 @@ from typing import Any
 from app.services.agents.graph import Graph
 from app.services.agent_tools import ConversationPhase, get_tools_for_phase
 from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
+from app.services.context_utils import compact_result_json
 
 from app.services.llm_client import LLMClient
 
@@ -184,7 +185,8 @@ class ReactGraphAgent:
             messages.append({
                 "role": "tool",
                 "tool_call_id": pr.tc.get("id", f"call_{len(messages)}"),
-                "content": pr.result,
+                # 防爆：大结果压缩后进上下文（error 结果由 compact_result_json 完整保留供自纠错）
+                "content": compact_result_json(pr.result),
             })
 
         # 熔断：连续查询失败超过阈值，终止循环
