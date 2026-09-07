@@ -1,4 +1,4 @@
-"""SQLGuard 三层防护单元测试。
+﻿"""SQLGuard 三层防护单元测试。
 
 覆盖范围：
 - L1 输入净化（Prompt 注入 / 长度 / 危险输入模式）
@@ -437,7 +437,7 @@ class TestIntegrationGuardFlow:
 
     def test_internal_tool_call_skips_l1_l2(self):
         """工具内部调用(无 user_input)只过 L3。"""
-        # 模拟 query_datasource 工具: LLM 已生成 SQL,直接过 L3
+        # 模拟 query_sql 工具: LLM 已生成 SQL,直接过 L3
         result = sql_guard.full_check("", 'SELECT amount FROM "my_schema"."data"')
         assert result.allowed is True
         # 注入的 SQL 应被拦截

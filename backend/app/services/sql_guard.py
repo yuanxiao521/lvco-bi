@@ -1,4 +1,4 @@
-"""三层 SQL 安全防护模块。
+﻿"""三层 SQL 安全防护模块。
 
 该模块对用户输入和生成的 SQL 进行逐层安全检查，防止恶意操作和数据泄露。
 共有三个防护层级：
@@ -244,7 +244,7 @@ class SQLGuard:
     def full_check(cls, user_input: str, generated_sql: str = "") -> GuardResult:
         """三层完整检测入口，按顺序执行 L1 -> L2 -> L3。
 
-        当 user_input 为空时（例如 agent 工具内部直接调用 query_datasource），
+        当 user_input 为空时（例如 agent 工具内部直接调用 query_sql），
         自动跳过 L1 和 L2，仅对 SQL 执行 L3 检测。
         当 generated_sql 为空时（仅校验输入），跳过 L3 直接返回。
 

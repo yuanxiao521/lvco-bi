@@ -1,4 +1,4 @@
-"""Agent 工具注册：list_datasources, query_datasource, render_chart."""
+﻿"""Agent 工具注册：list_datasources, query_sql, render_chart."""
 import json
 import logging
 import re
@@ -18,12 +18,12 @@ class ConversationPhase(str, Enum):
 
     枚举值：
         SELECTING：选数据源阶段，只暴露 list_datasources 工具
-        ANALYZING：查数据阶段，暴露 query_datasource 和 list_datasources（查询失败时自纠错需要）
+        ANALYZING：查数据阶段，暴露 query_sql 和 list_datasources（查询失败时自纠错需要）
         GENERATING：生图表阶段，只暴露 render_chart 工具
         REPORTING：出报告阶段，无工具可用，纯文本输出
     """
     SELECTING = "selecting"      # 选数据源 → 只暴露 list_datasources
-    ANALYZING = "analyzing"      # 查数据   → 只暴露 query_datasource
+    ANALYZING = "analyzing"      # 查数据   → 只暴露 query_sql
     GENERATING = "generating"    # 生图表   → 只暴露 render_chart
     REPORTING = "reporting"      # 出报告   → 无工具，纯文本
 
@@ -38,7 +38,7 @@ _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
     ConversationPhase.ANALYZING: {
         "list_datasources",
         "list_fields",
-        "query_datasource",
+        "query_sql",
         "query_engine",
         "data_quality",
         "insight",
@@ -528,7 +528,7 @@ class ListFieldsTool(BaseTool):
 class QueryDatasourceTool(BaseTool):
     """执行 SQL 查询（带三层安全防护）"""
 
-    name = "query_datasource"
+    name = "query_sql"
     orchestrator_safe = True
     description = (
         "高级 SQL 兜底查询（仅支持 SELECT）：当 query_engine 覆盖不了时使用——"
@@ -1163,7 +1163,7 @@ class QueryEngineTool(BaseTool):
         "measures（度量，含聚合方式）、filters（过滤条件）、sort（排序）、limit，"
         "由查询引擎生成参数化 SQL 执行。字段白名单 + 参数绑定，比手写 SQL 更安全、更不容易出错，"
         "适合分组/对比/占比/排名/过滤等日常聚合统计。"
-        "时间趋势（date_trunc）、窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_datasource。"
+        "时间趋势（date_trunc）、窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_sql。"
     )
 
     def schema(self) -> dict:
@@ -1659,7 +1659,7 @@ class StatsAnalyzerTool(BaseTool):
             rows_2d = list(rows or [])
             if not cols or not rows_2d:
                 return json.dumps({
-                    "error": "数据为空，请先通过 query_datasource/query_engine 查询获取数据",
+                    "error": "数据为空，请先通过 query_sql/query_engine 查询获取数据",
                     "hint": "先执行查询步骤，再让本步骤依赖该查询步骤的结果",
                 }, ensure_ascii=False)
             # 内嵌校验：行宽与列数对齐
@@ -1733,7 +1733,7 @@ class StatsAnalyzerTool(BaseTool):
 # ==================== 注册工具 ====================
 
 list_datasources_tool = ListDatasourcesTool()
-query_datasource_tool = QueryDatasourceTool()
+query_sql_tool = QueryDatasourceTool()
 render_chart_tool = RenderChartTool()
 validate_chart_tool = ValidateChartTool()
 query_engine_tool = QueryEngineTool()
@@ -1746,7 +1746,7 @@ stats_analyzer_tool = StatsAnalyzerTool()
 
 ToolRegistry.register(list_datasources_tool)
 ToolRegistry.register(ListFieldsTool())
-ToolRegistry.register(query_datasource_tool)
+ToolRegistry.register(query_sql_tool)
 ToolRegistry.register(render_chart_tool)
 ToolRegistry.register(validate_chart_tool)
 ToolRegistry.register(query_engine_tool)

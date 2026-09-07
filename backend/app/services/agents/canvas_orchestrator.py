@@ -1,4 +1,4 @@
-"""CanvasOrchestrator：画布专用编排器（报告骨架 → 落块执行 → 简短总结）。
+﻿"""CanvasOrchestrator：画布专用编排器（报告骨架 → 落块执行 → 简短总结）。
 
 与 AgentOrchestrator 的关系：**编排策略独立**，仅复用底层设施。
 - 独立：Planner 用画布版 prompt（canvas_planner_system）规划"报告骨架"
@@ -8,7 +8,7 @@
 - 复用：Graph 图引擎、ToolExecutor 执行内核、模块级辅助（拓扑排序/分层/失败签名/历史摘要）。
 
 设计取舍：
-- add_chart_block 后端自验证取数，因此骨架里不需要单独的 query_datasource 步骤；
+- add_chart_block 后端自验证取数，因此骨架里不需要单独的 query_sql 步骤；
 - 工具白名单严格 = 入口注入的画布工具集（由 ai.py 画布入口传入 CANVAS_ALLOWED_TOOL_NAMES），
   Executor 只能执行白名单内工具；
 - 步骤依赖（depends_on）控制叙事/章节顺序，同层并发执行。

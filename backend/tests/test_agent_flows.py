@@ -1,4 +1,4 @@
-"""Agent 链路回归测试（图引擎 / 编排器 / ReAct / 工具 / 上下文压缩）。
+﻿"""Agent 链路回归测试（图引擎 / 编排器 / ReAct / 工具 / 上下文压缩）。
 
 覆盖 Phase 1.6-1.9 + Phase 2 的关键行为：
 - 编排器：Planner 骨架 → Executor agentic 执行 → 失败重试（≤3）→ 图表 → 报告；trace 观测统计
@@ -45,7 +45,7 @@ class MockOrchestratorLLM:
             return json.dumps({
                 "task_summary": "测试任务",
                 "steps": [
-                    {"step_id": 1, "goal": "查询各区域销售额", "tool": "query_datasource", "depends_on": [], "purpose": "获取数据"},
+                    {"step_id": 1, "goal": "查询各区域销售额", "tool": "query_sql", "depends_on": [], "purpose": "获取数据"},
                     {"step_id": 2, "goal": "生成柱状图", "tool": "render_chart", "depends_on": [1], "purpose": "可视化"},
                 ],
                 "expected_output": "report",
@@ -69,10 +69,10 @@ class MockOrchestratorLLM:
             # 查询步骤：失败 1 次（broken）→ 重试成功（ok）→ 纯文本结束步骤
             self._q_calls += 1
             if self._q_calls == 1:
-                yield {"type": "tool_call", "name": "query_datasource", "id": "call_q1",
+                yield {"type": "tool_call", "name": "query_sql", "id": "call_q1",
                        "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT broken"})}
             elif self._q_calls == 2:
-                yield {"type": "tool_call", "name": "query_datasource", "id": "call_q2",
+                yield {"type": "tool_call", "name": "query_sql", "id": "call_q2",
                        "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT ok"})}
             else:
                 yield {"type": "text", "content": ""}  # 纯文本（空）结束查询步骤
@@ -87,22 +87,22 @@ class MockReactLLM:
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         self.calls += 1
         if self.calls == 1:
-            yield {"type": "tool_call", "name": "query_datasource", "id": "c1",
+            yield {"type": "tool_call", "name": "query_sql", "id": "c1",
                    "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT region, amount FROM data"})}
         else:
             yield {"type": "text", "content": "## 分析结果\n\n**金额 100**"}
 
 
 class FakeQueryTool:
-    """query_datasource Fake：broken SQL 返回错误（含 hint），否则返回 50 行结果。"""
+    """query_sql Fake：broken SQL 返回错误（含 hint），否则返回 50 行结果。"""
 
-    name = "query_datasource"
+    name = "query_sql"
 
     def __init__(self) -> None:
         self.calls = 0
 
     def schema(self):
-        return {"type": "function", "function": {"name": "query_datasource", "description": "q",
+        return {"type": "function", "function": {"name": "query_sql", "description": "q",
                 "parameters": {"type": "object", "properties": {"datasource_id": {"type": "string"},
                                "sql": {"type": "string"}}, "required": ["datasource_id"]}}}
 
@@ -297,7 +297,7 @@ async def test_smart_compress_chains_after_injected_memory():
         msgs.append({
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"function": {"name": "query_datasource"}}],
+            "tool_calls": [{"function": {"name": "query_sql"}}],
         })
         msgs.append({"role": "tool", "content": f'{{"columns": ["c"], "rows": [["{i}", {i}]]}}'})
         msgs.append({"role": "assistant", "content": f"answer {i}"})
@@ -365,7 +365,7 @@ async def test_orchestrator_full_flow_with_retry_and_trace(fake_registry):
 
     capture = TraceCapture()
     orch_mod.get_observer = lambda: capture
-    fq = fake_registry.get("query_datasource")
+    fq = fake_registry.get("query_sql")
     ml = MockOrchestratorLLM()
     orch = AgentOrchestrator(ml, None)
 
@@ -437,7 +437,7 @@ async def test_react_graph_flow_with_trace(fake_registry):
     assert ml.calls == 2
     assert trace.metadata.get("tool_success_count") == 1
     assert trace.metadata.get("iterations") == 2
-    assert trace.metadata.get("executed_tool_names") == ["query_datasource"]
+    assert trace.metadata.get("executed_tool_names") == ["query_sql"]
     assert trace.metadata.get("done_reason") == "final_answer"
     assert len([s for s in trace.children if s.span_type == "tool"]) == 1
 
@@ -464,10 +464,10 @@ class MiniRegistry:
 class HugeQueryTool:
     """返回超长结果（>1500 字符）的查询工具，用于验证防爆压缩。"""
 
-    name = "query_datasource"
+    name = "query_sql"
 
     def schema(self):
-        return {"type": "function", "function": {"name": "query_datasource", "description": "q",
+        return {"type": "function", "function": {"name": "query_sql", "description": "q",
                 "parameters": {"type": "object", "properties": {"datasource_id": {"type": "string"},
                                "sql": {"type": "string"}}, "required": ["datasource_id"]}}}
 
@@ -479,10 +479,10 @@ class HugeQueryTool:
 class ErrorQueryTool:
     """返回错误结果的查询工具，验证错误完整保留。"""
 
-    name = "query_datasource"
+    name = "query_sql"
 
     def schema(self):
-        return {"type": "function", "function": {"name": "query_datasource", "description": "q",
+        return {"type": "function", "function": {"name": "query_sql", "description": "q",
                 "parameters": {"type": "object", "properties": {"datasource_id": {"type": "string"},
                                "sql": {"type": "string"}}, "required": ["datasource_id"]}}}
 
@@ -500,7 +500,7 @@ class CallOnceLLM:
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         self.calls += 1
         if self.calls == 1:
-            yield {"type": "tool_call", "name": "query_datasource", "id": "c1",
+            yield {"type": "tool_call", "name": "query_sql", "id": "c1",
                    "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT 1"})}
         else:
             yield {"type": "text", "content": "完成"}
@@ -648,8 +648,8 @@ def test_list_datasources_returns_table_level_only():
 
     desc = next(t for t in ToolRegistry.schemas() if t["function"]["name"] == "list_datasources")
     assert "list_fields(datasource_id)" in desc["function"]["description"]
-    # query_datasource 描述明确严禁 SELECT *，列名来源指向 list_fields
-    qd = next(t for t in ToolRegistry.schemas() if t["function"]["name"] == "query_datasource")
+    # query_sql 描述明确严禁 SELECT *，列名来源指向 list_fields
+    qd = next(t for t in ToolRegistry.schemas() if t["function"]["name"] == "query_sql")
     assert "严禁写 SELECT *" in qd["function"]["description"]
     assert "list_fields" in qd["function"]["description"]
 
@@ -701,22 +701,22 @@ async def test_list_fields_unknown_datasource_returns_error():
 
 
 def test_query_tool_descriptions_draw_clear_boundary():
-    """工具描述边界：标准聚合→query_engine 首选，复杂 SQL→query_datasource 兜底。"""
+    """工具描述边界：标准聚合→query_engine 首选，复杂 SQL→query_sql 兜底。"""
     from app.services.agent_tools import ToolRegistry
 
     desc = {t["function"]["name"]: t["function"]["description"] for t in ToolRegistry.schemas()}
-    # query_engine 明确"首选"；query_datasource 明确"兜底"并指向对端
+    # query_engine 明确"首选"；query_sql 明确"兜底"并指向对端
     assert "首选" in desc["query_engine"]
-    assert "query_datasource" in desc["query_engine"]
-    assert "query_engine" in desc["query_datasource"]  # 兜底说明引用了对端工具
+    assert "query_sql" in desc["query_engine"]
+    assert "query_engine" in desc["query_sql"]  # 兜底说明引用了对端工具
 
 
 def test_orchestrator_prompt_prefers_query_engine():
-    """Planner 示例去 SQL 化：常规聚合示例已改用 query_engine，且工具清单中其列在 query_datasource 之前。"""
+    """Planner 示例去 SQL 化：常规聚合示例已改用 query_engine，且工具清单中其列在 query_sql 之前。"""
     from app.services.ai_prompts import ORCHESTRATOR_SYSTEM
 
     text = str(ORCHESTRATOR_SYSTEM)
     assert '"tool": "query_engine"' in text
     idx_qe = text.find("query_engine（标准聚合首选")
-    idx_qd = text.find("query_datasource（高级 SQL 兜底")
+    idx_qd = text.find("query_sql（高级 SQL 兜底")
     assert idx_qe != -1 and idx_qd != -1 and idx_qe < idx_qd

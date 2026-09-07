@@ -1,4 +1,4 @@
-"""AgentOrchestrator：多 Agent 协作编排器（骨架规划 + Agentic 执行，LangGraph 模式，零依赖）。
+﻿"""AgentOrchestrator：多 Agent 协作编排器（骨架规划 + Agentic 执行，LangGraph 模式，零依赖）。
  
 多 Agent 协作模式：
     PlannerAgent（规划 Agent）：生成【骨架计划】——只定步骤目标/建议工具/依赖，不写死参数
@@ -270,7 +270,7 @@ class AgentOrchestrator:
                 {
                     "step_id": 1,
                     "goal": f"查询数据回答用户问题：{user_msg}。数据源为 {ds0.get('name', 'default')}（{ds_desc}）{field_hint}，请根据字段名生成合适的 SQL 查询",
-                    "tool": "query_datasource",
+                    "tool": "query_sql",
                     "depends_on": [],
                     "purpose": "直接查询数据回答用户问题",
                 },

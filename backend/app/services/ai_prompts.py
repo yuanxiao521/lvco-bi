@@ -1,4 +1,4 @@
-"""AI Prompt 兼容层。
+﻿"""AI Prompt 兼容层。
 
 向后兼容：保留原有常量名，但值从 PromptRegistry 加载。
 新代码应直接使用 PromptRegistry。
@@ -289,7 +289,7 @@ _AGENT_SYSTEM_FALLBACK = """你是 Lvco BI 的 AI 数据分析助手，名叫 Lv
 ## 工具使用流程（全部工具均为后端自校验，失败信息会回传给你修复）
 1. `list_datasources` — 列出数据源（表级：id、名称、类型、行数、table_ref，不含列名）
   2. `list_fields(datasource_id)` — 获取指定数据源的完整字段/列名（columns + 类型）。查询前或字段不确定时先调它
-  3. `query_datasource(datasource_id, sql)` — 高级 SQL 兜底（仅 SELECT，时间趋势/窗口/CTE/明细）。**严禁 SELECT *，列名用 list_fields 返回的 columns**（执行即校验，失败返回 error + 正确 table_ref + 可用列名 hint）
+  3. `query_sql(datasource_id, sql)` — 高级 SQL 兜底（仅 SELECT，时间趋势/窗口/CTE/明细）。**严禁 SELECT *，列名用 list_fields 返回的 columns**（执行即校验，失败返回 error + 正确 table_ref + 可用列名 hint）
   4. `query_engine(datasource_id, dimensions, measures, filters)` — 标准聚合首选（字段白名单 + 参数化）
   5. `data_quality(datasource_id)` — 数据质量分析（缺失/异常/重复/类型/格式），用户问数据质量时调用
   6. `insight(datasource_id)` — 自动洞察（趋势/异常发现），用户问有什么发现时调用
@@ -418,7 +418,7 @@ _CANVAS_AGENT_SYSTEM_FALLBACK = """你是 Lvco BI 的画布智能体，服务对
 并且能直接驱动用户的分析画布：新建图表块、写标题、写叙事、改块、删块，最终产出一份结构完整的可视化分析报告。
 
 ## 你的核心能力
-- 查询数据：`query_engine` / `query_datasource` 拉取并验证真实数据。
+- 查询数据：`query_engine` / `query_sql` 拉取并验证真实数据。
 - 洞察：`insight` 自动发现趋势 / 异常。
 - 驱动画布：`add_chart_block`（加图表，后端会先查真实数据验证）、`add_text_block`（写 h1/h2/段落叙事）、
   `update_chart_block`（改已存在块，block_id 来自上下文画布块）、`remove_block`（删块）、`arrange_layout`（自动布局）。
@@ -432,7 +432,7 @@ _CANVAS_AGENT_SYSTEM_FALLBACK = """你是 Lvco BI 的画布智能体，服务对
 1. 先 `add_text_block(h1)` 写报告大标题（如：用户增长分析报告）。
 2. 按报告骨架的每一节：
    - `add_text_block(h2)` 写章节标题；
-   - 用 `query_engine` 或 `query_datasource` 查该节要展示的数据；
+   - 用 `query_engine` 或 `query_sql` 查该节要展示的数据；
    - `add_chart_block` 建图（后端自动验证并取数）；
    - 用 `insight` 或基于查询结果生成 1-3 句叙事，`add_text_block(text)` 写在图表下方。
 3. 全部节完成后，可调用 `arrange_layout` 提示前端排版。
@@ -493,7 +493,7 @@ _CANVAS_PLANNER_SYSTEM_FALLBACK = """你是 Lvco BI 的画布报告规划器（C
 你的职责是规划报告骨架：拆成落块步骤（写标题 / 建图表 / 写叙事），步骤间按依赖排序。你不写具体工具参数。
 
 步骤 tool 只用 add_text_block（h1/h2/text）和 add_chart_block（建图表，后端自验证取数），
-不要规划 query_datasource / render_chart / insight 等非画布工具。
+不要规划 query_sql / render_chart / insight 等非画布工具。
 报告骨架顺序：先 h1 大标题 → 每章 add_chart_block 图表 + add_text_block(text) 叙事 → 章节间可加 h2。
 每张图表之后必须紧跟叙事；若上下文已有同主题图表优先 update_chart_block。
 输出严格 JSON：{"task_summary": "...", "steps": [{"step_id": 1, "goal": "...", "tool": "...", "depends_on": [], "purpose": "..."}], "expected_output": "report"}

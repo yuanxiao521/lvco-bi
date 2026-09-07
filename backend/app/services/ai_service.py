@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import re
@@ -920,7 +920,7 @@ class AIService:
     ) -> AsyncIterator[dict]:
         """单 Agent 工具调用模式：Phase 状态机（SELECTING→ANALYZING→GENERATING→REPORTING）+ ToolRegistry。
 
-        Agent 通过工具调用完成任务（list_datasources → query_datasource/query_engine → render_chart），
+        Agent 通过工具调用完成任务（list_datasources → query_sql/query_engine → render_chart），
         工具内嵌自校验（L3 防护 + 图表配置校验），失败信息回传 LLM 自纠错。
 
         Args:

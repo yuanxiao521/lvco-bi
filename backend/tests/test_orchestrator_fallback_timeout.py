@@ -1,4 +1,4 @@
-"""编排器 Report 模板化 fallback（Task 1）与超时控制（Task 6）回归测试。
+﻿"""编排器 Report 模板化 fallback（Task 1）与超时控制（Task 6）回归测试。
 
 覆盖：
 - _generate_template_report：纯模板报告（rows 前 5 行摘要 / chart 说明 / 超时状态 / 默认摘要）
@@ -20,7 +20,7 @@ from app.services.agents.agent_orchestrator import AgentOrchestrator
 PLAN = {
     "task_summary": "测试任务：查询并可视化销售额",
     "steps": [
-        {"step_id": 1, "goal": "查询各区域销售额", "tool": "query_datasource",
+        {"step_id": 1, "goal": "查询各区域销售额", "tool": "query_sql",
          "depends_on": [], "purpose": "获取数据"},
         {"step_id": 2, "goal": "生成柱状图", "tool": "render_chart",
          "depends_on": [1], "purpose": "可视化"},

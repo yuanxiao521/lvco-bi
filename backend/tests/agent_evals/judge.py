@@ -1,4 +1,4 @@
-"""Agent 评测评分逻辑。
+﻿"""Agent 评测评分逻辑。
 
 四个核心指标：
 1. SQL 准确率：执行 expected_sql 与 agent_sql，比较结果集是否一致
@@ -93,7 +93,7 @@ def judge_attempt(
     tool_events = [e for e in attempt.events if e.get("type") == "tool_call"]
     tool_results = [e for e in attempt.events if e.get("type") == "tool_result"]
     # "最终成功"模式：某工具只要有任意一次调用成功，就计为该工具成功。
-    # Agent 自纠错场景：query_engine 失败 → 改用 query_datasource 成功，应计为成功
+    # Agent 自纠错场景：query_engine 失败 → 改用 query_sql 成功，应计为成功
     tool_has_success: dict[str, bool] = {}
     for e in tool_results:
         name = e.get("name", "")
@@ -105,9 +105,9 @@ def judge_attempt(
         if not is_err:
             tool_has_success[name] = True
     # 核心工具必须至少有一次成功调用
-    query_ok = tool_has_success.get("query_datasource", False) or tool_has_success.get("query_engine", False)
+    query_ok = tool_has_success.get("query_sql", False) or tool_has_success.get("query_engine", False)
     chart_ok = tool_has_success.get("render_chart", False)
-    called_query = any(e.get("name") in ("query_datasource", "query_engine") for e in tool_events)
+    called_query = any(e.get("name") in ("query_sql", "query_engine") for e in tool_events)
     result.tool_success = called_query and query_ok
     if not result.tool_success:
         result.notes.append(
@@ -454,13 +454,13 @@ def _normalize_chart_types(types: list[str]) -> list[str]:
 
 
 def _extract_agent_sql(events: list[dict[str, Any]]) -> str:
-    """从 agent 工具调用事件中提取最后一个有效的 query_datasource SQL。
+    """从 agent 工具调用事件中提取最后一个有效的 query_sql SQL。
 
     Agent 可能多次查询（探查→纠错→最终查询），取最后一个以反映最终结果。
     """
     last_sql = ""
     for e in events:
-        if e.get("type") == "tool_call" and e.get("name") == "query_datasource":
+        if e.get("type") == "tool_call" and e.get("name") == "query_sql":
             args = e.get("args") or {}
             if isinstance(args, str):
                 try:

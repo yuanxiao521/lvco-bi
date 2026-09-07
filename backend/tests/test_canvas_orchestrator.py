@@ -1,4 +1,4 @@
-"""CanvasOrchestrator 单测：报告骨架规划 → 落块执行 → 总结，严格白名单。
+﻿"""CanvasOrchestrator 单测：报告骨架规划 → 落块执行 → 总结，严格白名单。
 
 覆盖核心差异化：
 - 图结构（plan → execute_steps → finish）
@@ -100,13 +100,13 @@ def test_executor_tools_only_whitelist(monkeypatch):
         "add_text_block": object(),
         "add_chart_block": object(),
         "render_chart": object(),  # 非画布工具，不应出现在 Executor 工具列表
-        "query_datasource": object(),
+        "query_sql": object(),
     })
     orch = _make_orch(extra={"add_text_block", "add_chart_block"})
     names = [t["function"]["name"] for t in orch._executor_tools()]
     assert set(names) == {"add_text_block", "add_chart_block"}
     assert "render_chart" not in names
-    assert "query_datasource" not in names
+    assert "query_sql" not in names
 
 
 def test_executor_tools_empty_without_whitelist(monkeypatch):

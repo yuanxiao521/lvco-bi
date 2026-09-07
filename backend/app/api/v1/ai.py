@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import logging
 import re
@@ -46,7 +46,7 @@ from app.services.canvas_tools import CANVAS_TOOL_NAMES
 # 画布助手允许的工具 = 画布专属落块工具 + 基础查数/出图工具（先查再落）。
 # 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
 _CANVAS_QUERY_TOOL_NAMES = frozenset({
-    "list_datasources", "list_fields", "query_datasource", "query_engine",
+    "list_datasources", "list_fields", "query_sql", "query_engine",
     "stats_analyzer", "recommend_charts",
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
@@ -632,7 +632,7 @@ async def data_chat_stream(
                     result_narration = ""
                     try:
                         parsed = json.loads(result_str) if isinstance(result_str, str) else {}
-                        if tname == "query_datasource":
+                        if tname == "query_sql":
                             if parsed.get("error"):
                                 err_msg = str(parsed.get("error"))[:80]
                                 result_narration = f"> 查询失败：{err_msg}\n"

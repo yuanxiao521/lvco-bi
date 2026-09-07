@@ -1,4 +1,4 @@
-"""Agent 评测运行入口。
+﻿"""Agent 评测运行入口。
 
 执行：
     cd backend && python -m tests.agent_evals.run_eval
@@ -101,7 +101,7 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
     try:
         ai = AIService(LLMClient())
         events: list[dict[str, Any]] = []
-        # db_session 必须真实：list_datasources / query_datasource 都要查库
+        # db_session 必须真实：list_datasources / query_sql 都要查库
         async with async_session_factory() as db:
             async for ev in ai.agent_stream(
                 user_id=user_id,
@@ -136,16 +136,16 @@ async def run_agent_mock(question: dict[str, Any]) -> AttemptTrace:
     if question.get("category") == "canvas":
         attempt.events = _build_mock_canvas_events(question)
     else:
-        # 模拟一次成功执行：调用 query_datasource + render_chart
+        # 模拟一次成功执行：调用 query_sql + render_chart
         attempt.events = [
             {"type": "tool_call", "name": "list_datasources", "args": {}},
             {"type": "tool_result", "name": "list_datasources", "result": '{"items": []}'},
             {
                 "type": "tool_call",
-                "name": "query_datasource",
+                "name": "query_sql",
                 "args": {"sql": question.get("expected_sql_template", "SELECT 1")},
             },
-            {"type": "tool_result", "name": "query_datasource", "result": '{"rows": []}'},
+            {"type": "tool_result", "name": "query_sql", "result": '{"rows": []}'},
             {
                 "type": "tool_call",
                 "name": "render_chart",

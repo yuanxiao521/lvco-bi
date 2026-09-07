@@ -1,4 +1,4 @@
-"""ReactGraphAgent：ReAct 循环的图化实现（LangGraph 模式，零依赖）。
+﻿"""ReactGraphAgent：ReAct 循环的图化实现（LangGraph 模式，零依赖）。
 
 图结构：
     reason（LLM 推理：流式调用 + 按 phase 过滤工具 schema）
@@ -29,7 +29,7 @@ MAX_ITERATIONS = 6
 MAX_CONSECUTIVE_FAILURES = 5  # 连续查询失败熔断阈值
 
 # 阶段流转触发工具（与 agent_stream 原逻辑一致）
-_ANALYZING_TRIGGERS = ("query_datasource", "query_engine")
+_ANALYZING_TRIGGERS = ("query_sql", "query_engine")
 _GENERATING_TRIGGERS = ("render_chart",)
 
 
@@ -175,10 +175,10 @@ class ReactGraphAgent:
             has_error = "error" in result_obj or pr.fatal
             if has_error:
                 tool_error_count += 1
-                if pr.name == "query_datasource":
+                if pr.name == "query_sql":
                     consecutive_query_failures += 1
                     logger.warning(f"[react] query_failed consecutive={consecutive_query_failures}")
-            elif pr.name == "query_datasource":
+            elif pr.name == "query_sql":
                 consecutive_query_failures = 0
                 tool_success_count += 1
 
@@ -249,9 +249,9 @@ class ReactGraphAgent:
     def _build_follow_up(self, executed_tool_names: list[str], has_error: bool, consecutive_query_failures: int) -> str:
         if executed_tool_names and all(n == "list_datasources" for n in executed_tool_names):
             return (
-                "以上是当前可用的数据源列表（每个数据源带 ID，可用于 query_datasource）。\n"
+                "以上是当前可用的数据源列表（每个数据源带 ID，可用于 query_sql）。\n"
                 "请结合用户的原始问题判断：\n"
-                "1. 如果用户问题中已明确提到要分析哪个数据源，直接调用 query_datasource（用对应数据源 ID）"
+                "1. 如果用户问题中已明确提到要分析哪个数据源，直接调用 query_sql（用对应数据源 ID）"
                 "继续查询分析，不要停下来询问；\n"
                 "2. 如果用户没有明确指定，再用友好方式展示数据源列表（名称、类型、关键字段），"
                 "引导用户选择要分析哪个数据源。\n"
@@ -263,13 +263,13 @@ class ReactGraphAgent:
                 "用 ## 标题分段，关键数字用 **加粗**，用 > 引用块展示重要发现。"
                 "**不要再查询了**，直接把报告输出给用户。"
             )
-        if any(n == "query_datasource" for n in executed_tool_names):
+        if any(n == "query_sql" for n in executed_tool_names):
             if has_error:
                 if consecutive_query_failures == 1:
                     return (
                         "上次查询失败了。错误提示中已经包含了正确的 table_ref 和可用列名。"
                         "请**直接用错误提示中的 table_ref 作为 FROM 子句**，用错误提示中的列名拼写 SQL，不要自己编表名或列名。"
-                        "然后调用 query_datasource 重试。"
+                        "然后调用 query_sql 重试。"
                     )
                 if consecutive_query_failures <= 3:
                     return (

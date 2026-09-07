@@ -1,4 +1,4 @@
-"""Planner 输出 schema 校验（Task 5，P1-7）与动态步骤上限（Task 7，P1-5）测试。
+﻿"""Planner 输出 schema 校验（Task 5，P1-7）与动态步骤上限（Task 7，P1-5）测试。
 
 覆盖：
 - PlanOutput / PlanStep pydantic 校验：完整 JSON 通过、depends_on 默认值、缺 goal 报 ValidationError
@@ -47,7 +47,7 @@ class ScriptedLLM:
 VALID_PLAN = {
     "task_summary": "分析各区域销售趋势",
     "steps": [
-        {"step_id": 1, "goal": "查询各区域销售数据", "tool": "query_datasource",
+        {"step_id": 1, "goal": "查询各区域销售数据", "tool": "query_sql",
          "depends_on": [], "purpose": "获取数据"},
         {"step_id": 2, "goal": "生成趋势折线图", "tool": "render_chart",
          "depends_on": [1], "purpose": "可视化"},
@@ -58,7 +58,7 @@ VALID_PLAN = {
 # 缺必填字段 goal → ValidationError
 INVALID_PLAN = {
     "task_summary": "缺字段计划",
-    "steps": [{"step_id": 1, "tool": "query_datasource", "depends_on": []}],
+    "steps": [{"step_id": 1, "tool": "query_sql", "depends_on": []}],
 }
 
 
@@ -67,7 +67,7 @@ def _make_plan(n_steps: int) -> dict:
     return {
         "task_summary": f"多步任务（{n_steps} 步）",
         "steps": [
-            {"step_id": i, "goal": f"步骤 {i}", "tool": "query_datasource", "depends_on": []}
+            {"step_id": i, "goal": f"步骤 {i}", "tool": "query_sql", "depends_on": []}
             for i in range(1, n_steps + 1)
         ],
         "expected_output": "report",
@@ -90,7 +90,7 @@ def test_plan_output_accepts_full_json():
 
 def test_plan_step_depends_on_has_default():
     """缺 depends_on（及 purpose/tool）时使用默认值，应通过校验。"""
-    step = PlanStep.model_validate({"step_id": 1, "goal": "查询数据", "tool": "query_datasource"})
+    step = PlanStep.model_validate({"step_id": 1, "goal": "查询数据", "tool": "query_sql"})
     assert step.depends_on == []
     assert step.purpose == ""
 

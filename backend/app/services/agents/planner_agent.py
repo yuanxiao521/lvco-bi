@@ -1,4 +1,4 @@
-"""PlannerAgent：动态任务规划——把用户任务分解为工具调用计划。
+﻿"""PlannerAgent：动态任务规划——把用户任务分解为工具调用计划。
 
 与旧版（固定 SQL→Chart 流水线）不同，新版 Planner 生成的计划是**动态的工具调用序列**：
 根据任务复杂度自由组合 ToolRegistry 中的任意工具，带依赖关系，交给执行器按计划执行。
@@ -46,7 +46,7 @@ class PlanOutput(BaseModel):
 
 # 兜底白名单：优先从 ToolRegistry 动态获取，异常/空集合时使用此常量
 _ORCHESTRATOR_TOOLS_FALLBACK = frozenset({
-    "list_datasources", "query_datasource", "query_engine", "data_quality",
+    "list_datasources", "query_sql", "query_engine", "data_quality",
     "insight", "clean_suggest", "recommend_charts", "render_chart",
     "validate_chart", "polish_text",
 })
