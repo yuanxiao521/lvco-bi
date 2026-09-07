@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
  
 _CHART_TOOL = "render_chart"
 _MAX_STEP_RETRIES = 3  # 执行 Agent 单步失败重试上限
+_MAX_LLM_CALLS_PER_TASK = 12  # P1-9 全局 LLM 调用上限（含 planner + executor + report），超限后跳过剩余步骤
  
 # Shared state keys (used to avoid LLM prompt injection via key names)
 _K_USER_MSG = "user_msg"
@@ -201,6 +202,11 @@ class AgentOrchestrator:
             f"  datasources: {json.dumps(shared['available_datasources'][:3], ensure_ascii=False)[:500]}"
         )
         
+        # P1-9 计入 planner LLM 调用
+        counter = shared.get("llm_call_counter")
+        if counter is not None:
+            counter["count"] += 1
+
         result = await self.planner.execute(
             user_msg=shared["user_msg"],
             history=shared["history"],
@@ -313,6 +319,21 @@ class AgentOrchestrator:
             memo = {}
             shared["tool_memo"] = memo
         shared.setdefault("tool_memo_lock", asyncio.Lock())
+        # P1-9 全局 LLM 调用闸门：超限后跳过剩余步骤
+        counter = shared.get("llm_call_counter")
+        if counter and counter["count"] >= _MAX_LLM_CALLS_PER_TASK:
+            for step in steps:
+                sid = step["step_id"]
+                skip_result = json.dumps({
+                    "skipped": True,
+                    "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），跳过步骤 {sid}",
+                }, ensure_ascii=False)
+                results[sid] = skip_result
+            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），跳过 {len(steps)} 个执行步骤")
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results}
         levels = _group_steps_by_level(steps)
         for level in levels:
             await asyncio.gather(
@@ -330,6 +351,23 @@ class AgentOrchestrator:
         await emit({"type": "status", "phase": "generating", "message": "正在生成可视化图表..."})
         results = dict(state.get("results") or {})
         ordered = state.get("ordered_steps") or []
+        # P1-9 全局 LLM 调用闸门：超限后跳过图表步骤
+        counter = shared.get("llm_call_counter")
+        if counter and counter["count"] >= _MAX_LLM_CALLS_PER_TASK:
+            for step in ordered:
+                if step["tool"] != _CHART_TOOL:
+                    continue
+                sid = step["step_id"]
+                skip_result = json.dumps({
+                    "skipped": True,
+                    "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），跳过图表步骤 {sid}",
+                }, ensure_ascii=False)
+                results[sid] = skip_result
+            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），跳过图表步骤")
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results}
         for step in ordered:
             if step["tool"] != _CHART_TOOL:
                 continue
@@ -345,7 +383,7 @@ class AgentOrchestrator:
         return "chart" if has_chart else "report"
  
     # ── Agentic 步骤执行：mini ReAct 循环（LLM 可多次调用工具，直到输出文本或达到上限）──
-    _MAX_TOOL_CALLS_PER_STEP = 5  # 单步内最多工具调用次数
+    _MAX_TOOL_CALLS_PER_STEP = 3  # 单步内最多工具调用次数（P1-9 从 5 降到 3，控制成本）
 
     # Task 6 (P1-8)：单步骤超时包装 —— 超时标记 skipped/timeout 并继续整体流程，不中断其他步骤。
     async def _run_step_with_timeout(self, step: dict, results: dict, state: dict, **shared) -> None:
@@ -449,12 +487,25 @@ class AgentOrchestrator:
         # Task 2 (P0-2)：同一步骤内按失败签名（工具+参数哈希）记录连续失败次数。
         fail_counts: dict[str, int] = {}
 
+        # P1-9 全局 LLM 调用计数器：每次 LLM 调用前检查并递增
+        counter = shared.get("llm_call_counter")
+
         # ── mini ReAct 循环：LLM 决策 → 执行工具 → 结果回传 → 再决策 ──
         while tool_call_count < self._MAX_TOOL_CALLS_PER_STEP:
             # 1. LLM 决策：调用工具或输出文本
             tool_calls: list[dict] = []
             text_parts: list[str] = []
             try:
+                # P1-9 递增全局 LLM 调用计数
+                if counter is not None:
+                    counter["count"] += 1
+                    if counter["count"] > _MAX_LLM_CALLS_PER_TASK:
+                        logger.warning(f"[orchestrator] 步骤 {sid} 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），提前终止")
+                        results[sid] = json.dumps({
+                            "skipped": True,
+                            "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），步骤 {sid} 终止",
+                        }, ensure_ascii=False)
+                        return
                 async for event in self.llm.stream_chat_with_tools(
                     messages, all_tools, temperature=0.3, max_tokens=2000,
                 ):
@@ -635,6 +686,10 @@ class AgentOrchestrator:
         emit = shared["emit"]
         # Task 11 (P2-9)：reporting 阶段事件。
         await emit({"type": "status", "phase": "reporting", "message": "正在生成分析报告..."})
+        # P1-9 计入 report LLM 调用
+        counter = shared.get("llm_call_counter")
+        if counter is not None:
+            counter["count"] += 1
         report, source = await self._generate_report(
             shared["user_msg"],
             state.get("plan") or {},
@@ -859,6 +914,8 @@ class AgentOrchestrator:
  
         async def run() -> None:
             state_sink: dict = {}
+            # P1-9 全局 LLM 调用计数器（planner + executor 各步骤 + report）
+            llm_call_counter = {"count": 0}
             try:
                 observer = get_observer()
                 with observer.trace(
@@ -878,6 +935,7 @@ class AgentOrchestrator:
                             emit=emit,
                             trace=trace,
                             state_sink=state_sink,
+                            llm_call_counter=llm_call_counter,
                         ),
                         timeout=settings.AGENT_ORCHESTRATOR_TIMEOUT,
                     )
