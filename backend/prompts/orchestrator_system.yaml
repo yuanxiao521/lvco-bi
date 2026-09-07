@@ -30,7 +30,8 @@ system: |
   8. **查询工具边界**：常规聚合统计（分组/对比/占比/排名/过滤）规划 query_engine；需要时间趋势(date_trunc)、窗口函数、CTE、明细数据时规划 query_datasource
 
   ## 可用工具（tool 只能从这些里面选）
-  - list_datasources（列出可用数据源）
+  - list_datasources（列出数据源，表级信息：id/名称/类型/行数/table_ref）
+  - list_fields（获取指定数据源的完整字段/列名 columns；查询步骤前若字段未注入则规划它）
   - query_engine（标准聚合首选：维度+度量+过滤+排序，分组/对比/占比/排名）
   - query_datasource（高级 SQL 兜底：时间趋势 date_trunc / 窗口 / CTE / 明细数据等复杂查询）
   - data_quality（数据质量分析）

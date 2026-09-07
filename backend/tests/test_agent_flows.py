@@ -630,6 +630,7 @@ def test_tool_registry_includes_stats_analyzer():
 
     names = [t["function"]["name"] for t in ToolRegistry.schemas()]
     assert "stats_analyzer" in names
+    assert "list_fields" in names  # 按需取列工具（表级/列级拆分）
     for tool in (
         "add_chart_block",
         "add_text_block",
@@ -638,7 +639,65 @@ def test_tool_registry_includes_stats_analyzer():
         "arrange_layout",
     ):
         assert tool in names
-    assert len(names) == 16
+    assert len(names) == 17
+
+
+def test_list_datasources_returns_table_level_only():
+    """list_datasources 拆分为表级：不再内嵌 columns/sample_sql（避免一次性暴露全部列）。"""
+    from app.services.agent_tools import ToolRegistry
+
+    desc = next(t for t in ToolRegistry.schemas() if t["function"]["name"] == "list_datasources")
+    assert "list_fields(datasource_id)" in desc["function"]["description"]
+    # query_datasource 描述明确严禁 SELECT *，列名来源指向 list_fields
+    qd = next(t for t in ToolRegistry.schemas() if t["function"]["name"] == "query_datasource")
+    assert "严禁写 SELECT *" in qd["function"]["description"]
+    assert "list_fields" in qd["function"]["description"]
+
+
+@pytest.mark.asyncio
+async def test_list_fields_returns_columns_for_datasource():
+    """list_fields 按需返回单源完整列名/类型/示例。"""
+    from app.services.agent_tools import ListFieldsTool
+
+    import uuid
+
+    class _FakeDS:
+        id = uuid.uuid4()
+        name = "订单"
+        schema_meta = {"fields": [
+            {"name": "amount", "data_type": "DOUBLE", "sample": [10.5, 20.0]},
+            {"name": "region", "data_type": "VARCHAR"},
+        ]}
+
+    class _FakeDB:
+        async def execute(self, stmt):
+            return self
+
+        def scalar_one_or_none(self):
+            return _FakeDS()
+
+    out = json.loads(await ListFieldsTool().execute(
+        datasource_id=str(_FakeDS.id), user_id="u1", db_session=_FakeDB(),
+    ))
+    assert out["columns"] == ["amount", "region"]
+    assert out["fields"] == ["amount(DOUBLE)", "region(VARCHAR)"]
+    assert out["samples"] == {"amount": [10.5, 20.0]}
+
+
+async def test_list_fields_unknown_datasource_returns_error():
+    from app.services.agent_tools import ListFieldsTool
+
+    class _FakeDB:
+        async def execute(self, stmt):
+            return self
+
+        def scalar_one_or_none(self):
+            return None
+
+    out = json.loads(await ListFieldsTool().execute(
+        datasource_id="nope", user_id="u1", db_session=_FakeDB(),
+    ))
+    assert "error" in out
 
 
 def test_query_tool_descriptions_draw_clear_boundary():

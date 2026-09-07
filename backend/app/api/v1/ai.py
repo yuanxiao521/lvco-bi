@@ -46,7 +46,7 @@ from app.services.canvas_tools import CANVAS_TOOL_NAMES
 # 画布助手允许的工具 = 画布专属落块工具 + 基础查数/出图工具（先查再落）。
 # 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
 _CANVAS_QUERY_TOOL_NAMES = frozenset({
-    "list_datasources", "query_datasource", "query_engine",
+    "list_datasources", "list_fields", "query_datasource", "query_engine",
     "stats_analyzer", "recommend_charts",
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
@@ -470,7 +470,7 @@ async def data_chat_stream(
                                 field_lines.append(f"  - {name} ({dtype}{cat_str})")
                         field_list = "\n".join(field_lines) if field_lines else "（无字段信息）"
 
-                        # 构建 table_ref 和 sample_sql（与 list_datasources 工具输出一致）
+                        # 构建 table_ref（列名已在下方注入，无需 sample_sql；严禁 SELECT * 探查）
                         schema_name = duckdb_client.get_schema_name(str(current_user.id), str(datasource.id), datasource.name)
                         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
                             meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
@@ -478,7 +478,6 @@ async def data_chat_stream(
                             table_ref = f'"{schema_name}".public."{table_name}"'
                         else:
                             table_ref = f'"{schema_name}"."data"'
-                        sample_sql = f"SELECT * FROM {table_ref} LIMIT 1"
 
                         columns_str = ", ".join(columns) if columns else "（无）"
                         agent_message = (
@@ -487,8 +486,7 @@ async def data_chat_stream(
                             f"数据源 ID: {body.datasource_id}\n"
                             f"总行数: {datasource.row_count or '未知'}\n"
                             f"table_ref（FROM 子句必须原样复制）: {table_ref}\n"
-                            f"sample_sql（可直接执行看数据结构）: {sample_sql}\n"
-                            f"列名（columns，SQL 中必须加双引号）: {columns_str}\n"
+                            f"列名（columns，SQL 中必须加双引号；严禁 SELECT *）: {columns_str}\n"
                             f"字段详情:\n{field_list}\n\n"
                             f"用户问题: {body.message}"
                         )

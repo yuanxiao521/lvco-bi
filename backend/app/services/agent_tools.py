@@ -30,13 +30,14 @@ class ConversationPhase(str, Enum):
 
 # 各阶段可用工具集合（按职责映射，提升 Agent 协作能力）
 # SELECTING:  只暴露数据源浏览
-# ANALYZING:  查数据(query/query_engine) + 数据质量 + 洞察 + 清洗建议
+# ANALYZING:  查数据(list_fields取列 + query/query_engine) + 数据质量 + 洞察 + 清洗建议
 # GENERATING: 图表生成(render) + 图表自校验(validate) + 类型推荐(recommend)
 # REPORTING:  报告润色
 _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
     ConversationPhase.SELECTING: {"list_datasources"},
     ConversationPhase.ANALYZING: {
         "list_datasources",
+        "list_fields",
         "query_datasource",
         "query_engine",
         "data_quality",
@@ -365,7 +366,7 @@ class ListDatasourcesTool(BaseTool):
 
     name = "list_datasources"
     orchestrator_safe = True
-    description = "列出当前可用的所有数据源。返回每个数据源的 ID、名称、类型、字段列表和行数。"
+    description = "列出当前可用的所有数据源（表级信息）：ID、名称、类型、行数、table_ref。需要某数据源的字段/列名时，另调用 list_fields(datasource_id)。"
 
     def schema(self) -> dict:
         """返回 list_datasources 工具的 OpenAI function calling schema。
@@ -427,19 +428,7 @@ class ListDatasourcesTool(BaseTool):
         summary = []
         for ds in datasources:
             schema_meta = ds.schema_meta or {}
-            fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
-            # columns: 纯列名数组，供 LLM 直接用于 SQL 生成
-            columns = []
-            # field_names: "name(type)" 格式，供 LLM 了解字段类型
-            field_names = []
-            for f in fields:
-                if isinstance(f, dict):
-                    name = f.get('name', '?')
-                    dtype = f.get('data_type', '?')
-                    columns.append(name)
-                    field_names.append(f"{name}({dtype})")
-
-            # 构建 table_ref，让 LLM 知道查询时 FROM 后面该写什么
+            # 表级信息：不再内嵌 columns/fields/sample_sql —— 列名按需走 list_fields(datasource_id)，避免一次性暴露全部列
             conn_cfg = dict(ds.connection_config) if ds.connection_config else {}
             schema_name = duckdb_client.get_schema_name(user_id, str(ds.id), ds.name, db_name=conn_cfg.get("db_name", ""))
             if ds.source_type in (SourceType.postgresql, SourceType.mysql):
@@ -448,19 +437,13 @@ class ListDatasourcesTool(BaseTool):
             else:
                 table_ref = f'"{schema_name}"."data"'
 
-            # 构建可直接执行的预览 SQL
-            sample_sql = f'SELECT * FROM {table_ref} LIMIT 1'
-
             summary.append({
                 "id": str(ds.id),
                 "name": ds.name,
                 "description": ds.description,
                 "type": ds.source_type.value if ds.source_type else "unknown",
                 "row_count": ds.row_count,
-                "columns": columns,
-                "fields": field_names,
                 "table_ref": table_ref,
-                "sample_sql": sample_sql,
             })
 
         total = len(summary)
@@ -471,10 +454,74 @@ class ListDatasourcesTool(BaseTool):
             "total_rows_estimate": total_rows,
             "datasources": summary,
             "tip": (
-                "查询前建议先用 sample_sql 执行 SELECT * LIMIT 1 看实际列名和数据格式，"
-                "然后用 columns 数组中的列名写正式的聚合查询。"
-                "FROM 用 table_ref，列名用双引号包裹。"
+                "本工具只返回表级信息（不含列名）。需要某数据源的完整字段/列名时，"
+                "调用 list_fields(datasource_id)。FROM 用 table_ref，列名用 list_fields 返回的 columns。"
             ),
+        }, ensure_ascii=False)
+
+
+class ListFieldsTool(BaseTool):
+    """获取单个数据源的完整字段/列名（按需拉取，避免一次性暴露全部列）。"""
+
+    name = "list_fields"
+    orchestrator_safe = True
+    description = (
+        "获取指定数据源的完整字段列表：columns（列名数组，可直接用于 SQL/query_engine）"
+        "与 fields（列名+类型+示例值）。在编写查询前调用一次，或字段不确定时调用。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {
+                            "type": "string",
+                            "description": "数据源 ID（从 list_datasources 获取）",
+                        },
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, user_id: str, db_session=None, **kwargs) -> str:
+        from sqlalchemy import select
+        from app.models.datasource import DataSource
+
+        ds_result = await db_session.execute(
+            select(DataSource).where(DataSource.id == datasource_id, DataSource.user_id == user_id)
+        )
+        datasource = ds_result.scalar_one_or_none()
+        if datasource is None:
+            return json.dumps({"error": "数据源不存在或无权限", "hint": "先从 list_datasources 获取正确的数据源 ID"}, ensure_ascii=False)
+
+        schema_meta = dict(datasource.schema_meta or {})
+        fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
+        columns: list[str] = []
+        field_names: list[str] = []
+        examples: dict[str, list] = {}
+        for f in fields:
+            if isinstance(f, dict):
+                name = f.get("name", "?")
+                dtype = f.get("data_type", "?")
+                columns.append(name)
+                field_names.append(f"{name}({dtype})")
+                if f.get("sample"):
+                    examples[name] = f["sample"]
+        if not columns:
+            return json.dumps({"error": "数据源表结构为空", "hint": "请先同步该数据源的 schema"}, ensure_ascii=False)
+
+        return json.dumps({
+            "datasource_id": str(datasource.id),
+            "name": datasource.name,
+            "columns": columns,
+            "fields": field_names,
+            "samples": examples,
         }, ensure_ascii=False)
 
 
@@ -488,7 +535,8 @@ class QueryDatasourceTool(BaseTool):
         "如时间趋势（date_trunc 按天/月聚合）、窗口函数、CTE、查询明细数据等复杂场景。"
         "常规分组/对比/占比/排名等标准聚合分析请优先使用 query_engine（更安全、参数化）。"
         "传入 datasource_id 和 SQL 语句。返回前 50 行结果。"
-        "重要：FROM 用 table_ref，列名用 list_datasources 返回的 columns 数组中的值并加双引号。"
+        "重要：FROM 用 table_ref；列名用 list_fields 返回的 columns 数组中的值并加双引号；"
+        "严禁写 SELECT *（会被安全拦截），需要结构时用显式列名 + LIMIT 1。"
     )
 
     def schema(self) -> dict:
@@ -1697,6 +1745,7 @@ polish_text_tool = PolishTextTool()
 stats_analyzer_tool = StatsAnalyzerTool()
 
 ToolRegistry.register(list_datasources_tool)
+ToolRegistry.register(ListFieldsTool())
 ToolRegistry.register(query_datasource_tool)
 ToolRegistry.register(render_chart_tool)
 ToolRegistry.register(validate_chart_tool)
