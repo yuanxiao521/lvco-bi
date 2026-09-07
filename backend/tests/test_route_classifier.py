@@ -160,6 +160,39 @@ async def test_route_llm_error_defaults_to_react(route_env):
     assert FakeOrchestrator.instances == 0
 
 
+async def test_route_llm_error_emits_degradation_status(route_env):
+    """分类 LLM 异常 → 降级 ReAct 且显式 emit 降级原因（用户/观测端可见）。"""
+    llm = StubRouteLLM(error=RuntimeError("llm down"))
+    svc = AIService(llm=llm)
+    events = await _run_agent(svc, SIMPLE_LONG_MSG)
+    assert FakeReactAgent.instances == 1
+    dg = [e for e in events if e.get("degradation")]
+    assert len(dg) == 1
+    assert dg[0]["degradation"] == "route_classifier_llm_fallback"
+    assert dg[0]["type"] == "status"
+
+
+class CrashingOrchestrator(FakeOrchestrator):
+    """编排器替身：execute_task 抛异常，验证显式降级到 ReAct。"""
+
+    async def execute_task(self, **kwargs):
+        raise RuntimeError("orchestrator boom")
+        yield {"type": "status"}  # pragma: no cover
+
+
+async def test_route_orchestrator_crash_falls_back_with_degradation(route_env):
+    """编排器崩溃 → 显式降级走 ReAct，并 emit 带原因的 degradation 状态事件。"""
+    route_env.setattr("app.services.agents.AgentOrchestrator", CrashingOrchestrator)
+    llm = StubRouteLLM(reply='{"classification": "complex"}')
+    svc = AIService(llm=llm)
+    events = await _run_agent(svc, COMPLEX_SHORT_MSG)
+    assert FakeOrchestrator.instances == 1
+    assert FakeReactAgent.instances == 1  # 显式降级到 ReAct，而非异常中断
+    dg = [e for e in events if e.get("degradation")]
+    assert len(dg) == 1
+    assert dg[0]["degradation"] == "orchestrator_crash"
+
+
 async def test_route_timeout_defaults_to_react(route_env):
     """wait_for 超时（TimeoutError）→ 默认简单任务 → ReAct。"""
     async def _raise_timeout(coro, timeout=None, **kwargs):

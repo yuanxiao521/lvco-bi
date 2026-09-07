@@ -83,7 +83,7 @@ async def test_agent_stream_passes_extra_tools_to_orchestrator(monkeypatch):
     """画布入口：extra_plannable_tools 从 agent_stream 传到编排器。"""
     import app.services.ai_service as service_module
 
-    async def _classify(self, msg):  # noqa: ANN001
+    async def _classify(self, msg, degradation=None):  # noqa: ANN001
         return True
 
     monkeypatch.setattr(settings, "AGENT_ORCHESTRATOR_ENABLED", True)
@@ -107,7 +107,7 @@ async def test_agent_stream_default_passes_none_to_orchestrator(monkeypatch):
     """普通对话：不传 extra_plannable_tools（同为 None）→ 不注入画布工具。"""
     import app.services.ai_service as service_module  # noqa: F401
 
-    async def _classify(self, msg):  # noqa: ANN001
+    async def _classify(self, msg, degradation=None):  # noqa: ANN001
         return True
 
     monkeypatch.setattr(settings, "AGENT_ORCHESTRATOR_ENABLED", True)

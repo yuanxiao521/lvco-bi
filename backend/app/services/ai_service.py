@@ -870,7 +870,7 @@ class AIService:
             "style": style,
         }
 
-    async def _classify_task_complexity(self, user_msg: str) -> bool:
+    async def _classify_task_complexity(self, user_msg: str, degradation: list[str] | None = None) -> bool:
         """调用 LLM 判断任务复杂度：复杂任务返回 True、简单任务返回 False。
 
         用于纠正纯长度启发式的误判（短但复杂，长但简单）。
@@ -880,6 +880,8 @@ class AIService:
 
         Args:
             user_msg: 用户原始消息文本。
+            degradation: 可选外部列表；发生兜底降级时把原因码（如
+                "route_classifier_llm_fallback"）写入其中，供调用方显式展示/观测。
 
         Returns:
             True 表示复杂任务（走编排器），False 表示简单任务（走 ReAct，含兜底）。
@@ -898,6 +900,8 @@ class AIService:
             )
         except Exception as e:  # noqa: BLE001
             log.warning(f"[route_classifier] llm_error error={e} default_to_simple")
+            if degradation is not None:
+                degradation.append("route_classifier_llm_fallback")
             return False
         return _parse_complexity(content)
 
@@ -961,13 +965,21 @@ class AIService:
         # 走轻量 ReAct 路径，避免误用复杂编排器。
         route_enabled = settings.AGENT_ORCHESTRATOR_ENABLED and initial_phase == "selecting"
         if route_enabled:
-            classification = await self._classify_task_complexity(user_msg)
+            degradation_out: list[str] = []
+            classification = await self._classify_task_complexity(user_msg, degradation_out)
             if classification:
                 log.info("[agent_stream] route_classifier=complex using_orchestrator_mode")
                 use_orchestrator = True
             else:
                 log.info("[agent_stream] route_classifier=simple using_react_mode")
                 use_orchestrator = False
+                if degradation_out:
+                    # 显式降级：分类服务异常/超时 → 简化处理，向用户与观测端给出原因
+                    yield {
+                        "type": "status",
+                        "message": "路由服务暂不可用，已按简化流程处理",
+                        "degradation": degradation_out[0],
+                    }
         else:
             use_orchestrator = False
         if use_orchestrator:
@@ -1014,7 +1026,9 @@ class AIService:
             # 规划-执行编排：按入口选择编排器。
             # - entry="chat"（普通对话）→ AgentOrchestrator（查询/分析/出图/报告）
             # - entry="canvas"（画布）→ CanvasOrchestrator（报告骨架 → 落块）
-            # ⚙️ 降级策略：异常时自动 fallback 到单 Agent ReAct 模式
+            # ⚙️ 降级策略显式化：编排成功必须 return；异常时 emit 带原因的状态事件，
+            #    随后显式进入下方单 Agent ReAct 路径（不再依赖 try/except 掉出）。
+            orchestrated_ok = False
             try:
                 if entry == "canvas":
                     from app.services.agents.canvas_orchestrator import CanvasOrchestrator
@@ -1029,14 +1043,19 @@ class AIService:
                     available_datasources=available_datasources,
                 ):
                     yield event
-                return
+                orchestrated_ok = True
             except Exception as e:
                 log.warning(
                     f"[agent_stream] orchestrator_failed_fallback_to_single reason={e}",
                     exc_info=True,
                 )
-                yield {"type": "status", "message": "编排执行失败，自动回退到标准模式"}
-                # 不 return，继续走单 Agent ReAct 路径
+                yield {
+                    "type": "status",
+                    "message": "编排执行失败，已降级为标准流程",
+                    "degradation": "orchestrator_crash",
+                }
+            if orchestrated_ok:
+                return
 
         # 单 Agent 模式：图化 ReAct（ReactGraphAgent，reason → execute_tools 循环）
         log.info(f"[agent_stream] using_single_agent_mode")

@@ -539,6 +539,49 @@ async def test_react_tool_error_result_kept_full(monkeypatch):
 
 
 # ======================================================================
+# 降级观测：Planner 失败 → fallback 计划 + trace 记录 degradation_reason
+# ======================================================================
+
+
+class FailingPlannerLLM:
+    """Planner 上游异常 → 编排器走降级计划；Executor 步骤空文本结束。"""
+
+    async def complete(self, messages, **kwargs):
+        raise RuntimeError("planner upstream error")
+
+    async def stream_chat_with_tools(self, messages, tools, **kwargs):
+        yield {"type": "text", "content": ""}  # 空文本立即结束步骤
+
+
+@pytest.mark.asyncio
+async def test_planner_fallback_records_degradation_trace(fake_registry):
+    """Planner 规划失败 → 使用降级计划，并在 trace metadata 记录降级原因。"""
+    from app.services.agents.agent_orchestrator import AgentOrchestrator
+    import app.services.agents.agent_orchestrator as orch_mod
+
+    capture = TraceCapture()
+    orch_mod.get_observer = lambda: capture
+    orch = AgentOrchestrator(FailingPlannerLLM(), None)
+
+    events = []
+    async for ev in orch.execute_task(
+        user_msg="查询销售额",
+        history=[],
+        user_id="u1",
+        available_datasources=[{"id": "ds1", "name": "测试源", "type": "csv",
+                                "fields": [{"name": "region"}, {"name": "amount"}]}],
+    ):
+        events.append(ev)
+
+    tr = capture.trace_record
+    assert tr is not None
+    # 降级原因被记录进观测 trace（供 Langfuse / 日志统计降级率）
+    assert tr.metadata.get("degradation_reason") == "planner_fallback"
+    # 降级后仍然产出落地的 plan 事件（用户可见降级后的计划）
+    assert any(e.get("type") == "plan" for e in events)
+
+
+# ======================================================================
 # 画布提取辅助函数
 # ======================================================================
 

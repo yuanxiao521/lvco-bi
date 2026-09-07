@@ -221,6 +221,9 @@ class AgentOrchestrator:
         
         if not result.success:
             logger.warning(f"[orchestrator] 规划失败，使用智能降级计划: {result.error}")
+            trace = shared.get("trace")
+            if trace is not None:
+                trace.metadata["degradation_reason"] = "planner_fallback"
             fallback_plan = self._build_fallback_plan(shared["user_msg"], shared["available_datasources"])
             steps = fallback_plan.get("steps", [])
             has_chart = any(s.get("tool") == _CHART_TOOL for s in steps)
