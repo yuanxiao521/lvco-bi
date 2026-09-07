@@ -480,6 +480,10 @@ async def data_chat_stream(
                             table_ref = f'"{schema_name}"."data"'
 
                         columns_str = ", ".join(columns) if columns else "（无）"
+                        _log.info(
+                            "[chat] ds_injection name=%s id=%s columns=%d",
+                            datasource.name, datasource.id, len(columns),
+                        )
                         agent_message = (
                             f"【系统注入：当前已连接数据源】\n"
                             f"数据源名称: {datasource.name}\n"

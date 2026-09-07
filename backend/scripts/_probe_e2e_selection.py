@@ -77,7 +77,8 @@ async def main() -> None:
         if ds is None:
             print(f"未找到数据源 {force_ds}，可用: {[d.get('id') for d in items][:5]}")
             return
-        print(f"[数据源(指定)] {ds.get('name')} id={ds.get('id')}")
+        ds_id = force_ds  # 真正用于请求的数据源 id
+        print(f"[数据源(指定)] {ds.get('name')} id={ds_id}")
     else:
         print(f"[数据源] {ds.get('name')} id={ds_id}")
     for q, expect in QUERIES:
@@ -88,7 +89,7 @@ async def main() -> None:
             async with client.stream(
                 "POST", "/ai/chat/stream",
                 headers=h,
-                json={"datasource_id": ds_id, "message": q},
+                json={"datasourceId": ds_id, "datasource_id": ds_id, "message": q},
             ) as resp:
                 body = (await resp.aread()).decode("utf-8", errors="replace")
             if resp.status_code >= 400:
