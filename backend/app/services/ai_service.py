@@ -916,6 +916,7 @@ class AIService:
         extra_plannable_tools: set[str] | None = None,
         memory_summary: str | None = None,
         entry: str = "chat",
+        selected_datasource_id: str | None = None,
     ) -> AsyncIterator[dict]:
         """单 Agent 工具调用模式：Phase 状态机（SELECTING→ANALYZING→GENERATING→REPORTING）+ ToolRegistry。
 
@@ -986,7 +987,10 @@ class AIService:
             log.info("[agent_stream] using_orchestrator_mode")
             yield {"type": "status", "message": "正在启动多工具编排..."}
 
-            # 获取可用数据源列表（供 Planner 规划时引用真实 datasource_id）
+            # 获取可用数据源列表（供 Planner 规划时引用真实 datasource_id）。
+            # 注入分流：已选数据源(selected_datasource_id) → 只注入该源且带字段；
+            # 未选 → 只注入表级摘要（fields 置空），列名由 LLM 按需 list_fields(datasource_id) 获取，
+            # 避免一次性把所有数据源的全部字段塞进上下文。
             available_datasources = []
             try:
                 import uuid
@@ -996,6 +1000,8 @@ class AIService:
                 ds_repo = SQLAlchemyDataSourceRepository(db_session)
                 user_uuid = uuid.UUID(user_id)
                 datasources, _ = await ds_repo.list_datasources(user_uuid, page=1, page_size=100, source_type=None, status=None, search=None)
+                if selected_datasource_id:
+                    datasources = [d for d in datasources if str(d.id) == selected_datasource_id]
                 from app.services.agent_tools import duckdb_client
                 from app.models.datasource import SourceType
                 for ds in datasources:
@@ -1014,10 +1020,14 @@ class AIService:
                         "name": ds.name,
                         "description": ds.description,
                         "type": ds.source_type.value if ds.source_type else "unknown",
-                        "fields": fields,
+                        "fields": fields if selected_datasource_id else [],
+                        "fields_injected": bool(selected_datasource_id),
                         "table_ref": table_ref,
                     })
-                log.info(f"[agent_stream] loaded_datasources count={len(available_datasources)}")
+                log.info(
+                    f"[agent_stream] loaded_datasources count={len(available_datasources)} "
+                    f"selected={bool(selected_datasource_id)}"
+                )
             except ValueError as e:
                 log.error(f"[agent_stream] load_datasources_failed invalid_user_id: {user_id}")
             except Exception as e:

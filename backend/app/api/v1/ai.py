@@ -614,6 +614,7 @@ async def data_chat_stream(
                 db_session=db,
                 initial_phase="analyzing" if body.datasource_id else "selecting",
                 memory_summary=await _load_memory_summary(db, session_id),
+                selected_datasource_id=body.datasource_id,
             ):
                 if event["type"] == "text":
                     raw_delta = event["content"]
@@ -1624,6 +1625,7 @@ async def canvas_ai_chat(
                 extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
                 memory_summary=await _load_memory_summary(db, session_id),
                 entry="canvas",
+                selected_datasource_id=str(datasource.id) if datasource else body.datasource_id,
             ):
                 ev_type = event.get("type")
                 if ev_type == "text":

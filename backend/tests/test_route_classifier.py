@@ -11,10 +11,13 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import MagicMock
 
 import pytest
 
+from app.config import settings
 from app.services.ai_service import AIService
+from app.services.llm_client import LLMClient
 
 
 # ======================================================================
@@ -191,6 +194,75 @@ async def test_route_orchestrator_crash_falls_back_with_degradation(route_env):
     dg = [e for e in events if e.get("degradation")]
     assert len(dg) == 1
     assert dg[0]["degradation"] == "orchestrator_crash"
+
+
+# ======================================================================
+# 注入分流：已选数据源 → 只注入该源且带字段；未选 → 全部表级摘要（无字段）
+# ======================================================================
+
+
+async def test_agent_stream_injection_split_selected_only(monkeypatch):
+    """给 selected_datasource_id 时编排器只收到该源且带字段；不给时收到全部源但 fields 为空。"""
+    from types import SimpleNamespace
+
+    class _CaptureOrch:
+        captured = None
+
+        def __init__(self, llm, db_session, extra_plannable_tools=None):
+            pass
+
+        async def execute_task(self, **kwargs):
+            _CaptureOrch.captured = kwargs.get("available_datasources")
+            yield {"type": "status", "message": "OK"}
+
+    def _mk(sid):
+        return SimpleNamespace(
+            id=sid, name=f"源{sid}", description="d", source_type=SimpleNamespace(value="csv"),
+            schema_meta={"fields": [{"name": "amount", "data_type": "DOUBLE"}]},
+            connection_config={},
+        )
+
+    class _DsRepo:
+        def __init__(self, db):
+            pass
+
+        async def list_datasources(self, *a, **k):
+            return [_mk("11111111-1111-1111-1111-111111111111"),
+                    _mk("22222222-2222-2222-2222-222222222222")], 2
+
+    async def _classify(self, msg, degradation=None):
+        return True
+
+    monkeypatch.setattr(settings, "AGENT_ORCHESTRATOR_ENABLED", True)
+    monkeypatch.setattr(AIService, "_classify_task_complexity", _classify)
+    monkeypatch.setattr("app.services.agents.AgentOrchestrator", _CaptureOrch)
+    monkeypatch.setattr("app.repositories.datasource_repository.SQLAlchemyDataSourceRepository", _DsRepo)
+
+    # 已选数据源：只注入该源、字段注入
+    ai = AIService(MagicMock(spec=LLMClient))
+    async for _ in ai.agent_stream(
+        user_id="00000000-0000-0000-0000-000000000000",
+        user_msg="分析订单",
+        history=[], db_session=MagicMock(), initial_phase="selecting",
+        selected_datasource_id="22222222-2222-2222-2222-222222222222",
+    ):
+        pass
+    sel = _CaptureOrch.captured
+    assert [d["id"] for d in sel] == ["22222222-2222-2222-2222-222222222222"]
+    assert sel[0]["fields"] and sel[0]["fields_injected"] is True
+
+    # 未选数据源：全部表级摘要（fields 置空，按需 list_fields）
+    _CaptureOrch.captured = None
+    async for _ in ai.agent_stream(
+        user_id="00000000-0000-0000-0000-000000000000",
+        user_msg="分析订单",
+        history=[], db_session=MagicMock(), initial_phase="selecting",
+    ):
+        pass
+    all_ds = _CaptureOrch.captured
+    assert [d["id"] for d in all_ds] == ["11111111-1111-1111-1111-111111111111",
+                                         "22222222-2222-2222-2222-222222222222"]
+    assert all(d["fields"] == [] and d["fields_injected"] is False for d in all_ds)
 
 
 async def test_route_timeout_defaults_to_react(route_env):
