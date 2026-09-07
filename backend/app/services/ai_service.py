@@ -1095,6 +1095,16 @@ class AIService:
                 and isinstance(t.get("function"), dict)
                 and t["function"].get("name") not in CANVAS_TOOL_NAMES
             ]
+        # 已选数据源（selected_datasource_id）时：物理摘掉 list_datasources，
+        # 让 LLM 无法浏览/选择其他数据源（配合 prompt 情况A 的强锁定）。
+        # 列名仍可通过 list_fields(datasource_id) 按需获取。
+        if selected_datasource_id:
+            all_tools = [
+                t for t in all_tools
+                if isinstance(t, dict)
+                and isinstance(t.get("function"), dict)
+                and t["function"].get("name") != "list_datasources"
+            ]
 
         observer = get_observer()
         with observer.trace(

@@ -71,6 +71,15 @@ async def main() -> None:
 
     # 3. 逐条真实聊天
     q_filter = sys.argv[1] if len(sys.argv) > 1 else None
+    force_ds = sys.argv[2] if len(sys.argv) > 2 else ""
+    if force_ds:
+        ds = next((d for d in items if str(d.get("id")) == force_ds), None)
+        if ds is None:
+            print(f"未找到数据源 {force_ds}，可用: {[d.get('id') for d in items][:5]}")
+            return
+        print(f"[数据源(指定)] {ds.get('name')} id={ds.get('id')}")
+    else:
+        print(f"[数据源] {ds.get('name')} id={ds_id}")
     for q, expect in QUERIES:
         if q_filter and q_filter not in q:
             continue
