@@ -366,6 +366,47 @@ def _build_order_by(sort: dict[str, str] | None, measures: list[dict[str, str]])
     return ""
 
 
+def _normalize_sort(sort: dict[str, str] | None, dims: list[str], measures: list[dict[str, str]]) -> dict[str, str] | None:
+    """校验并修正排序字段：可用于 ORDER BY 的列 = 维度 ∪ 度量别名。
+
+    背景：LLM 常把"排序依据"填成度量的源字段（如对 SUM(quantity) 排序传 quantity），
+    若直接拼 `ORDER BY "quantity"`，分组查询下 DuckDB 会报
+    "must appear in the GROUP BY clause"，导致查询失败并迫使 LLM 退回首写 SQL。
+
+    - sort.field == 某个度量源字段（如 quantity）→ 映射为该度量别名（sum_quantity），语义等价
+    - sort.field ∈ 维度 → 原样保留
+    - sort.field 已直接用度量别名 → 原样保留
+    - 其余字段（不存在或不可排序）→ 忽略该排序（返回 None，默认按第一度量排序），不报错
+
+    Args:
+        sort: 待校验的排序配置（会就地修正 field）。
+        dims: 已修正大小写的维度列表。
+        measures: 已修正的度量列表。
+
+    Returns:
+        修正后的排序配置；非法字段时返回 None（调用方走默认排序）。
+    """
+    if not sort or not sort.get("field"):
+        return sort
+
+    field = str(sort["field"])
+    dims_lower = {d.lower(): d for d in dims}
+    if field.lower() in dims_lower:
+        sort["field"] = dims_lower[field.lower()]
+        return sort
+
+    for m in measures:
+        if m.get("expression"):
+            alias = m.get("alias") or _expr_alias(m["expression"])
+        else:
+            alias = f'{m["agg"].upper().lower()}_{m["field"]}'
+        if field.lower() == str(m.get("field", "")).lower() or field.lower() == alias.lower():
+            sort["field"] = alias
+            return sort
+
+    return None
+
+
 async def execute_derived_metric(
     metric_id: str,
     metric_def,
@@ -583,6 +624,8 @@ async def execute_chart_query(
     group_by_clause = _build_group_by(dims)
 
     sort_dict = config.sort.model_dump() if config.sort else None
+    # 排序字段归一化：度量源字段→别名、非法字段降级忽略，避免聚合查询 ORDER BY 裸字段导致 DuckDB Binder error
+    sort_dict = _normalize_sort(sort_dict, dims, measure_dicts)
     order_by_clause = _build_order_by(sort_dict, measure_dicts)
 
     if source_type in (SourceType.mysql, SourceType.postgresql):

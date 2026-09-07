@@ -115,6 +115,47 @@ def test_build_select_expression_without_alias():
     assert cols == ["region", "sum_amount"]
 
 
+# ── _normalize_sort：排序字段归一化（P1-4a，修复聚合 ORDER BY 裸字段 Binder error）──
+
+def test_normalize_sort_maps_measure_field_to_alias():
+    """对 SUM(quantity) 按源字段 quantity 排序 → 映射到别名 sum_quantity（语义等价）。"""
+    s = qe._normalize_sort({"field": "quantity", "order": "desc"}, ["category"],
+                           [{"field": "quantity", "agg": "SUM"}])
+    assert s is not None and s["field"] == "sum_quantity"
+
+
+def test_normalize_sort_keeps_dimension_field():
+    """排序字段是维度 → 原样保留（含大小写修正）。"""
+    s = qe._normalize_sort({"field": "Category", "order": "asc"}, ["category"],
+                           [{"field": "quantity", "agg": "SUM"}])
+    assert s is not None and s["field"] == "category"
+
+
+def test_normalize_sort_drops_unknown_field():
+    """排序字段既不是维度也不是度量 → 放弃排序（返回 None），避免 SQL 报错。"""
+    s = qe._normalize_sort({"field": "not_a_column", "order": "desc"}, ["category"],
+                           [{"field": "quantity", "agg": "SUM"}])
+    assert s is None
+
+
+def test_normalize_sort_keeps_measure_alias_directly():
+    """排序字段已直接用度量别名 → 原样保留。"""
+    s = qe._normalize_sort({"field": "sum_quantity", "order": "desc"}, ["category"],
+                           [{"field": "quantity", "agg": "SUM"}])
+    assert s is not None and s["field"] == "sum_quantity"
+
+
+def test_normalize_sort_expression_measure_requires_alias():
+    """表达式度量只认别名（无法可靠解析表达式引用的裸字段），裸源字段降级忽略。"""
+    s = qe._normalize_sort({"field": "sum_amount", "order": "desc"}, ["region"],
+                           [{"field": "", "agg": "SUM", "expression": "SUM(amount)"}])
+    assert s is not None and s["field"] == "sum_amount"
+    # 裸源字段 amount 无法可靠映射 → 忽略排序（不报错）
+    s2 = qe._normalize_sort({"field": "amount", "order": "desc"}, ["region"],
+                            [{"field": "", "agg": "SUM", "expression": "SUM(amount)"}])
+    assert s2 is None
+
+
 # ── CRUD / 检索（隔离 DB）────────────────────────────────────────────────
 
 @pytest.mark.asyncio
