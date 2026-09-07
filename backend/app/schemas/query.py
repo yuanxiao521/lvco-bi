@@ -38,6 +38,8 @@ class ChartQueryConfig(CamelModel):
     datasource_id: str | None = None
     sort: SortConfig | None = None
     limit: int = Field(default=1000, ge=1, le=10000)
+    # 时间桶：{维度字段名: 桶粒度}，如 {"order_date": "month"} → date_trunc('month', "order_date")
+    dimension_buckets: dict[str, str] = Field(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

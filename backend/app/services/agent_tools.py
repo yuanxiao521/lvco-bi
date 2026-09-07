@@ -1163,7 +1163,9 @@ class QueryEngineTool(BaseTool):
         "measures（度量，含聚合方式）、filters（过滤条件）、sort（排序）、limit，"
         "由查询引擎生成参数化 SQL 执行。字段白名单 + 参数绑定，比手写 SQL 更安全、更不容易出错，"
         "适合分组/对比/占比/排名/过滤等日常聚合统计。"
-        "时间趋势（date_trunc）、窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_sql。"
+        "支持时间桶（dimension_buckets）：对时间维度按 day/week/month/quarter/year 分组，"
+        "如 {\"order_date\": \"month\"} 会生成 date_trunc('month', \"order_date\")。"
+        "窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_sql。"
     )
 
     def schema(self) -> dict:
@@ -1193,6 +1195,10 @@ class QueryEngineTool(BaseTool):
                         },
                         "sort": {"type": "object", "description": "排序 {field, order(desc/asc)}"},
                         "limit": {"type": "integer", "description": "返回行数上限（默认 50）"},
+                        "dimension_buckets": {
+                            "type": "object",
+                            "description": "时间桶映射：{时间维度字段名: 桶粒度}，桶粒度可选 day/week/month/quarter/year。例：{\"order_date\": \"month\"} 会按月份分组",
+                        },
                     },
                     "required": ["datasource_id"],
                 },
@@ -1200,7 +1206,7 @@ class QueryEngineTool(BaseTool):
         }
 
     async def execute(self, datasource_id: str, dimensions=None, measures=None, filters=None,
-                      sort=None, limit: int = 50, user_id: str | None = None,
+                      sort=None, limit: int = 50, dimension_buckets=None, user_id: str | None = None,
                       db_session=None, **kwargs) -> str:
         try:
             from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig, SortConfig
@@ -1225,6 +1231,7 @@ class QueryEngineTool(BaseTool):
                 chart_type=None,
                 sort=sort_obj,
                 limit=max(1, min(int(limit or 50), 1000)),
+                dimension_buckets=dimension_buckets or {},
             )
             result = await execute_chart_query(
                 datasource_id=datasource_id,

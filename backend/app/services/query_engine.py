@@ -17,6 +17,7 @@ from app.utils.crypto import decrypt_value, get_encryption_key
 
 ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT_DISTINCT"})
 ALLOWED_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "like"})
+ALLOWED_BUCKETS = frozenset({"day", "week", "month", "quarter", "year"})
 
 logger = structlog.get_logger("query_engine")
 
@@ -188,15 +189,26 @@ def _expr_alias(expr: str) -> str:
     return f"{agg}_{name}" if name else f"{agg}_metric"
 
 
-def _build_select(dimensions: list[str], measures: list[dict[str, str]]) -> tuple[str, list[str]]:
+def _bucket_alias(dim: str, bucket: str) -> str:
+    """为时间桶维度生成别名，如 order_date + month → order_date_month。"""
+    return f"{dim}_{bucket}"
+
+
+def _build_select(
+    dimensions: list[str],
+    measures: list[dict[str, str]],
+    dimension_buckets: dict[str, str] | None = None,
+) -> tuple[str, list[str]]:
     """构建 SQL SELECT 子句。
 
     根据维度字段和聚合度量生成 SELECT 表达式。
     特殊处理 COUNT_DISTINCT、STDDEV、MEDIAN 等聚合函数的语法。
+    支持时间桶：dimension_buckets 中的维度会展开为 date_trunc 表达式。
 
     Args:
         dimensions: 维度字段名列表，用于 GROUP BY。
         measures: 度量配置列表，每项包含 "field"（字段名）和 "agg"（聚合函数）。
+        dimension_buckets: {维度字段名: 桶粒度}，如 {"order_date": "month"}。
 
     Returns:
         (select_clause, result_columns) 元组：
@@ -205,10 +217,17 @@ def _build_select(dimensions: list[str], measures: list[dict[str, str]]) -> tupl
     """
     parts: list[str] = []
     result_columns: list[str] = []
+    buckets = dimension_buckets or {}
 
     for dim in dimensions:
-        parts.append(f'"{dim}"')
-        result_columns.append(dim)
+        bucket = buckets.get(dim)
+        if bucket and bucket in ALLOWED_BUCKETS:
+            alias = _bucket_alias(dim, bucket)
+            parts.append(f"date_trunc('{bucket}', \"{dim}\") AS \"{alias}\"")
+            result_columns.append(alias)
+        else:
+            parts.append(f'"{dim}"')
+            result_columns.append(dim)
 
     for m in measures:
         # 表达式度量（指标语义层）：直接用指标口径表达式，如 SUM("amount")
@@ -322,18 +341,32 @@ def _build_where(filters: list[dict[str, Any]], schema_fields: set[str], params:
     return "WHERE " + " AND ".join(conditions)
 
 
-def _build_group_by(dimensions: list[str]) -> str:
+def _build_group_by(
+    dimensions: list[str],
+    dimension_buckets: dict[str, str] | None = None,
+) -> str:
     """构建 SQL GROUP BY 子句。
+
+    支持时间桶：带桶的维度按 date_trunc 表达式分组。
 
     Args:
         dimensions: 维度字段名列表，无维度时返回空字符串。
+        dimension_buckets: {维度字段名: 桶粒度}。
 
     Returns:
         GROUP BY 子句字符串，如 'GROUP BY "field1", "field2"'。
     """
     if not dimensions:
         return ""
-    return "GROUP BY " + ", ".join(f'"{dim}"' for dim in dimensions)
+    buckets = dimension_buckets or {}
+    parts: list[str] = []
+    for dim in dimensions:
+        bucket = buckets.get(dim)
+        if bucket and bucket in ALLOWED_BUCKETS:
+            parts.append(f"date_trunc('{bucket}', \"{dim}\")")
+        else:
+            parts.append(f'"{dim}"')
+    return "GROUP BY " + ", ".join(parts)
 
 
 def _build_order_by(sort: dict[str, str] | None, measures: list[dict[str, str]]) -> str:
@@ -366,15 +399,20 @@ def _build_order_by(sort: dict[str, str] | None, measures: list[dict[str, str]])
     return ""
 
 
-def _normalize_sort(sort: dict[str, str] | None, dims: list[str], measures: list[dict[str, str]]) -> dict[str, str] | None:
-    """校验并修正排序字段：可用于 ORDER BY 的列 = 维度 ∪ 度量别名。
+def _normalize_sort(
+    sort: dict[str, str] | None,
+    dims: list[str],
+    measures: list[dict[str, str]],
+    dimension_buckets: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    """校验并修正排序字段：可用于 ORDER BY 的列 = 维度(含桶别名) ∪ 度量别名。
 
     背景：LLM 常把"排序依据"填成度量的源字段（如对 SUM(quantity) 排序传 quantity），
     若直接拼 `ORDER BY "quantity"`，分组查询下 DuckDB 会报
     "must appear in the GROUP BY clause"，导致查询失败并迫使 LLM 退回首写 SQL。
 
     - sort.field == 某个度量源字段（如 quantity）→ 映射为该度量别名（sum_quantity），语义等价
-    - sort.field ∈ 维度 → 原样保留
+    - sort.field ∈ 维度 → 原样保留（有桶时映射为桶别名）
     - sort.field 已直接用度量别名 → 原样保留
     - 其余字段（不存在或不可排序）→ 忽略该排序（返回 None，默认按第一度量排序），不报错
 
@@ -382,6 +420,7 @@ def _normalize_sort(sort: dict[str, str] | None, dims: list[str], measures: list
         sort: 待校验的排序配置（会就地修正 field）。
         dims: 已修正大小写的维度列表。
         measures: 已修正的度量列表。
+        dimension_buckets: {维度字段名: 桶粒度}。
 
     Returns:
         修正后的排序配置；非法字段时返回 None（调用方走默认排序）。
@@ -391,8 +430,14 @@ def _normalize_sort(sort: dict[str, str] | None, dims: list[str], measures: list
 
     field = str(sort["field"])
     dims_lower = {d.lower(): d for d in dims}
+    buckets = dimension_buckets or {}
     if field.lower() in dims_lower:
-        sort["field"] = dims_lower[field.lower()]
+        actual_dim = dims_lower[field.lower()]
+        bucket = buckets.get(actual_dim)
+        if bucket and bucket in ALLOWED_BUCKETS:
+            sort["field"] = _bucket_alias(actual_dim, bucket)
+        else:
+            sort["field"] = actual_dim
         return sort
 
     for m in measures:
@@ -616,16 +661,24 @@ async def execute_chart_query(
     else:
         dims = _validate_fields(config.dimensions, schema_fields, "维度")
 
-    select_clause, result_columns = _build_select(dims, measure_dicts)
+    # 时间桶 key 同步修正大小写（LLM 可能传原始字段名）
+    dim_lower = {d.lower(): d for d in dims}
+    buckets: dict[str, str] = {}
+    for k, v in (config.dimension_buckets or {}).items():
+        actual = dim_lower.get(k.lower())
+        if actual:
+            buckets[actual] = v.lower()
+
+    select_clause, result_columns = _build_select(dims, measure_dicts, buckets)
 
     params: list[Any] = []
     where_clause = _build_where(filter_dicts, schema_fields, params)
 
-    group_by_clause = _build_group_by(dims)
+    group_by_clause = _build_group_by(dims, buckets)
 
     sort_dict = config.sort.model_dump() if config.sort else None
     # 排序字段归一化：度量源字段→别名、非法字段降级忽略，避免聚合查询 ORDER BY 裸字段导致 DuckDB Binder error
-    sort_dict = _normalize_sort(sort_dict, dims, measure_dicts)
+    sort_dict = _normalize_sort(sort_dict, dims, measure_dicts, buckets)
     order_by_clause = _build_order_by(sort_dict, measure_dicts)
 
     if source_type in (SourceType.mysql, SourceType.postgresql):
