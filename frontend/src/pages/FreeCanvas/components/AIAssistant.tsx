@@ -1,9 +1,18 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
-import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical } from "lucide-react";
+import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical, Trash2 } from "lucide-react";
 import { tokenStore } from "../../../api/client";
 import { listMessages } from "../../../api/ai";
 import ActivityFeed from "./ActivityFeed";
 import type { FeedStep } from "./ActivityFeed";
+
+/** 生成稳定唯一的消息 id，避免同一毫秒内多次发送时 key 冲突（Date.now 碰撞） */
+function makeMsgId(prefix: string): string {
+  // crypto.randomUUID 在现代浏览器里可用；回退到高熵字符串保证唯一性
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // Props 接口：AI 助手组件的所有外部输入属性
 interface AIAssistantProps {
@@ -235,7 +244,13 @@ export default memo(function AIAssistant({
     },
   ]);
   const [inputValue, setInputValue] = useState("");       // 输入框当前文本
-  const [isStreaming, setIsStreaming] = useState(false);   // 是否正在接收 AI 流式响应
+  const [isStreaming, setIsStreaming] = useState(false);   // 是否正在接收 AI 流式响应（用于 UI 展示，如禁用按钮）
+  // ⚠️ 真正的并发互斥标志必须是同步级 useRef，不能依赖异步批处理的 setState：
+  // 毫秒级快速连点/连按回车时，第二次 handleSend 读 state 读到的是旧值 false，
+  // 会绕过 guard 造成"两个思考一起转"。streamingRef 原子、同步、即时。
+  const streamingRef = useRef(false);
+  // 当前未完成的 SSE reader.cancel，用于组件卸载 / 清空时主动中断流
+  const activeReaderCancelRef = useRef<(() => void) | null>(null);
   {/* 流式状态上报：父组件据此在 Agent 落块期间禁用画布拖动，避免位置冲突 */}
   useEffect(() => {
     onStreamingChange?.(isStreaming);
@@ -384,26 +399,40 @@ export default memo(function AIAssistant({
 
   // 发送消息的核心处理函数：校验输入、构建请求、处理 SSE 流式响应
   const handleSend = async (text?: string) => {
+    // [关键] 同步级 guard：streamingRef.current 为 true 直接 return，
+    // 毫秒级连点/连按回车也不会绕过（setState 是异步的，这里是原子同步判断）。
+    if (streamingRef.current) return;
     const content = (text || inputValue).trim();
-    if (!content || isStreaming) return;
-    // 未选择数据源时给出提示，不发起请求
-    if (!datasourceId) {
-      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: "请先在左侧选择一个数据源" }]);
-      return;
-    }
+    if (!content) return;
+
+    // 先同步清掉输入框 DOM（inputRef）+ 异步清 state，
+    // 避免用户在 setState 生效前再按回车时把同一条内容再发一遍。
+    if (inputRef.current) inputRef.current.value = "";
     setInputValue("");
 
+    // 未选择数据源时给出提示，不发起请求
+    if (!datasourceId) {
+      setMessages(prev => [...prev, { id: makeMsgId("e"), role: "assistant", content: "请先在左侧选择一个数据源" }]);
+      return;
+    }
+
+    // --- 并发互斥点：进请求前立刻置 streaming 标志 ---
+    streamingRef.current = true;
+    setIsStreaming(true);
+
     // 添加用户消息
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: "user", content };
+    const userMsg: ChatMessage = { id: makeMsgId("u"), role: "user", content };
     setMessages(prev => [...prev, userMsg]);
 
     // 预先创建一条空的 AI 消息占位，后续流式追加内容
-    const assistantId = `a-${Date.now()}`;
+    const assistantId = makeMsgId("a");
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "" };
     setMessages(prev => [...prev, assistantMsg]);
 
     let assistantContent = "";
-    setIsStreaming(true);
+    // 本地统计本轮的画布动作 / 图表次数（与后端计数器一致），用于 finally 兜底文案
+    let localCanvasActions = 0;
+    let localCharts = 0;
 
     const token = tokenStore.getAccess();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
@@ -461,6 +490,11 @@ export default memo(function AIAssistant({
       // 读取 SSE 流，逐行解析 data: 前缀的 JSON 事件
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
+
+      // 把 reader.cancel 登记在 ref 上，方便组件卸载/清空时主动断流
+      activeReaderCancelRef.current = () => {
+        try { reader.cancel(); } catch { /* ignore */ }
+      };
 
       const decoder = new TextDecoder();
       let buffer = '';
@@ -526,6 +560,7 @@ export default memo(function AIAssistant({
               }
               // 'canvas_action': Agent 的落块指令 → 转交父组件实时渲染，并给出提示
               case 'canvas_action': {
+                localCanvasActions += 1;
                 assistantContent += `\n\n> 已${ACTION_LABEL[event.action] ?? event.action}: ${actionDesc(event)}\n`;
                 setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
                 if (onCanvasAction) onCanvasAction(event);
@@ -536,8 +571,9 @@ export default memo(function AIAssistant({
                 runSeq.current += 1;
                 setSteps(prev => [...prev, { id: `${runSeq.current}`, title: event.title ?? "执行中", status: "run", tools: [] }]);
                 break;
-              // 'chart'：兼容旧行为，保留但不再强制应用，仅作提示
+              // 'chart'：图表渲染事件，计数用于兜底文案
               case 'chart':
+                localCharts += 1;
                 break;
               // 兼容旧事件
               // 'query_result': 查询结果数据，由 AI 自行处理，不显示原始数据表
@@ -584,6 +620,18 @@ export default memo(function AIAssistant({
     } catch (err: any) {
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `[连接失败] ${err.message}` } : m));
     } finally {
+      // 流结束但 AI 仍然没生成任何文本 → 用本轮统计到的画布动作/图表数生成兜底文案，
+      // 保证 UI 不再永远显示「思考中...」，也和后端保存到 DB 的兜底 assistant 消息对齐。
+      if (!assistantContent.trim() && (localCanvasActions > 0 || localCharts > 0)) {
+        const parts: string[] = [];
+        if (localCanvasActions > 0) parts.push(`在画布执行 ${localCanvasActions} 次落块操作`);
+        if (localCharts > 0) parts.push(`生成 ${localCharts} 张图表`);
+        assistantContent = `本次分析通过画布工具完成：${parts.join("，")}，请查看画布内容与工作台执行记录。`;
+        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
+      }
+      // 先清 ref（同步互斥标志），再清 state（异步 UI 状态），顺序不能反！
+      activeReaderCancelRef.current = null;
+      streamingRef.current = false;
       setIsStreaming(false);
     }
   };
@@ -592,9 +640,46 @@ export default memo(function AIAssistant({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // 键盘层也补一次同步 guard，防止快速连按 Enter 在 handleSend 之外冒泡重复
+      if (streamingRef.current) return;
       handleSend();
     }
   };
+
+  /** 清空当前对话：重置 UI 消息、工作台步骤、会话 ID，后端会在下一次发送时新建会话。 */
+  const handleClearChat = useCallback(() => {
+    // 正在运行 → 先主动断 SSE，保证状态彻底释放再清空
+    if (streamingRef.current) {
+      try { activeReaderCancelRef.current?.(); } catch { /* ignore */ }
+      activeReaderCancelRef.current = null;
+      streamingRef.current = false;
+      setIsStreaming(false);
+    }
+    // 清会话持久化
+    sessionIdRef.current = null;
+    sessionLoaded.current = false;
+    try { localStorage.removeItem("canvas_session_id"); } catch { /* ignore */ }
+    // 清 UI
+    setSteps([]);
+    // 重置欢迎语（根据当前数据源）
+    const welcome: ChatMessage = {
+      id: "welcome",
+      role: "assistant",
+      content: datasourceId && fieldMeta?.length
+        ? `你好！我已了解当前数据源，共有 ${fieldMeta.length} 个字段。你可以让我帮你分析数据、推荐图表。`
+        : "你好！我是 AI 画布助手。先选择数据源，我就能帮你分析数据和配置图表。",
+    };
+    setMessages([welcome]);
+  }, [datasourceId, fieldMeta]);
+
+  // 组件卸载 / 面板关闭：主动断流，避免 SSE 连接泄漏、streamingRef 卡在 true（下一次重开面板 guard 永远挡）
+  useEffect(() => {
+    return () => {
+      try { activeReaderCancelRef.current?.(); } catch { /* ignore */ }
+      activeReaderCancelRef.current = null;
+      streamingRef.current = false;
+    };
+  }, []);
 
   // 面板样式：结合拖拽偏移和缩放尺寸，拖拽/缩放时禁用文本选择
   const panelStyle: React.CSSProperties = {
@@ -631,9 +716,19 @@ export default memo(function AIAssistant({
                 </span>
               )}
             </div>
-            <button className="p-1 rounded hover:bg-muted" onClick={() => setOpen(false)}>
-              <X className="w-4 h-4 text-muted-foreground" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={handleClearChat}
+                disabled={isStreaming}
+                title="清空当前对话"
+              >
+                <Trash2 className="w-4 h-4 text-muted-foreground" />
+              </button>
+              <button className="p-1 rounded hover:bg-muted" onClick={() => setOpen(false)}>
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
           </div>
 
           {/* 消息列表区域 — 可滚动，每条消息按角色分别左右对齐 */}
@@ -660,11 +755,16 @@ export default memo(function AIAssistant({
                     msg.role === "assistant" && msg.id !== "welcome"
                       ? <div>{renderMarkdown(stripCodeBlocks(msg.content))}</div>
                       : <span className="whitespace-pre-wrap">{msg.content}</span>
-                  ) : (
-                    // 内容为空时显示"思考中..."加载动画
+                  ) : isStreaming ? (
+                    // 内容为空 + 仍在流式接收中 → 显示"思考中..."加载动画
                     <span className="inline-flex items-center gap-1 text-muted-foreground">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       思考中...
+                    </span>
+                  ) : (
+                    // 流已结束但 LLM 全程只调用工具、没有输出纯文本 → 给用户一个明确的完成提示，避免永远转圈
+                    <span className="whitespace-pre-wrap text-muted-foreground">
+                      已完成分析并更新画布，请查看工作台执行记录与画布内容。
                     </span>
                   )}
                 </div>

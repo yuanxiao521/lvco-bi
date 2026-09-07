@@ -43,8 +43,8 @@ export default function Login() {
           data?: {
             detail?: { code?: string; message?: string };
             message?: string;
+            error?: { message?: string };
           };
-          error?: { message?: string };
         };
         message?: string;
       };

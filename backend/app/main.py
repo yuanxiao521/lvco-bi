@@ -71,6 +71,7 @@ async def health_check() -> dict:
 async def startup():
     from app.api.deps import get_cache_repository
     from app.core.database import async_session_factory
+    from app.services.insight_engine.scheduler import InsightScheduler
     logger = structlog.get_logger("main")
     cache_repo = get_cache_repository()
     status = "redis" if getattr(cache_repo, "_use_redis", False) else "fallback_to_dict"
@@ -84,8 +85,54 @@ async def startup():
     except Exception:  # noqa: BLE001
         logger.warning("seed_default_metrics_failed")
 
+    if settings.INSIGHT_ENABLED:
+        try:
+            insight_scheduler = InsightScheduler(
+                interval_minutes=settings.INSIGHT_INTERVAL_MINUTES
+            )
+            insight_scheduler.start()
+            app.state.insight_scheduler = insight_scheduler
+            logger.info(
+                "insight_scheduler_started",
+                interval_minutes=settings.INSIGHT_INTERVAL_MINUTES,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("insight_scheduler_start_failed")
+
+    # 启动 DashboardScheduler
+    from app.services.dashboard_scheduler import DashboardScheduler
+    dashboard_scheduler = DashboardScheduler()
+    dashboard_scheduler.start()
+    app.state.dashboard_scheduler = dashboard_scheduler
+    logger.info("dashboard_scheduler_started")
+
+    # 加载已开启刷新的仪表盘
+    from app.core.database import async_session_factory
+    from app.models.dashboard import Dashboard
+    from sqlalchemy import select
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Dashboard).where(Dashboard.refresh_enabled == True, Dashboard.deleted_at.is_(None))
+        )
+        dashboards = result.scalars().all()
+        for d in dashboards:
+            if d.refresh_cron:
+                try:
+                    dashboard_scheduler.add_job(d.id, d.refresh_cron)
+                except Exception as e:
+                    logger.warning(f"dashboard_schedule_load_failed: {d.id} {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown():
     logger = structlog.get_logger("main")
+    insight_scheduler = getattr(app.state, "insight_scheduler", None)
+    if insight_scheduler is not None:
+        try:
+            insight_scheduler.shutdown()
+        except Exception:  # noqa: BLE001
+            logger.warning("insight_scheduler_stop_failed")
+    dashboard_scheduler = getattr(app.state, "dashboard_scheduler", None)
+    if dashboard_scheduler:
+        dashboard_scheduler.stop()
     logger.info("app_shutdown_complete")

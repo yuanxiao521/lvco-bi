@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.ai_memory import AIMemory
 from app.models.ai_message import AIMessage, AIMessageRole
 from app.models.ai_session import AISession
 
@@ -140,3 +141,38 @@ class SQLAlchemyAIMessageRepository:
         self.db.delete(msg)
         await self.db.flush()
         return True
+
+
+class SQLAlchemyAIMemoryRepository:
+    """AIMemory 压缩记忆 Repository（每会话一行，upsert 语义）。"""
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get_by_session(self, session_id: uuid.UUID) -> AIMemory | None:
+        """按会话读取最新压缩记忆（无则返回 None）。"""
+        result = await self.db.execute(
+            select(AIMemory).where(AIMemory.session_id == session_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert(
+        self,
+        session_id: uuid.UUID,
+        summary: str,
+        covered_rounds: int = 0,
+    ) -> AIMemory:
+        """写入/更新会话压缩记忆（存在则覆盖 summary 与 covered_rounds）。"""
+        memory = await self.get_by_session(session_id)
+        if memory is None:
+            memory = AIMemory(
+                session_id=session_id,
+                summary=summary,
+                covered_rounds=covered_rounds,
+            )
+            self.db.add(memory)
+        else:
+            memory.summary = summary
+            memory.covered_rounds = covered_rounds
+        await self.db.flush()
+        return memory

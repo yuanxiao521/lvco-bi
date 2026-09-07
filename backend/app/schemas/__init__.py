@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -307,7 +307,7 @@ class PolishRequest(CamelModel):
 class CanvasChatRequest(CamelModel):
     datasource_id: str | None = None
     session_id: str | None = None
-    message: str
+    message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
     canvas_context: dict | None = None  # blocks, current config, etc.
     canvas_id: str | None = None  # 画布 ID；供前端落块后保存定位（可选）
 
@@ -315,15 +315,23 @@ class CanvasChatRequest(CamelModel):
 class DataChatRequest(CamelModel):
     datasource_id: str | None = None
     session_id: str | None = None  # 会话 ID，用于保存消息
-    message: str
+    message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
     history: list[dict] | None = None
+
+
+AggKind = Literal["SUM", "AVG", "COUNT", "MAX", "MIN", "COUNT_DISTINCT", "MEDIAN", "STDDEV"]
 
 
 class MetricCreate(CamelModel):
     key: str = Field(..., min_length=1, max_length=120)
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(None, max_length=1000)
-    formula: str = Field(..., min_length=1)
+    # formula 与 source_field+agg 二选一：
+    # - 直接写口径表达式（高级）；或
+    # - 选一个数据源字段 + 聚合方式，由后端自动生成 SUM("字段") 式公式（免手写 SQL）
+    formula: str | None = None
+    source_field: str | None = None
+    agg: AggKind | None = None
     agg_kind: str | None = Field(None, max_length=20)
     datasource_id: UUID | None = None
     table_ref: str | None = Field("data", max_length=200)
@@ -345,6 +353,9 @@ class MetricResponse(CamelModel):
     name: str
     description: str | None
     formula: str
+    formula_type: str = "basic"
+    depends_on_metric_ids: list | None = None
+    version: int = 1
     agg_kind: str | None
     datasource_id: UUID | None
     table_ref: str | None

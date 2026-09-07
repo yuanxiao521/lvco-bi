@@ -26,6 +26,11 @@ class Dashboard(TimestampMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    refresh_cron: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    refresh_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user = relationship("User", back_populates="dashboards")
     dashboard_charts = relationship(

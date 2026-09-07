@@ -134,11 +134,14 @@ def _infer_table_description(ds: dict) -> str:
 class PlannerAgent(BaseAgent):
     """任务规划 Agent：分析用户意图，动态生成工具调用计划"""
 
-    def __init__(self, llm: LLMClient, extra_plannable_tools: set[str] | None = None):
+    def __init__(self, llm: LLMClient, extra_plannable_tools: set[str] | None = None,
+                 system_prompt: str | None = None):
         super().__init__("planner")
         self.llm = llm
         # 按入口注入的额外可规划工具（如画布工具）：白名单 = orchestrator_safe ∪ extra
         self.extra_plannable_tools: set[str] = set(extra_plannable_tools or ())
+        # 可注入自定义规划 prompt（如画布版 CanvasPlannerAgent）；默认用通用 ORCHESTRATOR_SYSTEM
+        self.system_prompt: str | None = system_prompt
 
     async def execute(self, **kwargs) -> AgentResult:
         """分析用户输入，生成工具调用计划。"""
@@ -222,7 +225,7 @@ class PlannerAgent(BaseAgent):
             context += f"\n\n对话历史（最近）：\n{json.dumps(history[-5:], ensure_ascii=False)}"
 
         messages = [
-            {"role": "system", "content": ORCHESTRATOR_SYSTEM},
+            {"role": "system", "content": self.system_prompt or ORCHESTRATOR_SYSTEM},
             {"role": "user", "content": context + "\n\n请生成执行计划（严格 JSON）。"},
         ]
         return messages
@@ -263,7 +266,10 @@ class PlannerAgent(BaseAgent):
         """Schema 校验 + 工具白名单过滤 + 字段规范化。返回规范化后的计划 dict。"""
         structured = PlanOutput.model_validate(plan)  # 抛 ValidationError 时由调用方处理
 
-        safe_tools = _get_cached_orchestrator_tools() | self.extra_plannable_tools
+        # 严格白名单：入口注入 extra（如画布工具集）时，白名单 = extra（完全覆盖，
+        # 不并入 orchestrator_safe，避免画布场景误暴露 render_chart 等非画布工具）；
+        # 未注入 extra（普通对话）时，白名单 = orchestrator_safe。
+        safe_tools = self.extra_plannable_tools if self.extra_plannable_tools else set(_get_cached_orchestrator_tools())
         valid_steps: list[dict] = []
         seen_ids: set[int] = set()
         for s in structured.steps:

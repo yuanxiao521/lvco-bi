@@ -533,6 +533,13 @@ class QueryDatasourceTool(BaseTool):
         # L3 安全检查：通过 sql_guard 对 SQL 进行完整校验（拦截危险操作）
         guard: GuardResult = sql_guard.full_check("", sql)
         if not guard.allowed:
+            # 日志：拦截时同时输出实际 SQL 和 reason，便于排查 AST 误报（如 COUNT(*) 被当成 SELECT *）
+            # ast_details 若有 failed_rule 一起打，可精确定位到是哪一条 AST 规则命中
+            failed_rule = (guard.ast_details or {}).get("failed_rule")
+            log.warning(
+                "[QueryDatasourceTool] GUARD BLOCKED layer=%s rule=%s reason=%s sql=%s",
+                guard.layer, failed_rule or "-", guard.reason, sql[:500],
+            )
             return json.dumps({"error": guard.reason}, ensure_ascii=False)
 
         final_sql = guard.sanitized_sql or sql
@@ -588,6 +595,15 @@ class QueryDatasourceTool(BaseTool):
             attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
             duckdb_client.execute(attach_sql)
 
+        # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
+        # 本地库 table_ref 为 "schema"."data"（归属在 db），外部库为 "schema".public."table"（归属在 catalog）。
+        # 防止 LLM 生成 SQL 访问不属于当前数据源的 schema。
+        from app.services.sql_guard_ast import check_sql_table_ownership
+        ownership_ok, ownership_reason, _ownership_refs = check_sql_table_ownership(final_sql, {schema_name})
+        if not ownership_ok:
+            log.warning("Query tool ownership blocked: %s", ownership_reason)
+            return self._build_query_error(datasource, schema_name, ownership_reason, attempted_sql=final_sql[:300])
+
         # 执行 SQL 查询并解析结果列名
         try:
             rows_raw = duckdb_client.fetchall(final_sql)
@@ -641,34 +657,43 @@ class QueryDatasourceTool(BaseTool):
             }, ensure_ascii=False, default=str)
         except Exception as e:
             log.warning("Query tool error: %s", e)
-            # 构建 table_ref 让 AI 能直接用正确的 FROM 子句重试
-            if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
-                meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
-                table_name = meta.get("table_name", "data")
-                table_ref = f'"{schema_name}".public."{table_name}"'
-            else:
-                table_ref = f'"{schema_name}"."data"'
+            # 复用统一错误构造：table_ref + 可用列 hint 供 LLM 自纠错
+            return self._build_query_error(datasource, schema_name, str(e)[:200], attempted_sql=final_sql[:300])
 
-            # 把数据源真实列名和 table_ref 注入 hint，让 LLM 能立即自纠错
-            available_columns: list[str] = []
-            schema_meta = datasource.schema_meta or {}
-            fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
-            for f in fields:
-                if isinstance(f, dict) and f.get("name"):
-                    available_columns.append(str(f["name"]))
-            hint_lines = [
-                f"FROM 子句必须用: {table_ref}（直接复制这个字符串，不要修改）",
-                "列名必须加双引号。",
-                "以下为该数据源真实列名（必须一字不差从这里复制）：",
-                ", ".join(f'"{c}"' for c in available_columns),
-            ]
-            return json.dumps({
-                "error": f"查询执行失败: {str(e)[:200]}",
-                "attempted_sql": final_sql[:300],
-                "table_ref": table_ref,
-                "hint": "\n".join(hint_lines),
-                "available_columns": available_columns,
-            }, ensure_ascii=False)
+    def _build_query_error(self, datasource, schema_name: str, error_msg: str, attempted_sql: str = "") -> str:
+        """构造查询失败的错误 JSON（含正确 table_ref 与可用列 hint，供 LLM 自纠错）。
+
+        归属校验失败与执行异常共用此方法，保证错误契约一致。
+        """
+        if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
+            meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
+            table_name = meta.get("table_name", "data")
+            table_ref = f'"{schema_name}".public."{table_name}"'
+        else:
+            table_ref = f'"{schema_name}"."data"'
+
+        # 把数据源真实列名和 table_ref 注入 hint，让 LLM 能立即自纠错
+        available_columns: list[str] = []
+        schema_meta = datasource.schema_meta or {}
+        fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
+        for f in fields:
+            if isinstance(f, dict) and f.get("name"):
+                available_columns.append(str(f["name"]))
+        hint_lines = [
+            f"FROM 子句必须用: {table_ref}（直接复制这个字符串，不要修改）",
+            "列名必须加双引号。",
+            "以下为该数据源真实列名（必须一字不差从这里复制）：",
+            ", ".join(f'"{c}"' for c in available_columns),
+        ]
+        payload = {
+            "error": f"查询执行失败: {error_msg}",
+            "table_ref": table_ref,
+            "hint": "\n".join(hint_lines),
+            "available_columns": available_columns,
+        }
+        if attempted_sql:
+            payload["attempted_sql"] = attempted_sql
+        return json.dumps(payload, ensure_ascii=False)
 
 
 class RenderChartTool(BaseTool):
@@ -1537,6 +1562,9 @@ class StatsAnalyzerTool(BaseTool):
     """统计分析：对查询结果（columns + rows）做描述性统计，数据可从依赖步骤自动填充"""
 
     name = "stats_analyzer"
+    # 纯计算工具（无 db_session 访问，数据从依赖步骤自动填充），且已列入 Planner 工具清单，
+    # 必须标记 orchestrator_safe=True，否则 Executor 白名单（orchestrator_safe ∪ extra）会拦截它。
+    orchestrator_safe = True
     description = (
         "统计分析：对已有查询结果做描述性统计——数值列输出 count/mean/std/min/25%分位/中位数/75%分位/max/"
         "缺失数/异常值提示（IQR 法），类别列输出 Top N 频次与占比。"

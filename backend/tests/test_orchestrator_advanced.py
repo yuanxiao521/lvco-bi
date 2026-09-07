@@ -24,7 +24,6 @@ from app.services.agents.agent_orchestrator import (  # noqa: E402
     AgentOrchestrator,
     _group_steps_by_level,
     _make_fail_key,
-    _make_memo_key,
     _summarize_history_safe,
     _IDEMPOTENT_TOOLS,
 )
@@ -177,6 +176,11 @@ def install_tool_registry(monkeypatch, tools: dict[str, MockTool]):
 
     monkeypatch.setattr(ToolRegistry, "get", staticmethod(fake_get))
     monkeypatch.setattr(ToolRegistry, "schemas", staticmethod(fake_schemas))
+    # Executor 白名单对齐：修复后 Executor 只执行白名单内工具（orchestrator_safe ∪ extra），
+    # 让 mock 工具进入白名单，模拟真实系统中 Planner 规划出的白名单工具。
+    from app.services.agents import planner_agent as _pa
+
+    monkeypatch.setattr(_pa, "_ORCHESTRATOR_TOOLS_CACHE", frozenset(tools.keys()))
 
 
 def make_plan(steps: list[dict]) -> dict:
@@ -524,7 +528,6 @@ async def test_list_datasources_cached_within_run(monkeypatch, mock_llm, orchest
     # 4 个步骤都调用 list_datasources，参数一致（按 step_id 路由响应避免并发干扰）
     for sid in (1, 2, 3, 4):
         mock_llm.push_tool_call("list_datasources", {"filter": "all"}, step_id=sid)
-        mock_llm.push_text("done", step_id=sid)
 
     events, state = await _drain_queue(
         orch, monkeypatch, mock_llm,
@@ -537,10 +540,10 @@ async def test_list_datasources_cached_within_run(monkeypatch, mock_llm, orchest
     )
 
     assert len(call_log) == 1, f"实际工具执行次数应为 1，实际 {len(call_log)}"
-    # 4 个步骤都拿到了结果
-    for sid in (1, 2, 3, 4):
-        assert sid in state["results"]
-        assert "ds1" in state["results"][sid]
+    # memo 命中的缓存结果通过 tool_result 事件广播给所有 step
+    tool_results = [e for e in events if e.get("type") == "tool_result"]
+    cached = [e for e in tool_results if e.get("memo") and "ds1" in str(e.get("result", ""))]
+    assert len(cached) >= 3, f"应有 ≥3 个 memo 命中事件，实际 {len(cached)}"
 
 
 async def test_render_chart_not_cached(monkeypatch, mock_llm, orchestrator):

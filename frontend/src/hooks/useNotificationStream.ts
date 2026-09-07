@@ -43,6 +43,18 @@ export function useNotificationStream() {
       }
     });
 
+    // 仪表盘数据已更新（指标口径变更联动触发），转给 Dashboard 详情页自动刷新
+    es.addEventListener("dashboard_updated", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        window.dispatchEvent(
+          new CustomEvent("dashboard:updated", { detail: data }),
+        );
+      } catch {
+        // 解析失败忽略
+      }
+    });
+
     es.addEventListener("error", () => {
       // EventSource 会自动重连，这里只清理引用
       // 如果连接彻底失败（如 401），readyState 变为 CLOSED

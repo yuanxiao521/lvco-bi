@@ -8,6 +8,8 @@ import ReportCenter from "./pages/ReportCenter";
 import ReportView from "./pages/ReportCenter/View";
 import DataSource from "./pages/DataSource";
 import StatisticsPage from "./pages/Statistics";
+import MetricsPage from "./pages/Metrics";
+import MetricDetail from "./pages/Metrics/Detail";
 import AIChat from "./pages/AIChat";
 import AccountSettings from "./pages/AccountSettings";
 import Templates from "./pages/Templates";
@@ -49,6 +51,8 @@ export default function App() {
                 <Route path="/report-center" element={<ReportCenter />} />
                 <Route path="/data-source" element={<DataSource />} />
                 <Route path="/statistics" element={<StatisticsPage />} />
+                <Route path="/metrics" element={<MetricsPage />} />
+                <Route path="/metrics/:id" element={<MetricDetail />} />
                 <Route path="/ai-chat" element={<AIChat />} />
                 <Route path="/account-settings" element={<AccountSettings />} />
                 <Route path="/templates" element={<Templates />} />

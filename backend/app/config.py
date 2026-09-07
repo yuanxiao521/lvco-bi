@@ -50,6 +50,21 @@ class Settings(BaseSettings):
     AGENT_STEP_TIMEOUT: int = 30  # 单步骤超时（秒）
     AGENT_ORCHESTRATOR_TIMEOUT: int = 60  # 整个编排流程超时（秒）
 
+    # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
+    INSIGHT_ENABLED: bool = True
+    INSIGHT_INTERVAL_MINUTES: int = 5
+
+    # 上下文压缩
+    CONTEXT_MAX_CHARS: int = 150000
+    CONTEXT_KEEP: int = 60
+    CONTEXT_MIN_ROUNDS: int = 3
+    CONTEXT_KEEP_ROUNDS: int = 3
+
+    # 单工具结果压缩（rows 数据行保留前 N 行；insights 等建议列表不按条数截断，
+    # 完整保留，仅受上方 RESULT_MAX_CHARS 总字符上限兜底）
+    RESULT_MAX_CHARS: int = 1500
+    RESULT_MAX_ROWS: int = 10
+
     @property
     def is_ai_configured(self) -> bool:
         return bool(self.openai_api_key)

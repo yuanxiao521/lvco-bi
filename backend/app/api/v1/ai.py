@@ -42,9 +42,46 @@ from app.schemas import (
 from app.services.ai_service import AIService, VALID_CHART_TYPES
 from app.services.ai_prompts import CANVAS_AGENT_SYSTEM, CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
+
+# 画布助手允许的工具 = 画布专属落块工具 + 基础查数/出图工具（先查再落）。
+# 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
+_CANVAS_QUERY_TOOL_NAMES = frozenset({
+    "list_datasources", "query_datasource", "query_engine",
+    "stats_analyzer", "recommend_charts",
+})
+CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 
 router = APIRouter(prefix="/ai", tags=["AI助手"])
+
+
+async def _load_memory_summary(db: AsyncSession, session_id) -> str | None:
+    """读取会话级压缩记忆，供本轮注入上下文（无会话/无记忆返回 None）。"""
+    if not session_id:
+        return None
+    try:
+        from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
+        memory = await SQLAlchemyAIMemoryRepository(db).get_by_session(session_id)
+        return memory.summary if memory else None
+    except Exception:
+        _log.warning("load_ai_memory_failed", exc_info=True)
+        return None
+
+
+async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
+    """持久化压缩记忆（消费 agent_stream 的 compressed_history 事件）。"""
+    if not session_id:
+        return
+    summary = (event.get("summary") or "").strip()
+    if not summary:
+        return
+    try:
+        from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
+        covered = int(event.get("covered_rounds") or 0)
+        await SQLAlchemyAIMemoryRepository(db).upsert(session_id, summary, covered_rounds=covered)
+        await db.commit()
+    except Exception:
+        _log.warning("save_ai_memory_failed", exc_info=True)
 
 
 @router.get("/sessions")
@@ -578,6 +615,7 @@ async def data_chat_stream(
                 history=history,
                 db_session=db,
                 initial_phase="analyzing" if body.datasource_id else "selecting",
+                memory_summary=await _load_memory_summary(db, session_id),
             ):
                 if event["type"] == "text":
                     raw_delta = event["content"]
@@ -626,6 +664,9 @@ async def data_chat_stream(
                     yield f"data: {json.dumps({'type': 'done', 'charts': collected_charts}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "error":
                     yield f"data: {json.dumps({'type': 'error', 'message': event['message']}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "compressed_history":
+                    # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
+                    await _save_memory(db, session_id, event)
 
             # Save assistant message
             if session_id and (full_content.strip() or collected_charts):
@@ -1393,10 +1434,68 @@ async def canvas_ai_chat(
         "\n（你可以在画布上直接搭报告：用 add_text_block 写标题/叙事，"
         "add_chart_block 建图，update_chart_block/remove_block 改删已有块。）"
     )
+
+    def _canvas_ds_injection(ds) -> str:
+        """构建与 AGENT_SYSTEM「情况A」匹配的数据源注入（含 table_ref / 字段）。
+
+        必须使用【系统注入：当前已连接数据源】前缀，否则 LLM 会判定为「未注入」，
+        从而反复调用 list_datasources 而无法推进到查询。
+        """
+        from app.models.datasource import SourceType as _ST
+
+        meta = ds.schema_meta if isinstance(ds.schema_meta, dict) else {}
+        fields = meta.get("fields") or []
+        field_lines: list[str] = []
+        col_names: list[str] = []
+        for f in fields:
+            if isinstance(f, dict):
+                fn = f.get("name")
+                if not fn:
+                    continue
+                col_names.append(fn)
+                ft = f.get("data_type", "?")
+                fc = f.get("category", "")
+                field_lines.append(f"  - {fn} ({ft}{' [' + fc + ']' if fc else ''})")
+        # 限制注入字段数量，避免 user_msg 超过 L1 长度上限（2000），
+        # 同时保证末尾的用户问题不会被截断。
+        _MAX_INJECTED_FIELDS = 25
+        if len(field_lines) > _MAX_INJECTED_FIELDS:
+            field_lines = field_lines[:_MAX_INJECTED_FIELDS] + [
+                f"  ...（共 {len(fields)} 个字段，仅展示前 {_MAX_INJECTED_FIELDS} 个）"
+            ]
+        schema_name = duckdb_client.get_schema_name(str(current_user.id), str(ds.id), ds.name)
+        if ds.source_type in (_ST.postgresql, _ST.mysql):
+            tbl = meta.get("table_name", "data")
+            table_ref = f'"{schema_name}".public."{tbl}"'
+        else:
+            table_ref = f'"{schema_name}"."data"'
+        return (
+            f"【系统注入：当前已连接数据源】\n"
+            f"数据源名称: {ds.name}\n"
+            f"数据源 ID: {ds.id}\n"
+            f"table_ref（FROM 子句必须原样复制）: {table_ref}\n"
+            f"列名（SQL 中必须加双引号）: {', '.join(col_names) or '（无）'}\n"
+            f"字段详情:\n{chr(10).join(field_lines) or '（无字段信息）'}"
+        )
+
     if datasource:
-        user_msg_parts = [f"已连接数据源：{datasource.name}（FROM 用表引用：{table_ref}）"]
+        user_msg_parts = [_canvas_ds_injection(datasource)]
     else:
-        user_msg_parts = ["当前未连接数据源，你可以与用户就其需求自由对话。"]
+        # 未绑定数据源但平台已有：全部注入，让 LLM 直接基于用户问题选择查询（而非反复 list）
+        from app.repositories.datasource_repository import SQLAlchemyDataSourceRepository
+
+        try:
+            ds_list, _ = await SQLAlchemyDataSourceRepository(db).list_datasources(
+                current_user.id, page=1, page_size=50,
+                source_type=None, status=None, search=None,
+            )
+            user_msg_parts = (
+                [_canvas_ds_injection(ds) for ds in ds_list]
+                if ds_list
+                else ["当前未连接数据源，你可以与用户就其需求自由对话。"]
+            )
+        except Exception:
+            user_msg_parts = ["当前未连接数据源，你可以与用户就其需求自由对话。"]
 
     # 注入指标清单：让 Planner 优先引用命名指标（metric key）而非裸字段聚合，
     # 从而统一口径、支持随指标定义联动刷新。
@@ -1425,6 +1524,10 @@ async def canvas_ai_chat(
 
         ai_service = AIService(LLMClient(settings))
         full_content = ""
+        # 画布动作 / 图表 计数器：工具型对话即使 LLM 不落纯文本，
+        # 也能据此生成兜底 assistant 消息，保证会话链路完整。
+        canvas_actions_count = 0
+        charts_count = 0
         session_id: uuid.UUID | None = None
         try:
             # ---- 1. 解析 / 创建会话 ----
@@ -1499,14 +1602,30 @@ async def canvas_ai_chat(
                     history.append({"role": pm.role.value, "content": pm.content})
 
             # ---- 4. Agent 流式执行 ----
+            # 画布有数据源（已绑定或平台已有）时直接进 analyzing，
+            # 避免每次请求都从 selecting 开始、反复 list_datasources 而无法推进到查询。
+            try:
+                from app.repositories.datasource_repository import SQLAlchemyDataSourceRepository
+                ds_list, _ = await SQLAlchemyDataSourceRepository(db).list_datasources(
+                    current_user.id, page=1, page_size=1,
+                    source_type=None, status=None, search=None,
+                )
+                has_ds = bool(ds_list)
+            except Exception:
+                has_ds = datasource is not None
+            canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
+            # 最近一次 tool_call 的 args（按工具名缓存），供 render_chart/chart 事件兜底合成 canvas_action 用
+            last_tool_args: dict[str, dict] = {}
             async for event in ai_service.agent_stream(
                 user_id=str(current_user.id),
                 user_msg=user_msg,
                 history=history,
                 db_session=db,
-                initial_phase="selecting",
+                initial_phase=canvas_initial_phase,
                 system_prompt_override=CANVAS_AGENT_SYSTEM,
-                extra_plannable_tools=CANVAS_TOOL_NAMES,
+                extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
+                memory_summary=await _load_memory_summary(db, session_id),
+                entry="canvas",
             ):
                 ev_type = event.get("type")
                 if ev_type == "text":
@@ -1514,7 +1633,11 @@ async def canvas_ai_chat(
                     full_content += delta
                     yield _sse({"type": "message", "delta": delta})
                 elif ev_type == "tool_call":
-                    yield _sse({"type": "tool_call", "name": event.get("name", ""), "args": event.get("args", {})})
+                    name = event.get("name", "")
+                    args = event.get("args", {}) or {}
+                    if name:
+                        last_tool_args[name] = dict(args) if isinstance(args, dict) else {}
+                    yield _sse({"type": "tool_call", "name": name, "args": args})
                 elif ev_type == "tool_result":
                     name = event.get("name", "")
                     result_raw = event.get("result", "")
@@ -1523,27 +1646,127 @@ async def canvas_ai_chat(
                         r = json.loads(result_raw) if isinstance(result_raw, str) else {}
                         action = r.get("canvas_action") if isinstance(r, dict) else None
                         if isinstance(action, dict):
+                            canvas_actions_count += 1
                             yield _sse({"type": "canvas_action", **action})
+                            continue
+                        # 兜底：Agent 在画布路径下可能误用通用 render_chart（仅出 ECharts option，不落块）。
+                        # 当 tool_name == render_chart + 有 option/chart_type + 无 error 时，
+                        # 用 tool_call 时携带的 columns/rows/title 合成等效 add_chart_block 的 canvas_action 落块。
+                        if isinstance(r, dict) and name == "render_chart" and not r.get("error"):
+                            chart_type = r.get("chart_type") or event.get("chart_type") or ""
+                            option = r.get("option")
+                            _log.info(
+                                "[canvas_chat] render_chart_fallback enter: chart_type=%s has_option=%s last_tool_render_keys=%s",
+                                chart_type, option is not None, list(last_tool_args.get("render_chart", {}).keys()),
+                            )
+                            if option is not None and chart_type:
+                                rc_args = last_tool_args.get("render_chart", {}) or {}
+                                title = (rc_args.get("title") or r.get("title") or "")
+                                columns = rc_args.get("columns") or []
+                                rows = rc_args.get("rows") or []
+                                _log.info(
+                                    "[canvas_chat] render_chart_fallback: title=%s cols=%s rows_n=%s ds=%s",
+                                    title, len(columns), len(rows),
+                                    (datasource.id if datasource else None) or body.datasource_id,
+                                )
+                                if columns and rows:
+                                    ds_id = str((datasource.id if datasource else None) or body.datasource_id or "")
+                                    dims = [str(c) for c in columns[:1]]
+                                    measures_cfg = [
+                                        {"field": str(c), "agg": "NONE"}
+                                        for c in columns[1:]
+                                    ]
+                                    fallback_block = {
+                                        "title": str(title) or str(chart_type),
+                                        "chartType": str(chart_type),
+                                        "datasourceId": ds_id,
+                                        "queryConfig": {
+                                            "dimensions": dims,
+                                            "measures": measures_cfg,
+                                            "filters": [],
+                                            "limit": 500,
+                                        },
+                                        "columns": [str(c) for c in columns],
+                                        "rows": [list(x) for x in rows],
+                                    }
+                                    # 项目硬约束：导出 PDF 需要 _chartResult + _chartConfig
+                                    fallback_block["_chartResult"] = {
+                                        "columns": fallback_block["columns"],
+                                        "rows": fallback_block["rows"],
+                                    }
+                                    fallback_block["_chartConfig"] = option
+                                    fallback_action = {
+                                        "action": "add_chart_block",
+                                        "block": fallback_block,
+                                    }
+                                    canvas_actions_count += 1
+                                    _log.info(
+                                        "[canvas_chat] render_chart_fallback YIELDED: title=%s chart_type=%s rows=%d",
+                                        fallback_block["title"], chart_type, len(rows),
+                                    )
+                                    yield _sse({"type": "canvas_action", **fallback_action})
+                                else:
+                                    _log.info("[canvas_chat] render_chart_fallback skipped: cols=%s rows=%s", bool(columns), bool(rows))
+                            else:
+                                _log.info("[canvas_chat] render_chart_fallback skipped: option=%s chart_type=%s", option is not None, bool(chart_type))
                     except (json.JSONDecodeError, TypeError):
                         pass
                 elif ev_type == "chart":
                     chart_type = event.get("chart_type")
                     option = event.get("option")
                     if option is not None:
+                        charts_count += 1
                         yield _sse({"type": "chart", "chart_type": chart_type, "option": option})
+                        # 同样兜底：chart 事件带 option 时，按 last render_chart 参数追加一个 canvas_action 落块
+                        rc_args = last_tool_args.get("render_chart", {}) or {}
+                        title = rc_args.get("title") or str(chart_type)
+                        columns = rc_args.get("columns") or []
+                        rows = rc_args.get("rows") or []
+                        if columns and rows:
+                            ds_id = str((datasource.id if datasource else None) or body.datasource_id or "")
+                            dims = [str(c) for c in columns[:1]]
+                            measures_cfg = [{"field": str(c), "agg": "NONE"} for c in columns[1:]]
+                            fb = {
+                                "title": str(title) or str(chart_type),
+                                "chartType": str(chart_type),
+                                "datasourceId": ds_id,
+                                "queryConfig": {
+                                    "dimensions": dims, "measures": measures_cfg,
+                                    "filters": [], "limit": 500,
+                                },
+                                "columns": [str(c) for c in columns],
+                                "rows": [list(x) for x in rows],
+                            }
+                            fb["_chartResult"] = {"columns": fb["columns"], "rows": fb["rows"]}
+                            fb["_chartConfig"] = option
+                            canvas_actions_count += 1
+                            yield _sse({"type": "canvas_action", "action": "add_chart_block", "block": fb})
                 elif ev_type == "status":
                     yield _sse({"type": "step", "title": event.get("message", ""), "status": "running"})
                 elif ev_type == "error":
                     yield _sse({"type": "error", "message": event.get("message", "服务异常")})
                 elif ev_type == "done":
                     yield _sse({"type": "done"})
+                elif ev_type == "compressed_history":
+                    # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
+                    await _save_memory(db, session_id, event)
 
             # ---- 5. 保存助手消息 ----
-            if session_id and full_content.strip():
+            # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作或图表输出，
+            # 也保存一份兜底 assistant 消息到 DB，保证下次加载历史时链路完整。
+            save_content = full_content.strip()
+            if not save_content and (canvas_actions_count > 0 or charts_count > 0):
+                parts: list[str] = []
+                if canvas_actions_count:
+                    parts.append(f"已在画布执行 {canvas_actions_count} 次落块操作")
+                if charts_count:
+                    parts.append(f"生成 {charts_count} 张图表")
+                save_content = "本次分析通过画布工具完成：" + "，".join(parts) + "，请查看画布内容与工作台执行记录。"
+            if session_id and save_content:
                 assistant_msg = AIMessage(
                     session_id=session_id,
                     role=AIMessageRole.assistant,
-                    content=full_content,
+                    content=save_content,
                 )
                 db.add(assistant_msg)
                 await db.commit()

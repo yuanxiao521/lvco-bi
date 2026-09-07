@@ -49,6 +49,7 @@ import type {
 } from "../../api/types";
 import type { DashboardSummary } from "../../api/types";
 import type { ReportStatus } from "../../api/types";
+import type { MetricDefinition } from "../../types/metric";
 import { useToast } from "../../components/ui/Toast";
 // 导入默认模板工具函数
 import { findDefaultTemplate, isSystemTemplateId } from "../../data/defaultTemplates";
@@ -799,6 +800,24 @@ export default function FreeCanvas() {
   const handleAddMeasure = (field: string) => {
     setMeasures((prev) =>
       prev.some((m) => m.field === field) ? prev : [...prev, { field, agg: "SUM" }]
+    );
+  };
+
+  // 添加指标中心命名指标为度量（以 metric_id 引用，查询端解析为当前口径表达式）
+  const handleAddMetric = (metric: MetricDefinition) => {
+    setMeasures((prev) =>
+      prev.some((m) => m.metric_id === metric.id)
+        ? prev
+        : [
+            ...prev,
+            {
+              field: metric.key,
+              agg: "SUM" as const,
+              metric_id: metric.id,
+              metric_key: metric.key,
+              metric_name: metric.name,
+            },
+          ]
     );
   };
 
@@ -1647,7 +1666,7 @@ export default function FreeCanvas() {
             onSelectDatasource={handleSelectDatasource}
             onAddDimension={handleAddDimension}
             onAddMeasure={handleAddMeasure}
-            onAddFilter={handleAddFilter}
+            onAddMetric={handleAddMetric}
             collapsed={fieldsCollapsed}
             onToggleCollapsed={() => setFieldsCollapsed((prev) => !prev)}
           />
@@ -1781,6 +1800,11 @@ export default function FreeCanvas() {
             onRemoveFilter={(i) =>
               setFilters((prev) => prev.filter((_, idx) => idx !== i))
             }
+            onChangeFilter={(i, next) =>
+              setFilters((prev) =>
+                prev.map((f, idx) => (idx === i ? next : f))
+              )
+            }
             onChangeMeasureAgg={handleChangeMeasureAgg}
             onApply={handleApply}
             onReset={handleReset}
@@ -1797,7 +1821,18 @@ export default function FreeCanvas() {
             onClearSelection={() => setSelectedBlockIdx(null)}
             onDropField={(payload) => {
               if (payload.category === "measure") handleAddMeasure(payload.name);
-              else if (payload.category === "time") handleAddFilter(payload.name);
+              else if (payload.category === "metric") {
+                handleAddMetric({
+                  id: payload.metricId!,
+                  key: payload.metricKey!,
+                  name: payload.metricName || payload.name,
+                  formula: payload.metricFormula || "",
+                  formulaType: "basic",
+                  dependsOnMetricIds: [],
+                  version: "v1",
+                  datasourceId: selectedDatasourceId,
+                });
+              } else if (payload.category === "time") handleAddFilter(payload.name);
               else handleAddDimension(payload.name);
             }}
             palette={

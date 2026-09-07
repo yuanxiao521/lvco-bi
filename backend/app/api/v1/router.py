@@ -7,6 +7,7 @@ from app.api.v1.canvases import router as canvases_router
 from app.api.v1.dashboards import router as dashboards_router
 from app.api.v1.datasources import router as datasources_router
 from app.api.v1.insights import router as insights_router
+from app.api.v1.metrics import router as metrics_router
 from app.api.v1.notifications import router as notifications_router
 from app.api.v1.permissions import router as permissions_router
 from app.api.v1.public import public_router

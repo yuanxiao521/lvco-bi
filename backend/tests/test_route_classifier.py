@@ -2,9 +2,9 @@
 
 覆盖 agent_stream 的路由决策链路：
 - LLM 分类 complex → 编排器；simple → ReAct（纠正长度启发式的误判）
-- LLM 异常 / 超时 → 回退原启发式（短消息→ReAct，长消息→编排器）
+- LLM 异常 / 超时 / 返回无法识别内容 → 一律默认简单任务（走 ReAct）
 - AGENT_ORCHESTRATOR_ENABLED=false / phase 非 selecting → 短路不调分类器
-- _classify_task_complexity 的文本解析（大小写/换行容错、异常、不可解析）
+- _classify_task_complexity 的 JSON 枚举解析（大小写/换行容错、异常、兜底 simple）
 
 全部使用 Mock LLM 与 Fake 编排器 / ReAct，无需数据库与真实 LLM。
 """
@@ -98,9 +98,9 @@ SIMPLE_LONG_MSG = "请帮我分析一下今年各个月份的整体销售表现�
 # ======================================================================
 
 
-async def test_classify_returns_true_for_complex_with_case_and_newline():
-    """返回 "COMPLEX\n"（大写+换行）应解析为 True。"""
-    llm = StubRouteLLM(reply="COMPLEX\n")
+async def test_classify_returns_true_for_complex_json():
+    """返回 JSON {"classification": "complex"}（含大小写/换行）应解析为 True。"""
+    llm = StubRouteLLM(reply='{\n  "classification": "COMPLEX"\n}')
     svc = AIService(llm=llm)
     assert await svc._classify_task_complexity("生成完整的销售分析报告") is True
     # 分类请求：system 为路由分类 prompt，user 为原消息
@@ -111,14 +111,16 @@ async def test_classify_returns_true_for_complex_with_case_and_newline():
 
 
 async def test_classify_returns_false_for_simple():
-    llm = StubRouteLLM(reply="  simple  ")
+    llm = StubRouteLLM(reply="simple")
     svc = AIService(llm=llm)
     assert await svc._classify_task_complexity("销售额是多少") is False
 
 
-async def test_classify_returns_none_on_error_and_garbage():
-    assert await AIService(llm=StubRouteLLM(error=RuntimeError("boom")))._classify_task_complexity("x") is None
-    assert await AIService(llm=StubRouteLLM(reply="无法判断"))._classify_task_complexity("x") is None
+async def test_classify_returns_false_on_error_and_garbage():
+    """LLM 异常或返回无法识别的内容 → 一律默认简单任务（False）。"""
+    assert await AIService(llm=StubRouteLLM(error=RuntimeError("boom")))._classify_task_complexity("x") is False
+    assert await AIService(llm=StubRouteLLM(reply="无法判断"))._classify_task_complexity("x") is False
+    assert await AIService(llm=StubRouteLLM(reply='{"class": "complex"}'))._classify_task_complexity("x") is False
 
 
 # ======================================================================
@@ -128,7 +130,7 @@ async def test_classify_returns_none_on_error_and_garbage():
 
 async def test_route_complex_goes_to_orchestrator(route_env):
     """LLM 判 complex → 走编排器（短复杂消息不再被长度启发式误判）。"""
-    llm = StubRouteLLM(reply="complex")
+    llm = StubRouteLLM(reply='{"classification": "complex"}')
     svc = AIService(llm=llm)
     events = await _run_agent(svc, COMPLEX_SHORT_MSG)
     assert llm.complete_calls == 1
@@ -139,7 +141,7 @@ async def test_route_complex_goes_to_orchestrator(route_env):
 
 async def test_route_simple_goes_to_react(route_env):
     """LLM 判 simple → 走 ReAct（长简单消息不再被长度启发式误判）。"""
-    llm = StubRouteLLM(reply="simple")
+    llm = StubRouteLLM(reply='{"classification": "simple"}')
     svc = AIService(llm=llm)
     events = await _run_agent(svc, SIMPLE_LONG_MSG)
     assert llm.complete_calls == 1
@@ -148,27 +150,18 @@ async def test_route_simple_goes_to_react(route_env):
     assert any(e.get("content") == "REACT_MARK" for e in events)
 
 
-async def test_route_llm_error_falls_back_to_heuristic_short_msg(route_env):
-    """LLM 异常 + 短消息 → 回退启发式 → ReAct。"""
+async def test_route_llm_error_defaults_to_react(route_env):
+    """LLM 异常 → 默认简单任务 → ReAct（不再回退启发式）。"""
     llm = StubRouteLLM(error=RuntimeError("llm down"))
     svc = AIService(llm=llm)
-    events = await _run_agent(svc, "销售额是多少")
+    events = await _run_agent(svc, SIMPLE_LONG_MSG)
     assert llm.complete_calls == 1
     assert FakeReactAgent.instances == 1
     assert FakeOrchestrator.instances == 0
 
 
-async def test_route_llm_error_falls_back_to_heuristic_long_msg(route_env):
-    """LLM 异常 + 长消息（>20 字且非列出/有哪些开头）→ 回退启发式 → 编排器。"""
-    llm = StubRouteLLM(error=RuntimeError("llm down"))
-    svc = AIService(llm=llm)
-    events = await _run_agent(svc, SIMPLE_LONG_MSG)
-    assert FakeOrchestrator.instances == 1
-    assert FakeReactAgent.instances == 0
-
-
-async def test_route_timeout_falls_back_to_heuristic(route_env):
-    """wait_for 超时（TimeoutError）→ 回退启发式（长消息 → 编排器）。"""
+async def test_route_timeout_defaults_to_react(route_env):
+    """wait_for 超时（TimeoutError）→ 默认简单任务 → ReAct。"""
     async def _raise_timeout(coro, timeout=None, **kwargs):
         coro.close()  # 关闭未 await 的协程，避免 RuntimeWarning
         raise asyncio.TimeoutError()
@@ -177,8 +170,8 @@ async def test_route_timeout_falls_back_to_heuristic(route_env):
     llm = StubRouteLLM(reply="complex")
     svc = AIService(llm=llm)
     events = await _run_agent(svc, SIMPLE_LONG_MSG)
-    assert FakeOrchestrator.instances == 1
-    assert FakeReactAgent.instances == 0
+    assert FakeOrchestrator.instances == 0
+    assert FakeReactAgent.instances == 1
 
 
 async def test_route_disabled_skips_classifier(route_env):

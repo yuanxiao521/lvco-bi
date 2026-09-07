@@ -30,8 +30,9 @@ import { recommendChartTypes } from "../../api/canvases";
 import {
   decodeDraggedField,
   FIELD_DRAG_MIME,
+  type DraggedFieldPayload,
+  type FieldCategory,
 } from "./FieldPanel";
-import type { SchemaField } from "../../api/types";
 import { PALETTE_PRESETS, CHART_TYPE_LABELS } from "../../types/canvas";
 
 interface ConfigPanelProps {
@@ -43,6 +44,7 @@ interface ConfigPanelProps {
   onRemoveDimension: (i: number) => void;
   onRemoveMeasure: (i: number) => void;
   onRemoveFilter: (i: number) => void;
+  onChangeFilter: (index: number, filter: FilterConfig) => void;
   onChangeMeasureAgg: (index: number, agg: MeasureConfig["agg"]) => void;
   onApply: () => void;
   onReset: () => void;
@@ -52,7 +54,7 @@ interface ConfigPanelProps {
   onRendererChange?: (r: string) => void;
   applyMode?: "create" | "update";
   onClearSelection?: () => void;
-  onDropField?: (payload: { name: string; category: SchemaField["category"] }) => void;
+  onDropField?: (payload: DraggedFieldPayload) => void;
   palette?: string;
   onPaletteChange?: (id: string) => void;
   collapsed?: boolean;
@@ -121,8 +123,8 @@ function DropZone<T extends { id: string; label: string }>({
   items: T[];
   renderItem?: (item: T) => React.ReactNode;
   onRemove: (id: string) => void;
-  onDropField?: (payload: { name: string; category: SchemaField["category"] }) => void;
-  acceptCategories?: SchemaField["category"][];
+  onDropField?: (payload: DraggedFieldPayload) => void;
+  acceptCategories?: FieldCategory[];
 }) {
   const [dragOver, setDragOver] = useState(false);
   return (
@@ -148,7 +150,7 @@ function DropZone<T extends { id: string; label: string }>({
           }
           if (!payload || !onDropField) return;
           if (acceptCategories && !acceptCategories.includes(payload.category)) return;
-          onDropField({ name: payload.name, category: payload.category });
+          onDropField(payload);
         }}
         className={`border border-dashed rounded-[8px] p-2.5 min-h-[44px] flex flex-wrap gap-1.5 transition-colors ${
           dragOver
@@ -182,6 +184,125 @@ function DropZone<T extends { id: string; label: string }>({
   );
 }
 
+const FILTER_OP_OPTIONS: Array<{ value: FilterConfig["op"]; label: string }> = [
+  { value: "eq", label: "等于" },
+  { value: "neq", label: "不等于" },
+  { value: "gt", label: "大于" },
+  { value: "gte", label: "大于等于" },
+  { value: "lt", label: "小于" },
+  { value: "lte", label: "小于等于" },
+  { value: "between", label: "介于" },
+  { value: "in", label: "包含于" },
+  { value: "like", label: "模糊" },
+];
+
+/**
+ * 单条过滤条件编辑器：切换比较符 + 编辑筛选值。
+ * 输入用本地 state 维护（避免每次输入回写导致光标跳动），值在失焦时提交给人。
+ * between→区间；in→逗号分隔多值；其余→单值。
+ */
+function FilterEditor({
+  filter,
+  badgeIcon,
+  badgeClass,
+  onChange,
+  onRemove,
+}: {
+  filter: FilterConfig;
+  badgeIcon: React.ReactNode;
+  badgeClass: string;
+  onChange: (f: FilterConfig) => void;
+  onRemove: () => void;
+}) {
+  const needsRange = filter.op === "between";
+  const needsMulti = filter.op === "in";
+
+  const toText = (v: unknown): [string, string] => {
+    if (Array.isArray(v)) {
+      const arr = v as unknown[];
+      return [String(arr[0] ?? ""), String(arr[1] ?? "")];
+    }
+    if (typeof v === "object" && v !== null) return ["", ""];
+    return [String(v ?? ""), ""];
+  };
+  const [lo, setLo] = useState(needsRange ? toText(filter.value)[0] : "");
+  const [hi, setHi] = useState(needsRange ? toText(filter.value)[1] : "");
+  const [raw, setRaw] = useState(() =>
+    needsMulti ? (Array.isArray(filter.value) ? filter.value.join(",") : String(filter.value ?? "")) : String(filter.value ?? "")
+  );
+
+  const commitSingle = () => {
+    if (needsMulti) {
+      onChange({
+        ...filter,
+        value: raw.split(",").map((s) => s.trim()).filter(Boolean),
+      });
+    } else {
+      onChange({ ...filter, value: raw });
+    }
+  };
+
+  const inputCls =
+    "flex-1 min-w-0 px-1.5 py-0.5 text-[11px] rounded border border-border bg-white focus:outline-none focus:border-primary";
+
+  return (
+    <div className={`flex flex-col gap-1.5 px-2 py-2 rounded-[6px] border border-border/60 ${badgeClass}`}>
+      <div className="flex items-center gap-1.5">
+        {badgeIcon}
+        <span className="flex-1 truncate text-[11px] font-medium">{filter.field}</span>
+        <button
+          onClick={onRemove}
+          title="删除该过滤条件"
+          className="p-0.5 text-muted-foreground opacity-60 hover:opacity-100 hover:text-danger"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      </div>
+      <div className="flex items-stretch gap-1.5">
+        <select
+          value={filter.op}
+          onChange={(e) => onChange({ ...filter, op: e.target.value as FilterConfig["op"] })}
+          title="比较符"
+          className="shrink-0 px-1 py-0.5 text-[11px] rounded border border-border bg-white focus:outline-none focus:border-primary cursor-pointer"
+        >
+          {FILTER_OP_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        {needsRange ? (
+          <>
+            <input
+              className={inputCls}
+              value={lo}
+              onChange={(e) => setLo(e.target.value)}
+              onBlur={() => onChange({ ...filter, value: [lo, hi] })}
+              placeholder="最小值"
+            />
+            <span className="self-center text-[10px] text-muted-foreground">~</span>
+            <input
+              className={inputCls}
+              value={hi}
+              onChange={(e) => setHi(e.target.value)}
+              onBlur={() => onChange({ ...filter, value: [lo, hi] })}
+              placeholder="最大值"
+            />
+          </>
+        ) : (
+          <input
+            className={inputCls}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            onBlur={commitSingle}
+            placeholder={needsMulti ? "逗号分隔多个值，如 a,b" : "值"}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ConfigPanel({
   chartType,
   onChartTypeChange,
@@ -191,6 +312,7 @@ export default function ConfigPanel({
   onRemoveDimension,
   onRemoveMeasure,
   onRemoveFilter,
+  onChangeFilter,
   onChangeMeasureAgg,
   onApply,
   onReset,
@@ -409,42 +531,49 @@ export default function ConfigPanel({
 
         <DropZone
           label="度量"
-          empty="拖拽度量字段到此处"
+          empty="拖拽度量字段或指标到此处"
           badgeIcon="#"
           badgeClass="bg-info-light text-info"
-          items={measures.map((m, i) => ({ id: `${m.field}-${i}`, label: m.field, index: i }))}
+          items={measures.map((m, i) => ({ id: `${m.metric_id || m.field}-${i}`, label: m.metric_name || m.field, index: i }))}
           renderItem={(item) => {
             const measure = measures[item.index];
+            const isMetric = Boolean(measure.metric_id);
             return (
               <span className="inline-flex items-center gap-1">
-                {measure.field}
-                <select
-                  value={measure.agg}
-                  onChange={(e) =>
-                    onChangeMeasureAgg(item.index, e.target.value as MeasureConfig["agg"])
-                  }
-                  className="text-[9px] bg-transparent border-none outline-none cursor-pointer text-info"
-                >
-                  <option>SUM</option>
-                  <option>AVG</option>
-                  <option>MAX</option>
-                  <option>MIN</option>
-                  <option>COUNT</option>
-                  <option>STDDEV</option>
-                  <option>MEDIAN</option>
-                  <option>COUNT_DISTINCT</option>
-                </select>
+                <span className="max-w-[120px] truncate" title={isMetric ? `${measure.metric_key}：${measure.expression || ""}` : measure.field}>
+                  {measure.metric_name || measure.field}
+                </span>
+                {isMetric ? (
+                  <span className="text-[9px] bg-chart-3/15 text-chart-3 px-1 rounded">指标</span>
+                ) : (
+                  <select
+                    value={measure.agg}
+                    onChange={(e) =>
+                      onChangeMeasureAgg(item.index, e.target.value as MeasureConfig["agg"])
+                    }
+                    className="text-[9px] bg-transparent border-none outline-none cursor-pointer text-info"
+                  >
+                    <option>SUM</option>
+                    <option>AVG</option>
+                    <option>MAX</option>
+                    <option>MIN</option>
+                    <option>COUNT</option>
+                    <option>STDDEV</option>
+                    <option>MEDIAN</option>
+                    <option>COUNT_DISTINCT</option>
+                  </select>
+                )}
               </span>
             );
           }}
           onRemove={(id) => {
             const idx = measures.findIndex(
-              (_, i) => `${measures[i].field}-${i}` === id
+              (_, i) => `${measures[i].metric_id || measures[i].field}-${i}` === id
             );
             if (idx >= 0) onRemoveMeasure(idx);
           }}
           onDropField={onDropField}
-          acceptCategories={["measure"]}
+          acceptCategories={["measure", "metric"]}
         />
 
         <DropZone
@@ -457,6 +586,28 @@ export default function ConfigPanel({
           onDropField={onDropField}
           acceptCategories={["dimension", "key"]}
         />
+
+        <div>
+          <div className="text-[11px] font-medium mb-1.5 text-muted-foreground">过滤条件</div>
+          {filters.length === 0 ? (
+            <div className="border border-dashed border-border rounded-[8px] p-2.5 text-[11px] text-muted-foreground">
+              暂无过滤条件（拖时间字段到画布可生成）
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {filters.map((f, i) => (
+                <FilterEditor
+                  key={f.field}
+                  filter={f}
+                  badgeIcon="≠"
+                  badgeClass="bg-warning-light/40 text-warning"
+                  onChange={(next) => onChangeFilter(i, next)}
+                  onRemove={() => onRemoveFilter(i)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* AI 推荐图表 - 内联在配置面板内 */}
         <div>

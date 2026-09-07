@@ -219,15 +219,16 @@ class SQLGuard:
         if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
             return sql, "安全拦截：仅允许 SELECT 查询"
 
-        # 逐项检查黑名单关键字（使用 \b 边界匹配避免部分匹配）
-        for kw in FORBIDDEN_SQL_KEYWORDS:
-            pattern = re.compile(rf"\b{kw}\b", re.IGNORECASE)
-            if pattern.search(sql):
-                return sql, f"安全拦截：SQL 包含禁止关键字 '{kw}'"
-
-        # 去除字符串字面量内容后再检测分号，避免字符串内部分号误判为多语句
+        # 先剥离字符串字面量，再逐项检查黑名单关键字。
+        # 若不剥离，数据值里的英文词（如 status = 'CALL' / action = 'LOAD'）会被 \bCALL\b 误拦。
         no_strings = re.sub(r"'[^']*'", "", sql)
         no_strings = re.sub(r'"[^"]*"', "", no_strings)
+        for kw in FORBIDDEN_SQL_KEYWORDS:
+            pattern = re.compile(rf"\b{kw}\b", re.IGNORECASE)
+            if pattern.search(no_strings):
+                return sql, f"安全拦截：SQL 包含禁止关键字 '{kw}'"
+
+        # 多语句检测（基于已剥离字符串字面量的文本，避免字符串内部分号误判）
         if ";" in no_strings:
             return sql, "安全拦截：不允许执行多条 SQL 语句"
 

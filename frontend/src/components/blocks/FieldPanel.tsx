@@ -6,16 +6,19 @@ import {
   ChevronRight,
   Calendar,
   Loader2,
+  Layers,
 } from "lucide-react";
 import { listDatasources, getDatasource } from "../../api/datasources";
+import { listMetrics } from "../../api/metrics";
 import type { DataSource, SchemaField } from "../../api/types";
+import type { MetricDefinition } from "../../types/metric";
 
 interface FieldPanelProps {
   selectedDatasourceId: string | null;
   onSelectDatasource: (id: string) => void;
   onAddDimension: (field: string) => void;
   onAddMeasure: (field: string) => void;
-  onAddFilter: (field: string) => void;
+  onAddMetric: (metric: MetricDefinition) => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
 }
@@ -29,10 +32,17 @@ const TYPE_BADGE: Record<SchemaField["category"], { color: string; label: string
 
 export const FIELD_DRAG_MIME = "application/x-lvco-field";
 
+export type FieldCategory = SchemaField["category"] | "metric";
+
 export interface DraggedFieldPayload {
   name: string;
-  category: SchemaField["category"];
+  category: FieldCategory;
   displayName?: string;
+  /** 指标引用：category === "metric" 时携带 */
+  metricId?: string;
+  metricKey?: string;
+  metricName?: string;
+  metricFormula?: string;
 }
 
 export function encodeDraggedField(payload: DraggedFieldPayload): string {
@@ -62,14 +72,16 @@ export default function FieldPanel({
   onSelectDatasource,
   onAddDimension,
   onAddMeasure,
-  onAddFilter,
+  onAddMetric,
   collapsed = false,
   onToggleCollapsed,
 }: FieldPanelProps) {
   const [datasources, setDatasources] = useState<DataSource[]>([]);
   const [fields, setFields] = useState<SchemaField[]>([]);
+  const [metrics, setMetrics] = useState<MetricDefinition[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingFields, setLoadingFields] = useState(false);
+  const [activeTab, setActiveTab] = useState<"fields" | "metrics">("fields");
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +123,22 @@ export default function FieldPanel({
     };
   }, [selectedDatasourceId]);
 
+  // 加载指标中心全部命名指标（含未绑定数据源的），在「指标」tab 标注绑定状态
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const all = await listMetrics();
+        if (!cancelled) setMetrics(all ?? []);
+      } catch {
+        if (!cancelled) setMetrics([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const grouped = {
     measure: fields.filter((f) => f.category === "measure"),
     dimension: fields.filter((f) => f.category === "dimension"),
@@ -149,101 +177,196 @@ export default function FieldPanel({
         )}
       </div>
       {!collapsed ? (
-        <div className="px-4 pb-3 border-b border-border-light">
-          <div className="relative">
-            <select
-              value={selectedDatasourceId ?? ""}
-              onChange={(e) => onSelectDatasource(e.target.value)}
-              disabled={loading}
-              className="w-full appearance-none flex items-center justify-between px-2.5 py-1.5 rounded-[6px] border border-border text-[12px] bg-card text-card-foreground focus:outline-none focus:border-primary cursor-pointer"
+        <div className="px-2 py-2 border-b border-border-light">
+          <div className="flex rounded-[8px] bg-muted p-0.5 text-[12px]">
+            <button
+              onClick={() => setActiveTab("fields")}
+              className={`flex-1 py-1 rounded-[6px] font-medium transition-colors ${
+                activeTab === "fields"
+                  ? "bg-white shadow-sm text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
             >
-              <option value="" disabled>
-                {loading ? "加载中..." : "选择数据源"}
-              </option>
-              {datasources.map((ds) => (
-                <option key={ds.id} value={ds.id}>
-                  {ds.name}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              字段
+            </button>
+            <button
+              onClick={() => setActiveTab("metrics")}
+              className={`flex-1 py-1 rounded-[6px] font-medium transition-colors ${
+                activeTab === "metrics"
+                  ? "bg-white shadow-sm text-primary"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              指标
+            </button>
           </div>
         </div>
       ) : null}
 
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5 no-scrollbar">
-        {loadingFields ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" />
-          </div>
-        ) : !selectedDatasourceId ? (
-          <div className="text-[11px] text-muted-foreground text-center py-8">
-            请先选择数据源
-          </div>
-        ) : fields.length === 0 ? (
-          <div className="text-[11px] text-muted-foreground text-center py-8">
-            该数据源暂无字段
-          </div>
+        {activeTab === "metrics" ? (
+          metrics.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground text-center py-8 leading-relaxed">
+              暂无指标
+              <br />
+              去「指标中心」创建后即可拖入画布
+            </div>
+          ) : (
+            <div key="metrics-tab">
+              <div className="flex items-center justify-between px-1 py-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  指标
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {metrics.length}
+                </span>
+              </div>
+              {metrics.map((m) => {
+                const bound = !!m.datasourceId;
+                return (
+                  <div
+                    key={m.id}
+                    draggable={true}
+                    onDragStart={(e) => {
+                      const payload: DraggedFieldPayload = {
+                        name: m.key,
+                        category: "metric",
+                        displayName: m.name,
+                        metricId: m.id,
+                        metricKey: m.key,
+                        metricName: m.name,
+                        metricFormula: m.formula,
+                      };
+                      const encoded = encodeDraggedField(payload);
+                      e.dataTransfer.setData(FIELD_DRAG_MIME, encoded);
+                      e.dataTransfer.setData("text/plain", encoded);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onClick={() => onAddMetric(m)}
+                    title={`${m.name}：${m.formula}`}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-[6px] hover:bg-muted cursor-grab active:cursor-grabbing group"
+                  >
+                    <GripVertical className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <span className="w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center bg-chart-3 text-white">
+                      <Layers className="w-2.5 h-2.5" />
+                    </span>
+                    <span className="text-[12px] text-card-foreground truncate flex-1">
+                      {m.name}
+                    </span>
+                    <span
+                      className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
+                        bound
+                          ? "bg-success-light text-success"
+                          : "bg-warning-light text-warning"
+                      }`}
+                      title={
+                        bound ? "已绑定数据源" : "未绑定数据源，请在指标中心关联"
+                      }
+                    >
+                      {bound ? "已绑定" : "未绑定"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )
         ) : (
           <>
-            {(["measure", "dimension", "time", "key"] as const).map((cat) => {
-              const list = grouped[cat];
-              if (list.length === 0) return null;
-              const labels: Record<typeof cat, string> = {
-                measure: "度量",
-                dimension: "维度",
-                time: "时间",
-                key: "主键",
-              };
-              return (
-                <div key={cat}>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider px-1 py-1.5 text-muted-foreground">
-                    {labels[cat]}
-                  </div>
-                  {list.map((f) => {
-                    const badge = TYPE_BADGE[f.category];
-                    const handleClick = () => {
-                      if (f.category === "measure") onAddMeasure(f.name);
-                      else if (f.category === "time") onAddDimension(f.name);
-                      else onAddDimension(f.name);
-                    };
-                    return (
-                      <div
-                        key={f.name}
-                        draggable={true}
-                        onDragStart={(e) => {
-                          const payload: DraggedFieldPayload = {
-                            name: f.name,
-                            category: f.category,
-                            displayName: f.displayName,
-                          };
-                          const encoded = encodeDraggedField(payload);
-                          e.dataTransfer.setData(FIELD_DRAG_MIME, encoded);
-                          e.dataTransfer.setData("text/plain", encoded);
-                          e.dataTransfer.effectAllowed = "copy";
-                        }}
-                        onClick={handleClick}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded-[6px] hover:bg-muted cursor-grab active:cursor-grabbing group"
-                      >
-                        <GripVertical className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <span
-                          className={`w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center ${badge.color}`}
-                        >
-                          {f.category === "time" ? (
-                            <Calendar className="w-2.5 h-2.5" />
-                          ) : (
-                            badge.label
-                          )}
-                        </span>
-                        <span className="text-[12px] text-card-foreground truncate">
-                          {f.displayName || f.name}
-                        </span>
+            <div className="px-1 pb-3 border-b border-border-light">
+              <div className="relative">
+                <select
+                  value={selectedDatasourceId ?? ""}
+                  onChange={(e) => onSelectDatasource(e.target.value)}
+                  disabled={loading}
+                  className="w-full appearance-none flex items-center justify-between px-2.5 py-1.5 rounded-[6px] border border-border text-[12px] bg-card text-card-foreground focus:outline-none focus:border-primary cursor-pointer"
+                >
+                  <option value="" disabled>
+                    {loading ? "加载中..." : "选择数据源"}
+                  </option>
+                  {datasources.map((ds) => (
+                    <option key={ds.id} value={ds.id}>
+                      {ds.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              </div>
+            </div>
+
+            {loadingFields && fields.length === 0 ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+              </div>
+            ) : !selectedDatasourceId ? (
+              <div className="text-[11px] text-muted-foreground text-center py-8">
+                请先选择数据源
+              </div>
+            ) : (
+              <>
+                {(["measure", "dimension", "time", "key"] as const).map((cat) => {
+                  const list = grouped[cat];
+                  if (list.length === 0) return null;
+                  const labels: Record<typeof cat, string> = {
+                    measure: "度量",
+                    dimension: "维度",
+                    time: "时间",
+                    key: "主键",
+                  };
+                  return (
+                    <div key={cat}>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider px-1 py-1.5 text-muted-foreground">
+                        {labels[cat]}
                       </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+                      {list.map((f) => {
+                        const badge = TYPE_BADGE[f.category];
+                        const handleClick = () => {
+                          if (f.category === "measure") onAddMeasure(f.name);
+                          else onAddDimension(f.name);
+                        };
+                        return (
+                          <div
+                            key={f.name}
+                            draggable={true}
+                            onDragStart={(e) => {
+                              const payload: DraggedFieldPayload = {
+                                name: f.name,
+                                category: f.category,
+                                displayName: f.displayName,
+                              };
+                              const encoded = encodeDraggedField(payload);
+                              e.dataTransfer.setData(FIELD_DRAG_MIME, encoded);
+                              e.dataTransfer.setData("text/plain", encoded);
+                              e.dataTransfer.effectAllowed = "copy";
+                            }}
+                            onClick={handleClick}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-[6px] hover:bg-muted cursor-grab active:cursor-grabbing group"
+                          >
+                            <GripVertical className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <span
+                              className={`w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center ${badge.color}`}
+                            >
+                              {f.category === "time" ? (
+                                <Calendar className="w-2.5 h-2.5" />
+                              ) : (
+                                badge.label
+                              )}
+                            </span>
+                            <span className="text-[12px] text-card-foreground truncate">
+                              {f.displayName || f.name}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                {fields.length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground text-center py-6">
+                    该数据源暂无原始字段
+                  </div>
+                ) : null}
+              </>
+            )}
           </>
         )}
       </div>

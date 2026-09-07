@@ -34,6 +34,8 @@ from app.services.sql_guard_ast import (
     check_aggregations,
     check_dangerous_functions,
     check_table_refs,
+    check_table_ownership,
+    check_sql_table_ownership,
     inject_limit,
     ast_full_check,
 )
@@ -576,11 +578,12 @@ class TestCheckAggregations:
 
     def test_看起来像聚合_但不在白名单_被拦截(self):
         """看起来像聚合函数但不在白名单中的函数应被拦截。"""
-        # VARIANCE 在 _looks_like_aggregate 中，但不在 ALLOWED_AGGREGATIONS 中
-        ast = _parse_one("SELECT VARIANCE(amount) FROM schema.orders")
+        # PERCENTILE 在 _looks_like_aggregate 中，但不在 ALLOWED_AGGREGATIONS
+        # （白名单只放行 PERCENTILE_CONT / PERCENTILE_DISC）
+        ast = _parse_one("SELECT PERCENTILE(amount) FROM schema.orders")
         passed, reason = check_aggregations(ast)
         assert passed is False
-        assert "VARIANCE" in reason
+        assert "PERCENTILE" in reason
 
     def test_普通函数_不被误判为聚合(self):
         """普通函数如 LOWER 不应被误判为聚合函数。"""
@@ -778,6 +781,89 @@ class TestCheckTableRefs:
         assert reason == ""
 
 
+# ==================== 9.5 check_table_ownership 表归属白名单校验 ====================
+
+
+class TestCheckTableOwnership:
+    """check_table_ownership：表引用 schema 归属白名单校验。"""
+
+    def test_本地两段表名_归属通过(self):
+        """本地数据源 table_ref "schema"."data"，归属在 db，应通过。"""
+        ast = _parse_one('SELECT id FROM "sch_abc123"."data"')
+        passed, reason, refs = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is True
+        assert reason == ""
+        assert "sch_abc123" in refs
+
+    def test_外部三段表名_归属通过(self):
+        """外部库 table_ref "schema".public."table"，归属在 catalog，应通过。"""
+        ast = _parse_one('SELECT id FROM "sch_abc123".public."orders"')
+        passed, reason, refs = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is True
+        assert reason == ""
+        assert "sch_abc123" in refs
+
+    def test_多表同源_归属通过(self):
+        """多表 JOIN 且均属同一 schema，应通过。"""
+        ast = _parse_one(
+            'SELECT o.id, c.name FROM "sch_abc123"."orders" o '
+            'INNER JOIN "sch_abc123"."customers" c ON o.cid = c.id'
+        )
+        passed, reason, _ = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is True
+
+    def test_外来schema_被拦截(self):
+        """两段表名引用外来 schema（db 位置），应拦截。"""
+        ast = _parse_one('SELECT id FROM evil."data"')
+        passed, reason, refs = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is False
+        assert "evil" in reason
+
+    def test_外来catalog_被拦截(self):
+        """三段表名引用外来 catalog，应拦截。"""
+        ast = _parse_one('SELECT id FROM "evil".public."data"')
+        passed, reason, _ = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is False
+        assert "evil" in reason
+
+    def test_多表其一外来_被拦截(self):
+        """多表中任一表引用外来 schema，应拦截。"""
+        ast = _parse_one(
+            'SELECT o.id, e.name FROM "sch_abc123"."orders" o '
+            'INNER JOIN "evil"."employees" e ON o.eid = e.id'
+        )
+        passed, reason, _ = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is False
+
+    def test_无表引用_通过(self):
+        """无表引用（SELECT 1）应通过。"""
+        ast = _parse_one("SELECT 1")
+        passed, reason, refs = check_table_ownership(ast, {"sch_abc123"})
+        assert passed is True
+        assert refs == []
+
+
+class TestCheckSqlTableOwnership:
+    """check_sql_table_ownership：高层入口（解析 + 归属）。"""
+
+    def test_合法sql_通过(self):
+        passed, reason, _ = check_sql_table_ownership(
+            'SELECT id FROM "sch_abc123"."data"', {"sch_abc123"}
+        )
+        assert passed is True
+
+    def test_外来sql_拦截(self):
+        passed, reason, _ = check_sql_table_ownership(
+            'SELECT id FROM "other"."data"', {"sch_abc123"}
+        )
+        assert passed is False
+        assert "other" in reason
+
+    def test_空sql解析失败_拦截(self):
+        passed, reason, _ = check_sql_table_ownership("", {"sch_abc123"})
+        assert passed is False
+
+
 # ==================== 10. inject_limit 自动 LIMIT 注入 ====================
 
 
@@ -914,12 +1000,16 @@ class TestAstFullCheck:
         assert allowed is False
         assert "注释" in reason
 
-    def test_畸形_sql_返回_false(self):
-        """语法错误的 SQL 应返回 False。"""
+    def test_畸形_sql_解析失败_降级放行(self):
+        """SQLGlot 无法解析的 SQL 降级放行，交由 DuckDB 执行兜底。
+
+        解析失败 ≠ SQL 非法（可能是 SQLGlot 方言覆盖不全，如 DuckDB 专有函数）。
+        放行后由 L3 正则 + 归属白名单 + DuckDB 只读执行兜底，避免误拦正确查询。
+        """
         sql = "SELECT FROM WHERE"
         allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is False
-        assert "解析失败" in reason
+        assert allowed is True
+        assert details is not None and details.get("parse_error")
 
     def test_多语句_sql_返回_false(self):
         """多条 SQL 语句应被拦截。"""

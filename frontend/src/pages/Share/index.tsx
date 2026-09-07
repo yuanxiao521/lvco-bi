@@ -8,7 +8,7 @@ interface SharedData {
   type: 'dashboard' | 'report'
   title: string
   charts?: Array<{ chart_type: string; query_config: Record<string, unknown> }>
-  blocks?: { blocks: CanvasBlock[] }
+  blocks?: { blocks: CanvasBlock[] } | CanvasBlock[]
 }
 
 const LoadingSpinner = () => (

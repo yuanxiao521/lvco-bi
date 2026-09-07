@@ -14,8 +14,11 @@ import {
   DollarSign,
   ShoppingCart,
   BarChart2,
-  Activity,
   Target,
+  CalendarClock,
+  Clock,
+  Power,
+  Save,
 } from "lucide-react";
 import { useQuery } from "../../hooks/useQuery";
 import {
@@ -23,6 +26,8 @@ import {
   getDashboardData,
   shareDashboard,
   refreshDashboard,
+  scheduleDashboard,
+  disableSchedule,
 } from "../../api/dashboards";
 import type {
   DashboardDataResult,
@@ -34,6 +39,7 @@ import type {
 import ChartRenderer from "../../components/charts/ChartRenderer";
 import { useInView } from "../../hooks/useInView";
 import { useAuthStore } from "../../stores/authStore";
+import { useToast } from "../../components/ui/Toast";
 
 function formatRelative(input: string | null | undefined): string {
   if (!input) return "未知";
@@ -191,6 +197,7 @@ export default function DashboardDetail() {
     data: dashboardData,
     loading: dataLoading,
     error: dataError,
+    refetch: refetchData,
   } = useQuery<DashboardDataResult>(
     () => getDashboardData(id as string),
     [id],
@@ -202,6 +209,34 @@ export default function DashboardDetail() {
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const toast = useToast();
+  const [cron, setCron] = useState("");
+  const [enabled, setEnabled] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [disableSaving, setDisableSaving] = useState(false);
+
+  useEffect(() => {
+    if (dashboard) {
+      setCron(dashboard.refresh_cron ?? "");
+      setEnabled(dashboard.refresh_enabled ?? false);
+    }
+  }, [dashboard]);
+
+  // 指标口径变更联动：收到本仪表盘更新事件后自动重新拉数据
+  useEffect(() => {
+    if (!id) return;
+    const onDashboardUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | { dashboardId?: string }
+        | undefined;
+      if (detail?.dashboardId === id) {
+        refetchData();
+      }
+    };
+    window.addEventListener("dashboard:updated", onDashboardUpdated);
+    return () =>
+      window.removeEventListener("dashboard:updated", onDashboardUpdated);
+  }, [id, refetchData]);
 
   // KPI 配色盘（与图表配色一致）
   const KPI_COLORS = ["#2BB5A0", "#6C7BF2", "#F5A623", "#EF5B5B", "#4EADFF", "#A78BFA"];
@@ -228,7 +263,7 @@ export default function DashboardDetail() {
       field: string;
       sub: string;
       color: string;
-      Icon: React.ComponentType<{ className?: string }>;
+      Icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
     }> = [];
 
     const aggNames: Record<string, string> = {
@@ -316,6 +351,36 @@ export default function DashboardDetail() {
       window.location.reload();
     } catch {
       setRefreshing(false);
+    }
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!id || scheduleSaving) return;
+    setScheduleSaving(true);
+    try {
+      await scheduleDashboard(id, cron.trim(), enabled);
+      toast.success("刷新策略已保存");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "保存失败";
+      toast.error(msg);
+    } finally {
+      setScheduleSaving(false);
+    }
+  };
+
+  const handleDisableSchedule = async () => {
+    if (!id || disableSaving) return;
+    setDisableSaving(true);
+    try {
+      await disableSchedule(id);
+      setCron("");
+      setEnabled(false);
+      toast.success("定时刷新已关闭");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "关闭失败";
+      toast.error(msg);
+    } finally {
+      setDisableSaving(false);
     }
   };
 
@@ -460,6 +525,83 @@ export default function DashboardDetail() {
             加载图表数据失败：{dataError.message}
           </div>
         ) : null}
+
+        <div className="mb-6 bg-white rounded-lg border border-border-light shadow-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="w-4 h-4 text-primary" />
+              <h3 className="text-[14px] font-semibold text-foreground">
+                刷新策略
+              </h3>
+            </div>
+            <span className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+              <Clock className="w-3.5 h-3.5" />
+              上次刷新：{formatRelative(dashboard?.last_refreshed_at)}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-[12px] font-medium text-card-foreground">
+                CRON 表达式
+              </span>
+              <input
+                type="text"
+                value={cron}
+                onChange={(e) => setCron(e.target.value)}
+                placeholder="例如 */5 * * * *"
+                className="w-56 h-9 px-3 rounded-lg border border-border bg-white text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+              />
+            </label>
+            <label className="flex items-center gap-2 h-9 cursor-pointer">
+              <span className="text-[12px] font-medium text-card-foreground">
+                启用
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                onClick={() => setEnabled((v) => !v)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${
+                  enabled ? "bg-primary" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
+                    enabled ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSaveSchedule}
+                disabled={scheduleSaving || !cron.trim()}
+                className="h-9 px-3 rounded-lg bg-primary text-white text-[13px] hover:bg-primary-hover transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {scheduleSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                保存刷新策略
+              </button>
+              <button
+                type="button"
+                onClick={handleDisableSchedule}
+                disabled={disableSaving}
+                className="h-9 px-3 rounded-lg border border-border bg-white text-[13px] text-card-foreground hover:bg-muted transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {disableSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Power className="w-3.5 h-3.5" />
+                )}
+                关闭定时刷新
+              </button>
+            </div>
+          </div>
+        </div>
 
         {dataLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

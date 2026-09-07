@@ -33,6 +33,15 @@ class DashboardAddChartBody(CamelModel):
     position: dict | None = None
 
 
+class ScheduleRefreshBody(CamelModel):
+    cron: str
+    enabled: bool
+
+
+class ManualRefreshBody(CamelModel):
+    async_mode: bool = False
+
+
 def _summary(d: Dashboard, owner_name: str | None = None, chart_count: int = 0) -> dict:
     owner_id = str(d.user_id) if d.user_id else None
     return {
@@ -144,6 +153,7 @@ async def add_chart(
     body: DashboardAddChartBody,
     service: DashboardService = Depends(get_dashboard_service),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> SuccessResponse:
     dc = await service.add_chart(
         dashboard_id=dashboard_id,
@@ -157,6 +167,16 @@ async def add_chart(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "NOT_FOUND", "message": "仪表盘或图表配置不存在"},
         )
+    from app.services.metric_service import extract_metric_ids_from_measures, record_metric_usage
+    cc_result = await db.execute(select(ChartConfig).where(ChartConfig.id == body.chart_config_id))
+    cc = cc_result.scalar_one_or_none()
+    if cc is not None:
+        measures = (cc.query_config or {}).get("measures", [])
+        for mid_str in extract_metric_ids_from_measures(measures):
+            await record_metric_usage(
+                db, UUID(mid_str), usage_type="dashboard",
+                usage_ref_id=str(dashboard_id), user_id=current_user.id,
+            )
     return SuccessResponse(
         data={
             "chartId": str(dc.id),
@@ -198,20 +218,75 @@ async def get_dashboard_data(
     return SuccessResponse(data=payload)
 
 
-@router.post("/{dashboard_id}/refresh")
-async def refresh_dashboard(
+@router.post("/{dashboard_id}/schedule")
+async def set_dashboard_schedule(
+    dashboard_id: UUID,
+    body: ScheduleRefreshBody,
+    service: DashboardService = Depends(get_dashboard_service),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    try:
+        result = await service.schedule_refresh(dashboard_id, current_user.id, body.cron, body.enabled)
+    except ValueError as e:
+        msg = str(e)
+        if "dashboard_not_found" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Dashboard not found"},
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_CRON", "message": "Invalid cron expression"},
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Permission denied"},
+        )
+    return SuccessResponse(data=result)
+
+
+@router.delete("/{dashboard_id}/schedule")
+async def disable_dashboard_schedule(
     dashboard_id: UUID,
     service: DashboardService = Depends(get_dashboard_service),
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    ok = await service.refresh(dashboard_id, current_user.id)
-    if not ok:
+    try:
+        result = await service.schedule_refresh(dashboard_id, current_user.id, cron=None, enabled=False)
+    except ValueError as e:
+        if "dashboard_not_found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Dashboard not found"},
+            )
+        raise
+    except PermissionError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "NOT_FOUND", "message": "仪表盘不存在"},
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Permission denied"},
         )
-    payload = await service.get_dashboard_data(dashboard_id, current_user.id, use_cache=False)
-    return SuccessResponse(data=payload)
+    return SuccessResponse(data=result)
+
+
+@router.post("/{dashboard_id}/refresh")
+async def refresh_dashboard(
+    dashboard_id: UUID,
+    body: ManualRefreshBody | None = None,
+    service: DashboardService = Depends(get_dashboard_service),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    async_mode = body.async_mode if body else False
+    try:
+        result = await service.manual_refresh(dashboard_id, current_user.id, async_mode)
+    except ValueError as e:
+        if "dashboard_not_found" in str(e):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "Dashboard not found"},
+            )
+        raise
+    return SuccessResponse(data=result)
 
 
 @router.post("/{dashboard_id}/share")

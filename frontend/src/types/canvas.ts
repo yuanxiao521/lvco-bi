@@ -105,6 +105,11 @@ export interface CanvasUpdateBlocksPayload {
 export interface MeasureConfig {
   field: string;
   agg: "SUM" | "AVG" | "COUNT" | "MAX" | "MIN" | "STDDEV" | "MEDIAN" | "COUNT_DISTINCT";
+  /** 指标语义层引用：画布直接选择指标中心指标时携带，查询端据此解析为当前口径表达式 */
+  metric_id?: string;
+  metric_key?: string;
+  metric_name?: string;
+  expression?: string;
 }
 
 export type FilterOp =

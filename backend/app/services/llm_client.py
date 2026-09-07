@@ -48,6 +48,7 @@ class LLMClient:
         max_tokens: int | None,
         stream: bool,
         tools: list[dict] | None = None,
+        response_format: dict | None = None,
     ) -> dict[str, object]:
         body: dict[str, object] = {
             "model": self._settings.openai_model,
@@ -60,6 +61,8 @@ class LLMClient:
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
+        if response_format is not None:
+            body["response_format"] = response_format
         return body
 
     async def complete(
@@ -68,6 +71,7 @@ class LLMClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        response_format: dict | None = None,
     ) -> str:
         self._check_configured()
         url = f"{self._base_url}/chat/completions"
@@ -76,6 +80,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             stream=False,
+            response_format=response_format,
         )
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(url, headers=self._headers(), json=body)

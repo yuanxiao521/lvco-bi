@@ -29,9 +29,10 @@ from app.services.agents.base_agent import AgentResult
 from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
 from app.services.agents.graph import Graph
 from app.services.agent_tools import ToolRegistry
+from app.services.agents.tool_executor import ToolCallResult, ToolExecutor, build_assistant_message
 from app.services.context_utils import compact_result_json
 from app.services.llm_client import LLMClient
-from app.services.observability import get_observer, observe_tool_call
+from app.services.observability import get_observer
  
 logger = logging.getLogger(__name__)
  
@@ -99,11 +100,6 @@ def _make_fail_key(tool_name: str, args: dict) -> str:
     """生成失败签名：`tool_name:sha1(args)[:8]`。"""
     h = hashlib.sha1(json.dumps(args or {}, sort_keys=True).encode("utf-8")).hexdigest()
     return f"{tool_name}:{h[:8]}"
-
-
-# Task 8 (P1-6)：memo key，与失败签名同构（工具名 + 参数哈希）。
-def _make_memo_key(tool_name: str, args: dict) -> str:
-    return _make_fail_key(tool_name, args)
 
 
 # Task 3 (P0-3)：按 depends_on 依赖关系把步骤分成拓扑层，同层内可并发执行。
@@ -381,6 +377,33 @@ class AgentOrchestrator:
         sid = step["step_id"]
         goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
 
+        # 共享工具执行器：统一单次工具调用的生命周期（执行/观测/memo/emit/判定）。
+        # 幂等 memo 容器在 _execute_steps_node 初始化，此处兜底 setdefault。
+        _memo = shared.get("tool_memo")
+        if _memo is None:
+            _memo = {}
+            shared["tool_memo"] = _memo
+        _memo_locks = shared.setdefault("tool_memo_locks", {})
+        # Executor 工具白名单：与 Planner 完全一致（orchestrator_safe ∪ 入口注入的可规划工具）。
+        # 修复受限入口（如画布助手）在编排模式下 Executor 暴露全量工具、可能越权调用
+        # 当前入口无接收方工具（如 render_chart）的漏洞。
+        from app.services.agents.planner_agent import _get_cached_orchestrator_tools
+        # getattr 兜底：白盒测试可能用 __new__ 绕过 __init__（此时无 extra_plannable_tools 属性）
+        _extra = getattr(self, "extra_plannable_tools", set())
+        # 严格白名单：注入 extra（画布）时 Executor 只执行 extra 内工具（不并入 orchestrator_safe，
+        # 避免画布场景误执行 render_chart 等非画布工具）；未注入（普通对话）时用 orchestrator_safe。
+        executor_allowed: set[str] = set(_extra) if _extra else set(_get_cached_orchestrator_tools())
+        executor = ToolExecutor(
+            user_id=user_id,
+            db_session=db_session,
+            emit=emit,
+            trace=shared.get("trace"),
+            memo=_memo,
+            memo_locks=_memo_locks,
+            idempotent_tools=_IDEMPOTENT_TOOLS,
+            allowed_tools=executor_allowed or None,
+        )
+
         context = self._build_executor_context(state, step, results, **shared)
 
         # [DEBUG] 记录 Executor 输入上下文
@@ -397,7 +420,17 @@ class AgentOrchestrator:
             {"role": "system", "content": EXECUTOR_SYSTEM},
             {"role": "user", "content": context},
         ]
-        all_tools = ToolRegistry.schemas()
+        # Executor 可见工具 schema：按白名单过滤，LLM 看不到白名单外的工具
+        # （白名单为空时回退全量，保持原行为）。
+        if executor_allowed:
+            all_tools = [
+                t for t in ToolRegistry.schemas()
+                if isinstance(t, dict)
+                and isinstance(t.get("function"), dict)
+                and t["function"].get("name") in executor_allowed
+            ]
+        else:
+            all_tools = ToolRegistry.schemas()
 
         # [DEBUG] 记录可用工具列表
         logger.debug(
@@ -461,172 +494,101 @@ class AgentOrchestrator:
                 self._record_step_trace(shared.get("trace"), sid, "text", tool_call_count + 1, False)
                 return
 
-            # 2b. 执行工具（一次一个调用）
-            tc = tool_calls[0]
-            tname = tc.get("name", "")
-            try:
-                targs = json.loads(tc.get("arguments", "{}") or "{}")
-            except json.JSONDecodeError:
-                targs = {}
-            if tname in (_CHART_TOOL, "stats_analyzer"):
-                self._fill_step_data(targs, step, results)
-            await emit({"type": "tool_call", "name": tname, "args": targs})
+            # 2b. 并行执行本轮所有工具调用
+            # 先校验本轮工具数不会超限
+            if tool_call_count + len(tool_calls) > self._MAX_TOOL_CALLS_PER_STEP:
+                tool_calls = tool_calls[:self._MAX_TOOL_CALLS_PER_STEP - tool_call_count]
+                logger.warning(f"[orchestrator] 步骤 {sid} 工具调用数超限，截断到 {len(tool_calls)} 个")
 
-            tool = ToolRegistry.get(tname)
-            if tool is None:
-                err = json.dumps({"error": f"未知工具: {tname}"}, ensure_ascii=False)
-                results[sid] = err
-                await emit({"type": "tool_result", "name": tname, "result": err})
-                self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, True)
+            # 预解析所有工具参数（render_chart/stats_analyzer 填充依赖步骤数据）
+            tool_items = []
+            for tc in tool_calls:
+                _tname = tc.get("name", "")
+                try:
+                    _targs = json.loads(tc.get("arguments", "{}") or "{}")
+                except json.JSONDecodeError:
+                    _targs = {}
+                if _tname in (_CHART_TOOL, "stats_analyzer"):
+                    self._fill_step_data(_targs, step, results)
+                tool_items.append({"tc": tc, "tname": _tname, "targs": _targs})
+
+            # 并行执行本轮全部工具调用（执行/观测/memo/emit/判定统一由 ToolExecutor 负责）
+            parallel_results: list[ToolCallResult] = await asyncio.gather(
+                *(executor.execute_tool_call(it["tc"], args=it["targs"]) for it in tool_items)
+            )
+
+            # 3. 构建 assistant message（包含全部 tool_calls）
+            assistant_msg = build_assistant_message(tool_calls, reasoning_content=reasoning_content, id_offset=tool_call_count)
+            messages.append(assistant_msg)
+
+            # 4. 追加全部 tool 结果 + 统计（tool_call/tool_result/chart 事件已在 ToolExecutor 内 emit）
+            any_fatal = False
+            any_error = False
+            for i, pr in enumerate(parallel_results):
+                _is_error = pr.is_error
+                _is_fatal = pr.fatal
+
+                if _is_fatal:
+                    any_fatal = True
+                if _is_error:
+                    any_error = True
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": pr.tc.get("id", f"call_{tool_call_count + i}"),
+                    "content": pr.result,
+                })
+                self._record_step_trace(shared.get("trace"), sid, pr.name, tool_call_count + i + 1, _is_error or _is_fatal)
+
+            tool_call_count += len(tool_calls)
+            last_result = parallel_results[-1].result if parallel_results else ""
+            consecutive_errors = 0
+
+            # 5. 失败处理：fatal（未知工具）直接结束步骤
+            if any_fatal:
+                first_fatal = next(pr for pr in parallel_results if pr.fatal)
+                results[sid] = first_fatal.result
                 return
 
-            # Task 8 (P1-6)：幂等工具结果 memo —— 命中缓存直接复用，不再执行工具。
-            is_idempotent = tname in _IDEMPOTENT_TOOLS
-            mkey = _make_memo_key(tname, targs) if is_idempotent else None
-            memo = shared.get("tool_memo") if is_idempotent else None
-            memo_lock = shared.get("tool_memo_lock") if is_idempotent else None
-
-            result_str: str | None = None
-            if is_idempotent and memo is not None and memo_lock is not None:
-                # 幂等工具：在锁内完成 读-执行-写，保证并发下同一签名仅真实执行一次。
-                async with memo_lock:
-                    if mkey in memo:
-                        cached = memo[mkey]
-                        results[sid] = cached
-                        await emit({"type": "tool_result", "name": tname, "result": cached, "memo": True})
-                        logger.info(f"[orchestrator] 步骤 {sid} 命中 memo tool={tname}")
-                        self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, False)
+            # 6. 失败处理：有工具返回 error → 失败签名追踪 + 强制换工具
+            if any_error:
+                for pr in parallel_results:
+                    if not pr.is_error:
+                        continue
+                    _tname = pr.name
+                    _targs = pr.args
+                    fkey = _make_fail_key(_tname, _targs)
+                    fails = fail_counts.get(fkey, 0) + 1
+                    fail_counts[fkey] = fails
+                    if fails >= 3:
+                        reason = f"同一工具与参数连续失败 3 次（{fails}），跳过步骤 {sid}：{_tname}"
+                        results[sid] = json.dumps({"skipped": True, "skipped_reason": reason}, ensure_ascii=False)
+                        await emit({"type": "tool_result", "name": _tname, "result": results[sid]})
+                        logger.warning(f"[orchestrator] 步骤 {sid} 因 {reason} 跳过")
+                        self._record_step_trace(shared.get("trace"), sid, _tname, tool_call_count, True)
                         return
-                    result_str = await self._execute_tool_once(user_id, db_session, tname, targs, tool, shared)
-                    memo[mkey] = result_str
-                # 幂等工具成功结果即为该步骤的权威结果，直接结束步骤，避免被后续文本覆盖。
-                try:
-                    parsed_res = json.loads(result_str)
-                    is_exec_error = isinstance(parsed_res, dict) and "error" in parsed_res
-                except Exception:
-                    is_exec_error = False
-                if not is_exec_error:
-                    results[sid] = result_str
-                    await emit({"type": "tool_result", "name": tname, "result": result_str})
-                    self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count + 1, False)
-                    return
-            else:
-                result_str = await self._execute_tool_once(user_id, db_session, tname, targs, tool, shared)
-
-            # 判断工具返回是否含 error
-            try:
-                parsed_res = json.loads(result_str)
-                is_error = isinstance(parsed_res, dict) and "error" in parsed_res
-            except Exception:
-                is_error = False
-
-            await emit({"type": "tool_result", "name": tname, "result": result_str})
-
-            # [DEBUG] 记录工具执行结果
-            logger.debug(
-                f"[orchestrator][tool_result] step_id={sid} tool_call_count={tool_call_count}\n"
-                f"  tool_name: {tname}\n"
-                f"  is_error: {is_error}\n"
-                f"  result_length: {len(result_str)}\n"
-                f"  result_preview: {result_str[:500]}"
-            )
-
-            tool_call_count += 1
-            last_result = result_str
-            consecutive_errors = 0  # 工具调用成功，重置连续错误计数
-
-            # 3. 把 assistant tool_call + tool result 追加到 messages，让 LLM 看到结果后继续决策
-            assistant_msg: dict = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": tc.get("id", f"call_{tool_call_count}"),
-                    "type": "function",
-                    "function": {"name": tname, "arguments": tc.get("arguments", "{}")},
-                }],
-            }
-            if reasoning_content:
-                assistant_msg["reasoning_content"] = reasoning_content
-            messages.append(assistant_msg)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.get("id", f"call_{tool_call_count}"),
-                "content": result_str,
-            })
-
-            if is_error:
-                logger.warning(f"[orchestrator] 步骤 {sid} 工具返回错误 tool={tname} attempt={tool_call_count}")
-                # Task 2 (P0-2)：按失败签名计数；达 2 次注入强制换工具指令，达 3 次跳过步骤。
-                fkey = _make_fail_key(tname, targs)
-                fails = fail_counts.get(fkey, 0) + 1
-                fail_counts[fkey] = fails
-                if fails >= 3:
-                    reason = f"同一工具与参数连续失败 3 次（{fails}），跳过步骤 {sid}：{tname}"
-                    results[sid] = json.dumps({"skipped": True, "skipped_reason": reason}, ensure_ascii=False)
-                    await emit({"type": "tool_result", "name": tname, "result": results[sid]})
-                    logger.warning(f"[orchestrator] 步骤 {sid} 因 {reason} 跳过")
-                    self._record_step_trace(shared.get("trace"), sid, tname, tool_call_count, True)
-                    return
-                if fails == 2:
-                    force_msg = (
-                        f"[系统指令] 检测到同一工具与参数连续失败 2 次（工具：{tname}，"
-                        f"参数：{json.dumps(targs, ensure_ascii=False)}）。"
-                        f"请务必更换工具或修改参数后再尝试，不要再调用工具 {tname}。"
-                    )
-                    messages.append({"role": "system", "content": force_msg})
-                    logger.warning(f"[orchestrator] 步骤 {sid} 注入强制换工具指令 (fails={fails})")
-                # 错误时继续循环（含强制换工具指令后），让 LLM 看到错误后修正
+                    if fails == 2:
+                        force_msg = (
+                            f"[系统指令] 检测到同一工具与参数连续失败 2 次（工具：{_tname}，"
+                            f"参数：{json.dumps(_targs, ensure_ascii=False)}）。"
+                            f"请务必更换工具或修改参数后再尝试，不要再调用工具 {_tname}。"
+                        )
+                        messages.append({"role": "system", "content": force_msg})
+                        logger.warning(f"[orchestrator] 步骤 {sid} 注入强制换工具指令 (fails={fails})")
+                # 有错误 → 回到循环，让 LLM 看到结果后修正
                 continue
 
-            # 工具成功：如果是 chart 步骤，发 chart 事件
-            if tname == _CHART_TOOL:
-                try:
-                    cr = json.loads(result_str)
-                    if cr.get("option"):
-                        await emit({"type": "chart", "chart_type": cr.get("chart_type", "bar"), "option": cr["option"]})
-                except Exception as ce:
-                    logger.warning(f"[orchestrator] chart 事件解析失败: {ce}")
+            # 7. 全部工具成功：设步骤结果
+            results[sid] = last_result
+            logger.info(f"[orchestrator] 步骤 {sid} 全部 {len(tool_calls)} 个工具执行成功")
 
-            logger.info(f"[orchestrator] 步骤 {sid} 工具成功 tool={tname} (第{tool_call_count}次调用)")
-            # 成功后继续循环，让 LLM 决定是否需要更多工具调用
-
-        # 达到工具调用上限，用最后一次工具结果作为步骤结果
-        results[sid] = last_result or json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
+        # 达到工具调用上限
+        if tool_call_count > 0:
+            results[sid] = last_result
+        else:
+            results[sid] = json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
         logger.warning(f"[orchestrator] 步骤 {sid} 达到工具调用上限 {self._MAX_TOOL_CALLS_PER_STEP}")
         self._record_step_trace(shared.get("trace"), sid, "max_calls", tool_call_count, False)
-
-    async def _execute_tool_once(
-        self,
-        user_id: str,
-        db_session,
-        tname: str,
-        targs: dict,
-        tool,
-        shared: dict,
-    ) -> str:
-        """执行单次工具调用并返回结果字符串（含观测 span 与异常兜底）。"""
-        trace = shared.get("trace")
-        span_obj = None
-        try:
-            if trace is not None:
-                with observe_tool_call(trace, tname, args=targs) as span:
-                    span_obj = span
-                    result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-            else:
-                result_str = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-        except Exception as e:
-            result_str = json.dumps({"error": str(e)}, ensure_ascii=False)
-        if span_obj is not None:
-            try:
-                parsed_res = json.loads(result_str)
-                is_error = isinstance(parsed_res, dict) and "error" in parsed_res
-            except Exception:
-                is_error = False
-            span_obj.update(
-                output=result_str[:300],
-                metadata={"ok": not is_error, "attempt": 1},
-            )
-        return result_str
 
     def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
         """构建执行 Agent 上下文：用户问题 + 当前步骤 + 依赖步骤结果 + 数据源信息。"""
@@ -854,14 +816,8 @@ class AgentOrchestrator:
                 summary = str(result_str)[:500]
             steps_info.append(f"步骤{sid} [{s.get('tool') or 'text'}] {purpose}: {summary}")
  
-        system_prompt = """你是一个数据分析专家（ReportAgent）。根据用户的查询需求、执行计划和工具执行结果，生成一份清晰的中文分析报告。
- 
-要求：
-1. 用简洁语言总结分析结果，突出关键数据和发现
-2. 若某步骤失败，如实说明失败原因（引用工具返回的错误/hint），并给出可操作建议
-3. 使用 Markdown 格式：## 标题分段、**加粗**关键数字、> 引用块展示重要发现
-4. 引用真实数据，不编造
-"""
+        from app.services.ai_prompts import REPORT_SYSTEM
+        system_prompt = REPORT_SYSTEM
  
         # Task 9 (P2-11)：注入对话历史摘要。
         history_block = ""

@@ -279,12 +279,29 @@ async def update_blocks(
     body: CanvasBlocksBody,
     service: CanvasService = Depends(get_canvas_service),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> SuccessResponse:
-    canvas = await service.update_blocks(canvas_id, current_user.id, body.blocks)
+    canvas = await service.get_by_id(canvas_id, current_user.id)
     if canvas is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "NOT_FOUND", "message": "画布不存在"},
+        )
+    old_metric_ids = set()
+    from app.services.metric_service import extract_metric_ids_from_blocks, record_metric_usage
+    if canvas.blocks:
+        old_metric_ids = set(extract_metric_ids_from_blocks(canvas.blocks))
+    canvas = await service.update_blocks(canvas_id, current_user.id, body.blocks)
+    new_metric_ids = set(extract_metric_ids_from_blocks(body.blocks))
+    for mid_str in new_metric_ids:
+        await record_metric_usage(
+            db, UUID(mid_str), usage_type="canvas",
+            usage_ref_id=str(canvas_id), user_id=current_user.id,
+        )
+    for mid_str in old_metric_ids - new_metric_ids:
+        await record_metric_usage(
+            db, UUID(mid_str), usage_type="canvas",
+            usage_ref_id=None, user_id=current_user.id,
         )
     return SuccessResponse(data=CanvasResponse.model_validate(canvas).model_dump(mode="json", by_alias=True))
 
@@ -340,8 +357,10 @@ async def query_canvas(
     # 实现"指标口径改一处 → 引用它的所有块按新口径刷新"。
     config_to_run = body
     has_metric_ref = any(
-        isinstance(m, (MeasureConfig, dict))
-        and (m.get("metric_id") if isinstance(m, dict) else getattr(m, "expression", None) is not None)
+        isinstance(m, (MeasureConfig, dict)) and (
+            (m.get("metric_id") if isinstance(m, dict) else getattr(m, "metric_id", None))
+            or (getattr(m, "expression", None) if isinstance(m, MeasureConfig) else None)
+        )
         for m in (body.measures or [])
     )
     if has_metric_ref:
@@ -349,7 +368,11 @@ async def query_canvas(
         raw_measures = []
         for m in (body.measures or []):
             if isinstance(m, MeasureConfig):
-                raw_measures.append({"field": m.field, "agg": m.agg})
+                entry: dict = {"field": m.field, "agg": m.agg}
+                if m.metric_id or m.metric_key:
+                    entry["metric_id"] = m.metric_id
+                    entry["metric_key"] = m.metric_key
+                raw_measures.append(entry)
             else:
                 raw_measures.append(m)
         try:

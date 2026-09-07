@@ -10,6 +10,9 @@ export interface DashboardSummary {
   updatedAt: string | null;
   ownerName?: string | null;
   ownerId?: string | null;
+  refresh_cron?: string | null;
+  refresh_enabled?: boolean;
+  last_refreshed_at?: string | null;
 }
 
 export interface DashboardChartConfig {
@@ -30,6 +33,9 @@ export interface DashboardDetail {
   updatedAt: string | null;
   ownerName?: string | null;
   ownerId?: string | null;
+  refresh_cron?: string | null;
+  refresh_enabled?: boolean;
+  last_refreshed_at?: string | null;
 }
 
 export interface DashboardCreatePayload {

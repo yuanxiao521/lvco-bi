@@ -6,6 +6,7 @@ canvas_action 内嵌在工具返回 JSON 中，由 API 层提取后转发为独�
 """
 import json
 import logging
+import uuid
 from uuid import UUID
 
 from app.services.agent_tools import BaseTool

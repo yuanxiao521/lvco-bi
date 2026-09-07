@@ -169,10 +169,11 @@ def fake_registry(monkeypatch):
 
     FakeRegistry.register(RenderChartTool())
     import app.services.agents.agent_orchestrator as orch_mod
-    import app.services.agents.react_agent as react_mod
+    import app.services.agents.tool_executor as tool_exec_mod
 
     monkeypatch.setattr(orch_mod, "ToolRegistry", FakeRegistry)
-    monkeypatch.setattr(react_mod, "ToolRegistry", FakeRegistry)
+    # 工具执行已抽离到 ToolExecutor（内部使用 tool_executor.ToolRegistry）
+    monkeypatch.setattr(tool_exec_mod, "ToolRegistry", FakeRegistry)
     return FakeRegistry
 
 
@@ -216,6 +217,71 @@ def test_compress_history_folds_old_messages():
     assert out[0]["role"] == "system"
     assert any("省略" in m["content"] for m in out)
     assert len(out) <= 22
+
+
+def test_extract_compressed_digest_collects_marker_summaries():
+    from app.services.context_utils import COMPRESSION_MARKER, extract_compressed_digest
+
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": f"{COMPRESSION_MARKER}【历史记忆】销售额 100，柱状图已生成"},
+        {"role": "user", "content": "再分析一下"},
+        {"role": "assistant", "content": f"{COMPRESSION_MARKER}新增结论：增长率 20%"},
+        {"role": "assistant", "content": "普通回复不算摘要"},
+    ]
+    digest = extract_compressed_digest(msgs)
+    assert "销售额 100" in digest
+    assert "增长率 20%" in digest
+    assert "普通回复" not in digest
+
+
+def test_count_rounds_since_marker():
+    from app.services.context_utils import COMPRESSION_MARKER, count_rounds_since_marker
+
+    msgs = [
+        {"role": "assistant", "content": f"{COMPRESSION_MARKER}old memory"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+    assert count_rounds_since_marker(msgs) == 2
+
+
+@pytest.mark.asyncio
+async def test_smart_compress_chains_after_injected_memory():
+    """验证跨轮记忆链路：上一轮记忆以标记注入后，新一轮压缩可继续累积并提取拼接。"""
+    from app.services.context_utils import (
+        COMPRESSION_MARKER,
+        extract_compressed_digest,
+        smart_compress_history,
+    )
+
+    class _LLM:
+        async def complete(self, messages, **kwargs):
+            return "新摘要：利润 5000，环比 +8%"
+
+    # 模拟：system + 注入的上一轮记忆 + 3 轮完整对话（含 tool_call/tool 结果）
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": f"{COMPRESSION_MARKER}【历史记忆】旧摘要：销售额 100"},
+    ]
+    for i in range(3):
+        msgs.append({"role": "user", "content": f"question {i}"})
+        msgs.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"function": {"name": "query_datasource"}}],
+        })
+        msgs.append({"role": "tool", "content": f'{{"columns": ["c"], "rows": [["{i}", {i}]]}}'})
+        msgs.append({"role": "assistant", "content": f"answer {i}"})
+
+    compressed = await smart_compress_history(msgs, _LLM(), min_rounds=3, keep_rounds=1)
+    assert compressed is not msgs
+    digest = extract_compressed_digest(compressed)
+    # 旧记忆保留 + 新摘要追加 → 跨轮记忆连续累积
+    assert "旧摘要" in digest
+    assert "利润 5000" in digest
 
 
 # ======================================================================

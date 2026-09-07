@@ -9,6 +9,7 @@ import {
   Search,
   FileText,
   Table,
+  AlertTriangle,
   Pencil,
   Trash2,
   Eye,
@@ -438,7 +439,7 @@ export default function DataSource() {
     setUploadState({ state: "uploading" });
     const nameFromFile = file.name.replace(/\.[^.]+$/, "");
     uploadDatasource(file, nameFromFile)
-      .then((ds) => {
+      .then(() => {
         setUploadState({ state: "idle" });
         refetch();
         pushNotification({ type: "system", title: "数据源就绪", body: `"${nameFromFile}" 已上传成功，可以开始分析了`, resourceType: "datasource" }).catch(() => {});

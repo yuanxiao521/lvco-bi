@@ -474,9 +474,6 @@ export default function AIChat() {
       return next;
     };
 
-    // P2: 收集图表数据，流结束后存入消息
-    let collectedCharts: StreamingChart[] = [];
-
     try {
       const response = await fetch(`${baseUrl}/ai/chat/stream`, {
         method: 'POST',
@@ -548,7 +545,6 @@ export default function AIChat() {
                 // 从 done 事件中提取批量图表（后端已缓存所有图表，一次性发送）
                 const doneCharts: StreamingChart[] = event.charts || [];
                 if (doneCharts.length > 0) {
-                  collectedCharts = doneCharts;
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === assistantId

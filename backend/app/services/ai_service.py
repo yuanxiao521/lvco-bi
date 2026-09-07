@@ -219,25 +219,34 @@ def _build_config(current_config: dict, chart_type: str) -> dict:
     return cfg
 
 
-def _parse_complexity(reply: str) -> bool | None:
-    """解析任务分类器输出：含 complex 信号返回 True，含 simple 返回 False，否则 None。
+def _parse_complexity(reply: str) -> bool:
+    """解析任务分类器输出：识别 JSON 中的 classification 字段。
 
-    大小写 / 首尾空白 / 换行容错：先转小写并去空白后做子串匹配。
+    模型按 json_object 模式输出 ``{"classification": "complex"|"simple"}``。
+    这里只认这两个枚举词；解析失败或值不合法时**默认 simple**（False），
+    宁可用轻量的单 Agent ReAct 路径，也不要误触发复杂的编排器。
 
     Args:
         reply: LLM 原始返回文本。
 
     Returns:
-        True/False/None（None 表示不可解析，需回退）。
+        True 表示复杂任务，False 表示简单任务（含一切兜底情况）。
     """
-    if not reply:
-        return None
-    text = reply.strip().lower()
-    if "complex" in text:
+    classification = ""
+    if reply:
+        try:
+            obj = json.loads(reply)
+            if isinstance(obj, dict):
+                classification = str(obj.get("classification", "")).strip().lower()
+        except (json.JSONDecodeError, TypeError):
+            # json_object 模式可能混入代码块/解释文字，回退到宽松取值
+            import re
+
+            m = re.search(r'"(?:classification)"\s*:\s*"?([a-zA-Z]+)"?', reply)
+            classification = m.group(1).strip().lower() if m else ""
+    if classification == "complex":
         return True
-    if "simple" in text:
-        return False
-    return None
+    return False
 
 
 class AIService:
@@ -861,19 +870,19 @@ class AIService:
             "style": style,
         }
 
-    async def _classify_task_complexity(self, user_msg: str) -> bool | None:
+    async def _classify_task_complexity(self, user_msg: str) -> bool:
         """调用 LLM 判断任务复杂度：复杂任务返回 True、简单任务返回 False。
 
         用于纠正纯长度启发式的误判（短但复杂，长但简单）。
-        智能降级：LLM 异常 / 超时（2s）/ 不可解析时返回 None，由调用方回退到原启发式，
-        保证分类器不可用时路由结果不比现状差，且不阻塞主流程。
+        强约束 + 兜底：以 json_object 模式请求模型输出固定枚举；LLM 异常 / 超时（2s）
+        或返回无法识别时**一律默认简单任务（False）**，走轻量的单 Agent ReAct 路径，
+        避免误用复杂编排器。
 
         Args:
             user_msg: 用户原始消息文本。
 
         Returns:
-            True 表示复杂任务（走编排器），False 表示简单任务（走 ReAct），
-            None 表示分类失败需回退。
+            True 表示复杂任务（走编排器），False 表示简单任务（走 ReAct，含兜底）。
         """
         try:
             content = await asyncio.wait_for(
@@ -881,13 +890,15 @@ class AIService:
                     [
                         {"role": "system", "content": ROUTE_CLASSIFIER_SYSTEM},
                         {"role": "user", "content": user_msg},
-                    ]
+                    ],
+                    response_format={"type": "json_object"},
+                    max_tokens=20,
                 ),
                 timeout=2.0,
             )
         except Exception as e:  # noqa: BLE001
-            log.warning(f"[route_classifier] llm_error error={e} fallback_to_heuristic")
-            return None
+            log.warning(f"[route_classifier] llm_error error={e} default_to_simple")
+            return False
         return _parse_complexity(content)
 
     async def agent_stream(
@@ -899,6 +910,8 @@ class AIService:
         initial_phase: str = "selecting",
         system_prompt_override: str | None = None,
         extra_plannable_tools: set[str] | None = None,
+        memory_summary: str | None = None,
+        entry: str = "chat",
     ) -> AsyncIterator[dict]:
         """单 Agent 工具调用模式：Phase 状态机（SELECTING→ANALYZING→GENERATING→REPORTING）+ ToolRegistry。
 
@@ -930,30 +943,31 @@ class AIService:
         # L1 + L2: 安全检查 — SQL 注入、危险命令等
         guard_result: GuardResult = sql_guard.full_check(user_msg)
         if not guard_result.allowed:
-            log.warning(f"[agent_stream] security_check_failed reason={guard_result.reason}")
-            yield {"type": "error", "message": guard_result.reason}
-            return
+            # "输入过长"是 L1 对【用户原始输入】的长度限制；user_msg 是内部构建的
+            # （含数据源/画布注入），用户输入已在 schema 层限长，此处既不阻断也不截断
+            # （截断会切掉末尾的用户问题）。
+            if guard_result.reason and guard_result.reason.startswith("输入过长"):
+                log.info(
+                    f"[agent_stream] user_msg system-built len={len(user_msg)} exceeds L1 limit, proceeding"
+                )
+            else:
+                log.warning(f"[agent_stream] security_check_failed reason={guard_result.reason}")
+                yield {"type": "error", "message": guard_result.reason}
+                return
 
-        # ── 路由决策：LLM 分类器 + 长度启发式回退 ────────────────────────────
+        # ── 路由决策：LLM 分类器（强约束 + 默认简单兜底） ────────────────
         # 编排模式仅当 AGENT_ORCHESTRATOR_ENABLED 且初始 phase 为 selecting 时启用。
-        # 先由 LLM 分类器判断任务复杂度（复杂→编排器、简单→ReAct），纠正长度启发式的误判
-        #（短但复杂、长但简单）；分类器不可用（异常/超时/不可解析返回 None）时回退原长度启发式。
+        # 分类器按 json_object 输出固定枚举；解析失败 / LLM 异常时一律默认简单任务，
+        # 走轻量 ReAct 路径，避免误用复杂编排器。
         route_enabled = settings.AGENT_ORCHESTRATOR_ENABLED and initial_phase == "selecting"
         if route_enabled:
             classification = await self._classify_task_complexity(user_msg)
-            if classification is True:
+            if classification:
                 log.info("[agent_stream] route_classifier=complex using_orchestrator_mode")
                 use_orchestrator = True
-            elif classification is False:
+            else:
                 log.info("[agent_stream] route_classifier=simple using_react_mode")
                 use_orchestrator = False
-            else:
-                # 分类器不可用：回退原长度启发式（短消息/列数据源走 ReAct）
-                use_orchestrator = (
-                    len(user_msg) > 20
-                    and not user_msg.strip().startswith("列出")
-                    and not user_msg.strip().startswith("有哪些")
-                )
         else:
             use_orchestrator = False
         if use_orchestrator:
@@ -997,11 +1011,17 @@ class AIService:
             except Exception as e:
                 log.error(f"[agent_stream] load_datasources_failed error={e}")
 
-            # 规划-执行编排：Planner 动态规划 → Executor 按计划执行工具
+            # 规划-执行编排：按入口选择编排器。
+            # - entry="chat"（普通对话）→ AgentOrchestrator（查询/分析/出图/报告）
+            # - entry="canvas"（画布）→ CanvasOrchestrator（报告骨架 → 落块）
             # ⚙️ 降级策略：异常时自动 fallback 到单 Agent ReAct 模式
             try:
-                from app.services.agents import AgentOrchestrator
-                orchestrator = AgentOrchestrator(self.llm, db_session, extra_plannable_tools)
+                if entry == "canvas":
+                    from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+                    orchestrator = CanvasOrchestrator(self.llm, db_session, extra_plannable_tools)
+                else:
+                    from app.services.agents import AgentOrchestrator
+                    orchestrator = AgentOrchestrator(self.llm, db_session, extra_plannable_tools)
                 async for event in orchestrator.execute_task(
                     user_msg=user_msg,
                     history=history or [],
@@ -1025,6 +1045,27 @@ class AIService:
         from app.services.agents.react_agent import ReactGraphAgent
 
         all_tools = ToolRegistry.schemas()
+        # 工具范围收敛（与 phase 过滤叠加，形成"入口级"过滤）：
+        # - 传入白名单（画布助手等受限入口）：只保留白名单内工具
+        # - 未传白名单（普通对话助手）：排除画布落块工具（add_chart_block 等只在画布入口
+        #   有接收方，普通 chat 调了也白调）。注意 phase 集合（_PHASE_TOOLS）为通用设计
+        #   包含画布工具，因此必须在入口层把普通 chat 的画布工具剔除。
+        if extra_plannable_tools:
+            allowed = set(extra_plannable_tools)
+            all_tools = [
+                t for t in all_tools
+                if isinstance(t, dict)
+                and isinstance(t.get("function"), dict)
+                and t["function"].get("name") in allowed
+            ]
+        else:
+            from app.services.canvas_tools import CANVAS_TOOL_NAMES
+            all_tools = [
+                t for t in all_tools
+                if isinstance(t, dict)
+                and isinstance(t.get("function"), dict)
+                and t["function"].get("name") not in CANVAS_TOOL_NAMES
+            ]
 
         observer = get_observer()
         with observer.trace(
@@ -1038,13 +1079,19 @@ class AIService:
             },
         ) as agent_trace:
 
-            from app.services.context_utils import compress_history
+            from app.services.context_utils import COMPRESSION_MARKER, compress_history
             messages: list[dict] = [{"role": "system", "content": system_prompt_override or AGENT_SYSTEM}]
+            # 上一轮压缩记忆回流：以压缩摘要标记注入，保证跨轮链路可继续累积压缩
+            if memory_summary and str(memory_summary).strip():
+                messages.append({
+                    "role": "assistant",
+                    "content": f"{COMPRESSION_MARKER}【历史记忆】{memory_summary}",
+                })
             # 历史消息压缩：保留最近 20 条；总长超限时把最早部分折叠为摘要行
             for h in (history or [])[-20:]:
                 if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
                     messages.append({"role": h["role"], "content": str(h.get("content", ""))})
-            messages = compress_history(messages, keep=20, max_chars=8000)
+            messages = compress_history(messages, keep=60, max_chars=150000)
             messages.append({"role": "user", "content": guard_result.sanitized_input or user_msg})
 
             # 图化 ReAct：由 ReactGraphAgent 内部图引擎执行（LLM 推理 → 工具执行 → 循环）
@@ -1077,6 +1124,23 @@ class AIService:
                     break
                 yield ev
             await task
+
+            # 单 Agent 路径：智能压缩历史（默认走 settings：3 轮触发，保留 3 轮）
+            # 压缩结果只用于提取跨轮记忆摘要（路由负责持久化到 ai_memories 并下一轮回流）
+            from app.services.context_utils import (
+                count_rounds_since_marker,
+                extract_compressed_digest,
+                smart_compress_history,
+            )
+            compressed = await smart_compress_history(messages, self.llm)
+            if compressed is not messages:
+                digest = extract_compressed_digest(compressed)
+                if digest:
+                    yield {
+                        "type": "compressed_history",
+                        "summary": digest,
+                        "covered_rounds": count_rounds_since_marker(messages),
+                    }
 
         yield {"type": "done"}
 

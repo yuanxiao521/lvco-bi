@@ -55,9 +55,25 @@ def _advisory_lock_key(rule_id: uuid_lib.UUID | str) -> int:
 class InsightScheduler:
     """Insight 规则调度器（轻量封装 APScheduler）。"""
 
-    def __init__(self) -> None:
+    def __init__(self, interval_minutes: int = 5) -> None:
+        self._interval_minutes = interval_minutes
         self._started = False
         self._scheduler: Any = None
+
+    def start(self) -> None:
+        if self._started:
+            return
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        self._scheduler = AsyncIOScheduler()
+        self._scheduler.start()
+        self._started = True
+        logger.info("InsightScheduler started", extra={"interval_minutes": self._interval_minutes})
+
+    async def stop(self) -> None:
+        if not self._started:
+            return
+        await self.shutdown()
+        self._started = False
 
     def _build_trigger(self, schedule_type: Any, t: time) -> Any:
         """根据调度类型 + 时间构建 APScheduler CronTrigger。"""

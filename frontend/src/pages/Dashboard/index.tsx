@@ -10,12 +10,14 @@ import {
   X,
   Loader2,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import { useQuery } from "../../hooks/useQuery";
 import {
   listDashboards,
   createDashboard,
   deleteDashboard,
+  refreshDashboard,
 } from "../../api/dashboards";
 import { useToast } from "../../components/ui/Toast";
 import type { PaginatedResult } from "../../api/types";
@@ -101,6 +103,7 @@ export default function DashboardList() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const dashboards: DashboardSummary[] = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -156,6 +159,21 @@ export default function DashboardList() {
       toast.error(msg);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleRefresh = async (id: string) => {
+    if (!id || refreshingId) return;
+    setRefreshingId(id);
+    try {
+      await refreshDashboard(id);
+      toast.success("刷新成功");
+      await refetch();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "刷新失败";
+      toast.error(msg);
+    } finally {
+      setRefreshingId(null);
     }
   };
 
@@ -326,6 +344,30 @@ export default function DashboardList() {
                       <User className="w-3 h-3" />
                       {dashboard.ownerName ?? ownerFallback}
                     </span>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between border-t border-border-light pt-3">
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <RefreshCw className="w-3 h-3" />
+                      刷新于 {formatRelative(dashboard.last_refreshed_at)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleRefresh(dashboard.id);
+                      }}
+                      disabled={refreshingId === dashboard.id}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-primary hover:bg-primary-light transition-colors disabled:opacity-50"
+                      title="立即刷新"
+                    >
+                      {refreshingId === dashboard.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      立即刷新
+                    </button>
                   </div>
                 </Link>
 

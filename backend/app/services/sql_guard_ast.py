@@ -28,9 +28,30 @@ logger = logging.getLogger("lvco.sql_guard_ast")
 # ==================== 常量定义 ====================
 
 # 白名单聚合函数 —— 仅允许这些聚合函数出现在 SQL 中
+# 注意：SQLGlot 会把部分 DuckDB 函数映射为通用名（如 STRING_AGG→GROUP_CONCAT、
+# LIST→ARRAY_AGG、QUANTILE_CONT→PERCENTILE_CONT、VAR_POP→VARIANCE_POP），
+# 因此映射前/后的名字都需列入，否则正确查询会被误拦。
 ALLOWED_AGGREGATIONS = frozenset({
-    "SUM", "AVG", "COUNT", "MAX", "MIN",
-    "STDDEV", "MEDIAN", "COUNT_DISTINCT",
+    # 基础聚合
+    "SUM", "AVG", "COUNT", "MAX", "MIN", "COUNT_DISTINCT",
+    # 标准差 / 方差（含 SQLGlot 映射名）
+    "STDDEV", "STDDEV_POP", "STDDEV_SAMP",
+    "VARIANCE", "VARIANCE_POP", "VARIANCE_SAMP", "VAR_POP", "VAR_SAMP",
+    # 分位数 / 中位数（QUANTILE_CONT→PERCENTILE_CONT 等）
+    "MEDIAN", "QUANTILE_CONT", "QUANTILE_DISC",
+    "PERCENTILE_CONT", "PERCENTILE_DISC", "APPROX_QUANTILE",
+    # 字符串 / 数组拼接（STRING_AGG→GROUP_CONCAT、LIST→ARRAY_AGG 等）
+    "STRING_AGG", "GROUP_CONCAT", "LISTAGG",
+    "LIST", "ARRAY_AGG",
+    # 相关性 / 协方差
+    "CORR", "COVAR_POP", "COVAR_SAMP",
+    # 布尔 / 位聚合
+    "BOOL_AND", "BOOL_OR", "EVERY", "SOME",
+    "BIT_AND", "BIT_OR", "BIT_XOR",
+    # 其他常用
+    "FIRST", "LAST", "MODE",
+    "APPROX_COUNT_DISTINCT", "APPROX_DISTINCT",
+    "ANY_VALUE", "NTH_VALUE",
 })
 
 # 危险函数黑名单 —— 这些函数可能用于文件读写、系统调用或修改数据库状态
@@ -196,10 +217,17 @@ def check_cross_join(ast: exp.Expression) -> tuple[bool, str]:
 
 
 def check_select_star(ast: exp.Expression) -> tuple[bool, str]:
-    """检测 SQL 中是否包含 SELECT *。
+    """检测 SQL 中是否包含真正的 SELECT *（直接投影通配符）。
 
-    要求所有查询必须显式指定列名，不允许使用通配符。
-    这有助于控制返回的数据量，并避免意外暴露敏感列。
+    只拦截「出现在 Select 节点的 projections（expressions）里的裸 Star」，
+    也就是以下几种真实的列通配符场景：
+      - SELECT * FROM t
+      - SELECT t.* FROM t
+      - WITH cte AS (SELECT * FROM t) SELECT ... FROM cte   （CTE 内裸 *）
+
+    以下带 * 但不是列通配符的场景**放行**：
+      - COUNT(*) / MAX(*) / ANY_VALUE(*) 等聚合函数参数里的 *（exp.Star 嵌套
+        在 AggFunc/Func 内部，不是 Select.expressions 的直接子节点）
 
     Args:
         ast: 解析后的 AST 根节点。
@@ -207,10 +235,31 @@ def check_select_star(ast: exp.Expression) -> tuple[bool, str]:
     Returns:
         (是否通过, 拦截原因)。通过时 reason 为空字符串。
     """
-    # 查找所有 Star 节点（包括 SELECT * 和 table.*）
-    stars = list(ast.find_all(exp.Star))
-    if stars:
-        return False, "不允许使用 SELECT *，请显式指定列名"
+    # 遍历所有 Select 节点（含 WITH/CTE 内的子 Select、子查询 Select）
+    for select_node in ast.find_all(exp.Select):
+        for proj in select_node.expressions:
+            # 去掉外层 Alias（如 SELECT * AS x 仍然是 *）取实际投影表达式
+            expr = proj.this if isinstance(proj, exp.Alias) else proj
+
+            # 裸 SELECT *：Star 直接作为投影列
+            if isinstance(expr, exp.Star):
+                logger.warning(
+                    "[check_select_star] BLOCKED: 裸 Star 作为投影列 detected, "
+                    "select_sql=%s",
+                    select_node.sql(dialect="duckdb")[:200],
+                )
+                return False, "不允许使用 SELECT *，请显式指定列名"
+
+            # SQLGlot 把 table.*（如 t.* / a.*）解析为 Column，其 this 是 Star：
+            # 同样是列通配符，必须拦截。
+            # 注：COUNT(*) 里的 Star 被 Func 包裹（proj 是 Count/Func 而非 Column），不会走到这里。
+            if isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star):
+                logger.warning(
+                    "[check_select_star] BLOCKED: 表前缀通配符 table.* detected, "
+                    "select_sql=%s",
+                    select_node.sql(dialect="duckdb")[:200],
+                )
+                return False, "不允许使用 SELECT *，请显式指定列名"
     return True, ""
 
 
@@ -281,11 +330,33 @@ def check_dangerous_functions(ast: exp.Expression) -> tuple[bool, str]:
     return True, ""
 
 
+def _collect_cte_names(ast: exp.Expression) -> set[str]:
+    """收集 WITH 子句中定义的 CTE 名称。
+
+    SQLGlot 把 `FROM cte` 中的 CTE 引用解析为 exp.Table（无 db 前缀），
+    若不加区分会把合法的 CTE 引用误判为"裸表名"。此函数先收集所有
+    WITH 定义的 CTE 名，供 check_table_refs 跳过校验。
+    """
+    names: set[str] = set()
+    for cte in ast.find_all(exp.CTE):
+        alias = cte.args.get("alias")
+        if isinstance(alias, exp.TableAlias):
+            n = alias.this
+            if hasattr(n, "name"):
+                names.add(n.name)
+            elif n is not None:
+                names.add(str(n))
+        elif alias is not None and hasattr(alias, "name"):
+            names.add(alias.name)
+    return names
+
+
 def check_table_refs(ast: exp.Expression) -> tuple[bool, str]:
     """检查所有表引用是否匹配 schema.data 模式（两段式表名）。
 
     要求所有表引用必须带 schema 前缀，如 "my_schema"."data"，
     不允许裸表名（如 "data"），确保查询只访问已注册的数据源。
+    WITH 子句定义的 CTE 引用（如 FROM cte）不属于真实表，跳过校验。
 
     Args:
         ast: 解析后的 AST 根节点。
@@ -293,10 +364,15 @@ def check_table_refs(ast: exp.Expression) -> tuple[bool, str]:
     Returns:
         (是否通过, 拦截原因)。通过时 reason 为空字符串。
     """
+    cte_names = _collect_cte_names(ast)
     for table in ast.find_all(exp.Table):
         # 获取表的各个部分
         table_name = table.name  # 表名部分
         db = table.args.get("db")  # schema 部分
+
+        # WITH 子句定义的 CTE 引用：合法，跳过 schema 前缀校验
+        if table_name in cte_names:
+            continue
 
         if db is None:
             return False, (
@@ -312,6 +388,70 @@ def check_table_refs(ast: exp.Expression) -> tuple[bool, str]:
             )
 
     return True, ""
+
+
+def check_table_ownership(ast: exp.Expression, allowed_schemas: set[str]) -> tuple[bool, str, list[str]]:
+    """校验所有表引用的 schema 归属白名单。
+
+    表引用格式已由 check_table_refs 保证为两段（schema.table）或三段
+    （catalog.schema.table）。归属标识取 catalog（若有）否则 db：
+    - 本地数据源 table_ref 为 "schema"."data"，归属标识在 db；
+    - 外部库 table_ref 为 "schema".public."table"，归属标识在 catalog。
+
+    仅校验归属、不重复格式校验；无归属标识的表引用（裸表名 / CTE 名）
+    交由 check_table_refs 拦截，此处放行。
+
+    Args:
+        ast: 解析后的 AST 根节点。
+        allowed_schemas: 当前数据源允许的 schema 名集合（含当前 schema_name）。
+
+    Returns:
+        (是否通过, 拦截原因, 引用到的归属标识列表)。通过时 reason 为空字符串。
+    """
+    referenced: list[str] = []
+    for table in ast.find_all(exp.Table):
+        catalog = table.args.get("catalog")
+        db = table.args.get("db")
+        owner = catalog if catalog is not None else db
+        if owner is None:
+            continue  # 裸表 / CTE 引用：由格式层 check_table_refs 拦截
+        owner_name = owner.name if hasattr(owner, "name") else str(owner)
+        referenced.append(owner_name)
+        if owner_name not in allowed_schemas:
+            return False, (
+                f"表引用 '{table.sql(dialect='duckdb')}' 的 schema '{owner_name}' "
+                f"不属于当前数据源（允许的 schema: {sorted(allowed_schemas)}）"
+            ), referenced
+    return True, "", referenced
+
+
+def check_sql_table_ownership(
+    sql: str,
+    allowed_schemas: set[str],
+) -> tuple[bool, str, list[str]]:
+    """对完整 SQL 字符串执行表归属白名单校验（封装解析 + 归属检查）。
+
+    Args:
+        sql: 待校验的 SQL 字符串。
+        allowed_schemas: 当前数据源允许的 schema 名集合。
+
+    Returns:
+        (是否通过, 拦截原因, 引用到的归属标识列表)。
+        解析失败时降级放行（交由 DuckDB 只读执行兜底），避免误拦正确查询。
+    """
+    parsed = parse_sql(sql)
+    if parsed is None:
+        # 空 SQL / 纯注释：没有可执行内容，必须拦截。
+        if not sql or not sql.strip():
+            return False, "SQL 为空", []
+        # 非空但 SQLGlot 解析失败（可能是方言覆盖不全）：降级放行，交由 DuckDB 只读
+        # 执行兜底（未 ATTACH 的 schema 不存在，天然无法访问），避免误拦正确查询。
+        logger.warning("[check_sql_table_ownership] SQL 解析失败，跳过归属白名单校验: %s", sql[:200])
+        return True, "", []
+    valid = [s for s in parsed if s is not None]
+    if len(valid) != 1:
+        return False, f"SQL 语句数异常（{len(valid)} 条），无法校验表归属", []
+    return check_table_ownership(valid[0], allowed_schemas)
 
 
 def inject_limit(sql: str, ast: exp.Expression) -> str:
@@ -369,7 +509,10 @@ def ast_full_check(sql: str) -> tuple[bool, str, str, dict | None]:
     # ---- 步骤 1: 解析 ----
     parsed = parse_sql(sql)
     if parsed is None:
-        return False, f"SQL 解析失败: {sql[:200]}", sql, {"parse_error": str(sql[:200])}
+        # SQLGlot 对部分 DuckDB 专有函数/写法无法解析，解析失败≠SQL 非法。
+        # 降级放行，交由 L3 正则 + 归属白名单 + DuckDB 执行兜底，避免误拦正确查询。
+        logger.warning("[ast_full_check] SQL 解析失败，降级放行交由 L3 兜底: %s", sql[:200])
+        return True, "", sql, {"parse_error": str(sql[:200])}
 
     # ---- 步骤 2: 多语句检查 ----
     # 过滤掉空语句（纯注释等）

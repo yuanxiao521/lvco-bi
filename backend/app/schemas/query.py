@@ -13,6 +13,10 @@ class MeasureConfig(CamelModel):
     # 非空时优先于 field+agg 使用；alias 可选，缺省由引擎从表达式推导。
     expression: str | None = None
     alias: str | None = None
+    # 指标语义层引用（画布 UI 直接选择指标中心指标时携带）：
+    # 非空时优先于 field+agg 解析为命名指标的当前口径表达式。
+    metric_id: str | None = None
+    metric_key: str | None = None
 
 
 class FilterConfig(CamelModel):

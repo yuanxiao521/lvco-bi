@@ -17,9 +17,9 @@ import logging
 from typing import Any
 
 from app.services.agents.graph import Graph
-from app.services.agent_tools import ToolRegistry, ConversationPhase, get_tools_for_phase
-from app.services.context_utils import compact_result_json
-from app.services.observability import observe_tool_call
+from app.services.agent_tools import ConversationPhase, get_tools_for_phase
+from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
+
 from app.services.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -148,91 +148,43 @@ class ReactGraphAgent:
         consecutive_query_failures = state.get("consecutive_query_failures", 0)
 
         # 构建 assistant message with tool_calls
-        assistant_tool_calls = []
-        for tc in tool_calls:
-            assistant_tool_calls.append({
-                "id": tc.get("id", f"call_{len(assistant_tool_calls)}"),
-                "type": "function",
-                "function": {
-                    "name": tc["name"],
-                    "arguments": tc.get("arguments", "{}"),
-                },
-            })
-        messages.append({"role": "assistant", "content": None, "tool_calls": assistant_tool_calls})
+        messages.append(build_assistant_message(tool_calls))
 
-        all_results: list[dict] = []
+        # 共享工具执行器：统一执行/观测/事件 emit/错误判定（react 无幂等 memo）
+        executor = ToolExecutor(
+            user_id=user_id,
+            db_session=db_session,
+            emit=emit,
+            trace=self.agent_trace,
+        )
+
         has_error = False
         tool_success_count = 0
         tool_error_count = 0
         for tc in tool_calls:
-            tname = tc.get("name", "")
-            targs_str = tc.get("arguments", "{}")
+            pr = await executor.execute_tool_call(tc)
+            executed_tool_names.append(pr.name)
+            logger.info(f"[react] tool_call name={pr.name} result_length={len(pr.result)}")
+
+            # 查询成功/失败计数（Bug C 保护：非 JSON 降级）
             try:
-                targs = json.loads(targs_str) if targs_str else {}
-            except json.JSONDecodeError:
-                targs = {}
-            executed_tool_names.append(tname)
-            logger.info(f"[react] tool_call name={tname}")
-            await emit({"type": "tool_call", "name": tname, "args": targs})
-
-            tool = ToolRegistry.get(tname)
-            if tool:
-                try:
-                    if self.agent_trace is not None:
-                        with observe_tool_call(self.agent_trace, tname, args=targs) as span:
-                            result = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-                            span.update(output=result[:300])
-                    else:
-                        result = await tool.execute(user_id=user_id, db_session=db_session, **targs)
-                    all_results.append({"name": tname, "result": result})
-                    logger.info(f"[react] tool_success name={tname} result_length={len(result)}")
-                    await emit({"type": "tool_result", "name": tname, "result": result})
-
-                    # 查询成功/失败计数（Bug C 保护：非 JSON 降级）
-                    try:
-                        result_obj = json.loads(result)
-                    except (json.JSONDecodeError, TypeError):
-                        result_obj = {"error": f"工具返回了无法解析的结果: {str(result)[:100]}"}
-                    has_error = "error" in result_obj
-                    if has_error:
-                        tool_error_count += 1
-                        if tname == "query_datasource":
-                            consecutive_query_failures += 1
-                            logger.warning(f"[react] query_failed consecutive={consecutive_query_failures}")
-                    elif tname == "query_datasource":
-                        consecutive_query_failures = 0
-                        tool_success_count += 1
-
-                    # chart 事件（render_chart 内嵌校验，无人工确认）
-                    if tname == "render_chart":
-                        try:
-                            cr = json.loads(result)
-                            if cr.get("option"):
-                                logger.info(f"[react] chart_generated type={cr.get('chart_type')}")
-                                await emit({"type": "chart", "chart_type": cr.get("chart_type", "bar"), "option": cr["option"]})
-                        except Exception as ce:
-                            logger.warning(f"[react] render_chart_parse_failed error={ce}")
-                except Exception as e:
-                    logger.error(f"[react] tool_execution_failed name={tname} error={e}")
-                    err = json.dumps({"error": str(e)}, ensure_ascii=False)
-                    all_results.append({"name": tname, "result": err})
-                    await emit({"type": "tool_result", "name": tname, "result": err})
-                    if tname == "query_datasource":
-                        consecutive_query_failures += 1
-                    has_error = True
-                    tool_error_count += 1
-            else:
-                logger.error(f"[react] unknown_tool name={tname}")
-                err = json.dumps({"error": f"未知工具: {tname}"}, ensure_ascii=False)
-                all_results.append({"name": tname, "result": err})
-                await emit({"type": "tool_result", "name": tname, "result": err})
-                has_error = True
+                result_obj = json.loads(pr.result)
+            except (json.JSONDecodeError, TypeError):
+                result_obj = {"error": f"工具返回了无法解析的结果: {str(pr.result)[:100]}"}
+            has_error = "error" in result_obj or pr.fatal
+            if has_error:
                 tool_error_count += 1
+                if pr.name == "query_datasource":
+                    consecutive_query_failures += 1
+                    logger.warning(f"[react] query_failed consecutive={consecutive_query_failures}")
+            elif pr.name == "query_datasource":
+                consecutive_query_failures = 0
+                tool_success_count += 1
 
             messages.append({
                 "role": "tool",
-                "tool_call_id": tc.get("id", f"call_{len(messages)}"),
-                "content": all_results[-1]["result"],
+                "tool_call_id": pr.tc.get("id", f"call_{len(messages)}"),
+                "content": pr.result,
             })
 
         # 熔断：连续查询失败超过阈值，终止循环
@@ -253,7 +205,11 @@ class ReactGraphAgent:
 
         # Phase 状态流转（与 agent_stream 原逻辑一致）
         new_phase = phase
-        if phase == ConversationPhase.ANALYZING and not has_error:
+        if phase == ConversationPhase.SELECTING and not has_error:
+            if "list_datasources" in executed_tool_names:
+                new_phase = ConversationPhase.ANALYZING
+                logger.info("[react] phase_transition SELECTING→ANALYZING")
+        elif phase == ConversationPhase.ANALYZING and not has_error:
             if any(n in _ANALYZING_TRIGGERS for n in executed_tool_names):
                 new_phase = ConversationPhase.GENERATING
                 logger.info("[react] phase_transition ANALYZING→GENERATING")
@@ -262,12 +218,7 @@ class ReactGraphAgent:
                 new_phase = ConversationPhase.REPORTING
                 logger.info("[react] phase_transition GENERATING→REPORTING")
 
-        # follow_up 注入：引导 LLM 下一轮输出（成功结果压缩，错误完整保留）
-        compacted = [
-            {"name": r["name"], "result": compact_result_json(r["result"], 1200)}
-            for r in all_results
-        ]
-        results_text = json.dumps(compacted, ensure_ascii=False)
+        # follow_up 注入：引导 LLM 下一轮输出（不重复塞工具结果，role:tool 已携带完整数据）
         follow_up = self._build_follow_up(executed_tool_names, has_error, consecutive_query_failures)
 
         if self.agent_trace is not None:
@@ -279,7 +230,7 @@ class ReactGraphAgent:
             })
         messages.append({
             "role": "user",
-            "content": f"以上工具已执行完毕，结果如下：\n{results_text}\n\n{follow_up}",
+            "content": follow_up,
         })
 
         return {
@@ -296,9 +247,13 @@ class ReactGraphAgent:
     def _build_follow_up(self, executed_tool_names: list[str], has_error: bool, consecutive_query_failures: int) -> str:
         if executed_tool_names and all(n == "list_datasources" for n in executed_tool_names):
             return (
-                "以上是当前可用的数据源列表。请用友好的方式向用户展示有哪些数据源可用，"
-                "每个数据源列出名称、类型和关键字段，引导用户告诉你他想分析哪个数据源。"
-                "使用 ## 标题和列表格式，数字加粗。不要索要字段信息（你已经有了）。"
+                "以上是当前可用的数据源列表（每个数据源带 ID，可用于 query_datasource）。\n"
+                "请结合用户的原始问题判断：\n"
+                "1. 如果用户问题中已明确提到要分析哪个数据源，直接调用 query_datasource（用对应数据源 ID）"
+                "继续查询分析，不要停下来询问；\n"
+                "2. 如果用户没有明确指定，再用友好方式展示数据源列表（名称、类型、关键字段），"
+                "引导用户选择要分析哪个数据源。\n"
+                "使用 ## 标题和列表格式，关键数字加粗。"
             )
         if any(n == "render_chart" for n in executed_tool_names):
             return (

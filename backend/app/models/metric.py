@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -57,6 +57,12 @@ class MetricDefinition(TimestampMixin, Base):
     # 指标引用的表名（缺省 data）
     table_ref: Mapped[str | None] = mapped_column(String(200), nullable=True, default="data")
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # 当前版本号，每次口径变更递增；metric_versions 表保留历史快照
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 公式类型：basic（基础聚合） / derived（派生，由其它指标组合）
+    formula_type: Mapped[str] = mapped_column(String(32), nullable=False, default="basic")
+    # 派生指标依赖的指标 ID 列表（metric_definitions.id，UUID 字符串数组）
+    depends_on_metric_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

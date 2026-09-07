@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.duckdb_client import duckdb_client
 from app.models.datasource import DataSource, SourceType
 from app.repositories.protocols import CacheRepository
-from app.schemas.query import ChartQueryConfig, QueryResult
+from app.schemas.query import ChartQueryConfig, MeasureConfig, QueryResult
 from app.utils.crypto import decrypt_value, get_encryption_key
 
 ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT_DISTINCT"})
@@ -29,6 +29,11 @@ class QueryEngineError(Exception):
         self.message = message
         self.code = code
         super().__init__(message)
+
+
+class CircularDependencyError(QueryEngineError):
+    def __init__(self, metric_id: str) -> None:
+        super().__init__(f"循环依赖检测到: {metric_id}", code="CIRCULAR_DEPENDENCY")
 
 
 def _decrypt_connection_info(source_type: SourceType, connection_config: dict | None) -> dict:
@@ -361,6 +366,70 @@ def _build_order_by(sort: dict[str, str] | None, measures: list[dict[str, str]])
     return ""
 
 
+async def execute_derived_metric(
+    metric_id: str,
+    metric_def,
+    context: dict,
+) -> QueryResult:
+    _cache = context.setdefault("_cache", {})
+    _recursion_stack = context.setdefault("_recursion_stack", set())
+
+    if metric_id in _recursion_stack:
+        raise CircularDependencyError(metric_id)
+    if metric_id in _cache:
+        return _cache[metric_id]
+
+    _recursion_stack.add(metric_id)
+    try:
+        dep_ids = metric_def.depends_on_metric_ids or []
+        for dep_id in dep_ids:
+            if dep_id not in _cache:
+                from app.models.metric import MetricDefinition
+                from sqlalchemy import select
+                stmt = select(MetricDefinition).where(MetricDefinition.id == dep_id)
+                result = await context["db"].execute(stmt)
+                dep_metric = result.scalar_one_or_none()
+                if dep_metric is not None:
+                    await execute_derived_metric(dep_id, dep_metric, context)
+
+        if metric_def.formula_type == 'derived':
+            agg = (metric_def.agg_kind or "SUM").upper()
+            config = ChartQueryConfig(
+                dimensions=list(context.get("dimensions", [])),
+                measures=[MeasureConfig(
+                    field="",
+                    agg=agg,
+                    expression=metric_def.formula,
+                    alias=f"{agg.lower()}_{metric_def.key}",
+                )],
+                filters=list(context.get("filters", [])),
+                chart_type=context.get("chart_type"),
+                limit=context.get("limit", 1000),
+            )
+        else:
+            from app.services.metric_service import resolve_metric
+            config = resolve_metric(
+                metric_def,
+                dimensions=context.get("dimensions", []),
+                chart_type=context.get("chart_type"),
+                datasource_id=context["datasource_id"],
+                limit=context.get("limit", 1000),
+            )
+
+        result = await execute_chart_query(
+            datasource_id=context["datasource_id"],
+            config=config,
+            user_id=context["user_id"],
+            db=context.get("db"),
+            cache_repo=context.get("cache_repo"),
+            force=True,
+        )
+        _cache[metric_id] = result
+        return result
+    finally:
+        _recursion_stack.discard(metric_id)
+
+
 async def execute_chart_query(
     datasource_id: UUID,
     config: ChartQueryConfig,
@@ -368,6 +437,7 @@ async def execute_chart_query(
     db: AsyncSession | None = None,
     cache_repo: CacheRepository | None = None,
     force: bool = False,
+    metric_defs: dict[str, Any] | None = None,
 ) -> QueryResult:
     """执行图表查询，返回结构化的查询结果。
 
@@ -467,6 +537,24 @@ async def execute_chart_query(
         if cached:
             data = json.loads(cached)
             return QueryResult(**data)
+
+    if metric_defs and db is not None:
+        for mid, mdef in metric_defs.items():
+            if getattr(mdef, 'formula_type', 'basic') == 'derived':
+                ctx = {
+                    "db": db,
+                    "user_id": user_id,
+                    "datasource_id": datasource_id,
+                    "dimensions": config.dimensions,
+                    "filters": [f.model_dump() for f in config.filters],
+                    "cache_repo": cache_repo,
+                    "source_type": source_type,
+                    "pg_table_name": pg_table_name,
+                    "limit": config.limit,
+                    "chart_type": config.chart_type,
+                    "schema_fields": schema_fields,
+                }
+                return await execute_derived_metric(mid, mdef, ctx)
 
     measure_dicts = [m.model_dump() for m in config.measures]
     filter_dicts = [f.model_dump() for f in config.filters]

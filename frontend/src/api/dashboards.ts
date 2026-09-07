@@ -62,6 +62,23 @@ export async function refreshDashboard(id: string): Promise<DashboardDataResult>
   return unwrapApi<DashboardDataResult>(response.data);
 }
 
+export async function scheduleDashboard(
+  id: string,
+  cron: string,
+  enabled: boolean
+): Promise<DashboardSummary> {
+  const response = await apiClient.post(`/dashboards/${id}/schedule`, {
+    cron,
+    enabled,
+  });
+  return unwrapApi<DashboardSummary>(response.data);
+}
+
+export async function disableSchedule(id: string): Promise<DashboardSummary> {
+  const response = await apiClient.delete(`/dashboards/${id}/schedule`);
+  return unwrapApi<DashboardSummary>(response.data);
+}
+
 export async function shareDashboard(id: string): Promise<DashboardShareResult> {
   const response = await apiClient.post(`/dashboards/${id}/share`);
   return unwrapApi<DashboardShareResult>(response.data);

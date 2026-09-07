@@ -1,4 +1,4 @@
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Gauge,
@@ -6,6 +6,7 @@ import {
   Database,
   Sparkles,
   Lightbulb,
+  GitBranch,
   Settings,
   ChevronRight,
   X,
@@ -14,7 +15,7 @@ import {
   Trash2,
   Bell,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuthStore } from "../../stores/authStore";
 import { useNotificationsStore } from "../../stores/notificationsStore";
 import { logout } from "../../api/auth";
@@ -28,6 +29,7 @@ const navItems = [
   { to: "/dashboard", icon: Gauge, label: "仪表盘" },
   { to: "/report-center", icon: FileText, label: "报表中心" },
   { to: "/statistics", icon: Lightbulb, label: "智能洞察" },
+  { to: "/metrics", icon: GitBranch, label: "指标中心" },
   { to: "/data-source", icon: Database, label: "源数据管理" },
   { to: "/ai-chat", icon: Sparkles, label: "AI 助手" },
 ];
@@ -46,7 +48,6 @@ const settingsItems = [
 
 export default function Sidebar({ onClose }: SidebarProps) {
   const location = useLocation();
-  const navigate = useNavigate();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const user = useAuthStore((s) => s.user);
   const unreadCount = useNotificationsStore((s) => s.unreadCount);
