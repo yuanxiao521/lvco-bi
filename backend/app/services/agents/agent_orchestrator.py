@@ -1,4 +1,4 @@
-﻿"""AgentOrchestrator：多 Agent 协作编排器（骨架规划 + Agentic 执行，LangGraph 模式，零依赖）。
+"""AgentOrchestrator：多 Agent 协作编排器（骨架规划 + Agentic 执行，LangGraph 模式，零依赖）。
  
 多 Agent 协作模式：
     PlannerAgent（规划 Agent）：生成【骨架计划】——只定步骤目标/建议工具/依赖，不写死参数
@@ -38,7 +38,11 @@ logger = logging.getLogger(__name__)
  
 _CHART_TOOL = "render_chart"
 _MAX_STEP_RETRIES = 3  # 执行 Agent 单步失败重试上限
-_MAX_LLM_CALLS_PER_TASK = 12  # P1-9 全局 LLM 调用上限（含 planner + executor + report），超限后跳过剩余步骤
+# P1-9 全局 LLM 调用上限：早期为固定 12，实测复杂任务 5-6 步就打满导致步骤被跳过。
+# 现改为动态预算（_plan_node 依据步骤数计算）：
+#   budget = 1(planner) + 步骤数×_MAX_TOOL_CALLS_PER_STEP + 1(report) + 2(余量)
+# 固定值仅作为 fallback（planner 失败/预算未计算时兜底）。
+_MAX_LLM_CALLS_PER_TASK: int = 24
  
 # Shared state keys (used to avoid LLM prompt injection via key names)
 _K_USER_MSG = "user_msg"
@@ -153,6 +157,21 @@ def _summarize_history_safe(history: list[dict] | None, max_chars: int = 2000) -
         return "[对话历史摘要]\n（无法解析历史消息）"
  
  
+def _llm_budget(counter: dict | None) -> int:
+    """读取全局 LLM 预算；未计算（planner 失败等）时回退固定上限。"""
+    if counter is None:
+        return _MAX_LLM_CALLS_PER_TASK
+    return int(counter.get("budget") or _MAX_LLM_CALLS_PER_TASK)
+
+
+def _ensure_llm_budget(counter: dict | None, steps: list[dict]) -> None:
+    """按步骤数计算全局 LLM 预算：planner(1) + 步骤×单步上限 + report(1) + 余量(2)。"""
+    if counter is None:
+        return
+    per_step = 3  # 与 AgentOrchestrator._MAX_TOOL_CALLS_PER_STEP 保持一致
+    counter["budget"] = 1 + len(steps) * per_step + 1 + 2
+
+
 class AgentOrchestrator:
     """多 Agent 协作编排器：PlannerAgent 骨架规划 → ExecutorAgent 逐步执行 → ReportAgent 报告。"""
  
@@ -238,6 +257,7 @@ class AgentOrchestrator:
             state_sink = shared.get("state_sink")
             if state_sink is not None:
                 state_sink["plan"] = fallback_plan
+            _ensure_llm_budget(counter, steps)
             return {
                 "plan": fallback_plan,
                 "has_chart_steps": has_chart,
@@ -251,6 +271,7 @@ class AgentOrchestrator:
         state_sink = shared.get("state_sink")
         if state_sink is not None:
             state_sink["plan"] = plan
+        _ensure_llm_budget(counter, steps)
         return {
             "plan": plan,
             "has_chart_steps": has_chart,
@@ -319,17 +340,18 @@ class AgentOrchestrator:
             memo = {}
             shared["tool_memo"] = memo
         shared.setdefault("tool_memo_lock", asyncio.Lock())
-        # P1-9 全局 LLM 调用闸门：超限后跳过剩余步骤
+        # P1-9 全局 LLM 调用闸门：超限后跳过剩余执行步骤
         counter = shared.get("llm_call_counter")
-        if counter and counter["count"] >= _MAX_LLM_CALLS_PER_TASK:
+        budget = _llm_budget(counter)
+        if counter and counter["count"] >= budget:
             for step in steps:
                 sid = step["step_id"]
                 skip_result = json.dumps({
                     "skipped": True,
-                    "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），跳过步骤 {sid}",
+                    "skipped_reason": f"全局 LLM 调用已达上限（{budget}），跳过步骤 {sid}",
                 }, ensure_ascii=False)
                 results[sid] = skip_result
-            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），跳过 {len(steps)} 个执行步骤")
+            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{budget}），跳过 {len(steps)} 个执行步骤")
             state_sink = shared.get("state_sink")
             if state_sink is not None:
                 state_sink["results"] = dict(results)
@@ -353,17 +375,18 @@ class AgentOrchestrator:
         ordered = state.get("ordered_steps") or []
         # P1-9 全局 LLM 调用闸门：超限后跳过图表步骤
         counter = shared.get("llm_call_counter")
-        if counter and counter["count"] >= _MAX_LLM_CALLS_PER_TASK:
+        budget = _llm_budget(counter)
+        if counter and counter["count"] >= budget:
             for step in ordered:
                 if step["tool"] != _CHART_TOOL:
                     continue
                 sid = step["step_id"]
                 skip_result = json.dumps({
                     "skipped": True,
-                    "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），跳过图表步骤 {sid}",
+                    "skipped_reason": f"全局 LLM 调用已达上限（{budget}），跳过图表步骤 {sid}",
                 }, ensure_ascii=False)
                 results[sid] = skip_result
-            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），跳过图表步骤")
+            logger.warning(f"[orchestrator] 全局 LLM 调用超限（{counter['count']}/{budget}），跳过图表步骤")
             state_sink = shared.get("state_sink")
             if state_sink is not None:
                 state_sink["results"] = dict(results)
@@ -489,6 +512,7 @@ class AgentOrchestrator:
 
         # P1-9 全局 LLM 调用计数器：每次 LLM 调用前检查并递增
         counter = shared.get("llm_call_counter")
+        _budget = _llm_budget(counter)
 
         # ── mini ReAct 循环：LLM 决策 → 执行工具 → 结果回传 → 再决策 ──
         while tool_call_count < self._MAX_TOOL_CALLS_PER_STEP:
@@ -499,11 +523,11 @@ class AgentOrchestrator:
                 # P1-9 递增全局 LLM 调用计数
                 if counter is not None:
                     counter["count"] += 1
-                    if counter["count"] > _MAX_LLM_CALLS_PER_TASK:
-                        logger.warning(f"[orchestrator] 步骤 {sid} 全局 LLM 调用超限（{counter['count']}/{_MAX_LLM_CALLS_PER_TASK}），提前终止")
+                    if counter["count"] > _budget:
+                        logger.warning(f"[orchestrator] 步骤 {sid} 全局 LLM 调用超限（{counter['count']}/{_budget}），提前终止")
                         results[sid] = json.dumps({
                             "skipped": True,
-                            "skipped_reason": f"全局 LLM 调用已达上限（{_MAX_LLM_CALLS_PER_TASK}），步骤 {sid} 终止",
+                            "skipped_reason": f"全局 LLM 调用已达上限（{_budget}），步骤 {sid} 终止",
                         }, ensure_ascii=False)
                         return
                 async for event in self.llm.stream_chat_with_tools(

@@ -1,4 +1,30 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# .env 优先于系统环境变量：本机环境变量可能残留旧 LLM key/base_url
+# （如用户级 OPENAI_API_KEY 指向旧提供方），而 pydantic-settings
+# 默认"环境变量 > .env 文件"，会导致换 key 后进程仍用旧配置。
+# 这里对 LLM 三项强制以 .env 为准（.env 是本项目的配置源）。
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def _dotenv_first(*names: str) -> None:
+    """把 .env 中指定的项注入进程环境变量（覆盖已存在的同名项）。"""
+    import os
+
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return
+    values = dotenv_values(_ENV_FILE)
+    for name in names:
+        val = values.get(name)
+        if val:
+            os.environ[name] = val
+
+
+_dotenv_first("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")
 
 
 class Settings(BaseSettings):
@@ -48,7 +74,9 @@ class Settings(BaseSettings):
 
     # Task 6 (P1-8)：编排器超时控制
     AGENT_STEP_TIMEOUT: int = 30  # 单步骤超时（秒）
-    AGENT_ORCHESTRATOR_TIMEOUT: int = 60  # 整个编排流程超时（秒）
+    # 多步骤编排整体超时：思考模式 LLM 单轮流式 tool-calling 可能 10-20s，
+    # 4-6 步查询+图表任务轻松超过 60s（实测固定 60s 常触发模板报告降级），放宽到 180s
+    AGENT_ORCHESTRATOR_TIMEOUT: int = 180
 
     # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
     INSIGHT_ENABLED: bool = True
