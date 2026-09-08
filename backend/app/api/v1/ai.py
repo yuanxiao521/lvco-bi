@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import logging
 import re
@@ -651,6 +651,22 @@ async def data_chat_stream(
                         if narrated:
                             yield f"data: {json.dumps({'type': 'message', 'delta': narrated}, ensure_ascii=False)}\n\n"
                     yield f"data: {json.dumps({'type': 'tool_result', 'name': event['name'], 'result': event['result']}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "plan":
+                    # 编排模式标记：透传 plan 骨架（步骤工具名），前端/观测可区分
+                    # orchestrator（复杂）与 react（简单）两条路径
+                    steps = (event.get("plan") or {}).get("steps", [])
+                    yield f"data: {json.dumps({
+                        'type': 'plan',
+                        'mode': 'orchestrator',
+                        'steps': [s.get('tool') for s in steps if isinstance(s, dict)],
+                    }, ensure_ascii=False)}\n\n"
+                elif event["type"] == "status":
+                    yield f"data: {json.dumps({
+                        'type': 'status',
+                        'message': event.get('message', ''),
+                        'phase': event.get('phase'),
+                        'degradation': event.get('degradation'),
+                    }, ensure_ascii=False)}\n\n"
                 elif event["type"] == "chart":
                     chart_type = event.get("chart_type")
                     chart_option = event.get("option")
@@ -1636,6 +1652,14 @@ async def canvas_ai_chat(
                     delta = event.get("content", "")
                     full_content += delta
                     yield _sse({"type": "message", "delta": delta})
+                elif ev_type == "plan":
+                    steps = (event.get("plan") or {}).get("steps", [])
+                    yield _sse({"type": "plan", "mode": "orchestrator",
+                                "steps": [s.get("tool") for s in steps if isinstance(s, dict)]})
+                elif ev_type == "status":
+                    yield _sse({"type": "status", "message": event.get("message", ""),
+                                "phase": event.get("phase"),
+                                "degradation": event.get("degradation")})
                 elif ev_type == "tool_call":
                     name = event.get("name", "")
                     args = event.get("args", {}) or {}
