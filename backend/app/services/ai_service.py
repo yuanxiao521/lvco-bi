@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import logging
 import re
@@ -894,12 +894,19 @@ class AIService:
                         {"role": "user", "content": user_msg},
                     ],
                     response_format={"type": "json_object"},
-                    max_tokens=20,
+                    # 分类是轻量判断：关闭思考模式提速省 token（思考模式还会吃掉 max_tokens）
+                    enable_thinking=False,
+                    max_tokens=200,
                 ),
-                timeout=2.0,
+                timeout=8.0,
             )
         except Exception as e:  # noqa: BLE001
             log.warning(f"[route_classifier] llm_error error={e} default_to_simple")
+            if degradation is not None:
+                degradation.append("route_classifier_llm_fallback")
+            return False
+        if not (content or "").strip():
+            log.warning("[route_classifier] empty_content default_to_simple")
             if degradation is not None:
                 degradation.append("route_classifier_llm_fallback")
             return False
@@ -961,10 +968,14 @@ class AIService:
                 return
 
         # ── 路由决策：LLM 分类器（强约束 + 默认简单兜底） ────────────────
-        # 编排模式仅当 AGENT_ORCHESTRATOR_ENABLED 且初始 phase 为 selecting 时启用。
-        # 分类器按 json_object 输出固定枚举；解析失败 / LLM 异常时一律默认简单任务，
-        # 走轻量 ReAct 路径，避免误用复杂编排器。
-        route_enabled = settings.AGENT_ORCHESTRATOR_ENABLED and initial_phase == "selecting"
+        # 全部请求（已选数据源/未选数据源、chat/canvas 入口）统一走复杂度分类器：
+        # complex → orchestrator（编排），simple → 轻量 ReAct。
+        # 早期版本要求 initial_phase=="selecting" 才启用路由，导致"已选数据源"
+        # （initial_phase=analyzing）的请求永远跳过编排、直接 ReAct，
+        # 复杂分析（多步骤/多图表）只能单 agent 裸跑。分类器只看任务复杂度，
+        # 与数据源选择状态无关，故此处放开。
+        # 解析失败 / LLM 异常时一律默认简单任务，走轻量 ReAct 路径，避免误用复杂编排器。
+        route_enabled = settings.AGENT_ORCHESTRATOR_ENABLED
         if route_enabled:
             degradation_out: list[str] = []
             classification = await self._classify_task_complexity(user_msg, degradation_out)

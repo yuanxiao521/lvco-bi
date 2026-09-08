@@ -290,11 +290,12 @@ async def test_route_disabled_skips_classifier(route_env):
     assert FakeReactAgent.instances == 1
 
 
-async def test_route_non_selecting_phase_skips_classifier(route_env):
-    """phase 非 selecting → 短路，不调分类器，直接走 ReAct。"""
-    llm = StubRouteLLM(reply="complex")
+async def test_route_non_selecting_phase_runs_classifier(route_env):
+    """phase 非 selecting（如已选数据源的 analyzing）也走分类器：
+    复杂任务 → orchestrator。防止已选数据源请求跳过编排直接 ReAct。"""
+    llm = StubRouteLLM(reply='{"classification": "complex"}')
     svc = AIService(llm=llm)
-    events = await _run_agent(svc, COMPLEX_SHORT_MSG, phase="analyzing")
-    assert llm.complete_calls == 0
-    assert FakeOrchestrator.instances == 0
-    assert FakeReactAgent.instances == 1
+    await _run_agent(svc, COMPLEX_SHORT_MSG, phase="analyzing")
+    assert llm.complete_calls == 1, "analyzing 阶段也应调用复杂度分类器"
+    assert FakeOrchestrator.instances == 1, "复杂任务在 analyzing 阶段应走 orchestrator"
+    assert FakeReactAgent.instances == 0
