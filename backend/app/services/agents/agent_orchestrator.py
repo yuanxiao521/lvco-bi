@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
  
 from app.config import settings
@@ -791,15 +792,48 @@ class AgentOrchestrator:
         """
         try:
             prompt = self._build_report_prompt(user_msg, plan, results, history=history)
-            response = await self.llm.complete(prompt, temperature=0.4, max_tokens=1500)
+            response = await self.llm.complete(prompt, temperature=0.3, max_tokens=1500)
+            # 报告质量兜底：空文本或疑似"过场话/摘要级"报告 → 用 REPORT_SYSTEM 强化重写一次
             if not (response or "").strip():
                 raise ValueError("LLM 返回空报告，降级模板")
+            if self._report_looks_like_stub(response):
+                logger.warning("[orchestrator] report_stub len=%d 重写报告", len(response or ""))
+                rewritten = await self._rewrite_report(user_msg, plan, results, history=history)
+                if rewritten:
+                    return rewritten, "llm"
             return response, "llm"
         except Exception as e:
             logger.error(f"生成报告失败，降级模板报告: {e}")
             task_summary = (plan or {}).get("task_summary") or ""
             steps_info = self._build_steps_info(plan, results)
             return self._generate_template_report(task_summary, steps_info), "template"
+
+    @staticmethod
+    def _report_looks_like_stub(text: str) -> bool:
+        """报告质量判定：过短 / 命中过渡句 / 缺数据与结构 → 视为偷懒报告需重写。"""
+        t = (text or "").strip()
+        if len(t) < 150:
+            return True
+        stub_markers = ("开始分析", "已获取", "正在查询", "正在生成", "好的，", "让我", "Let me", "以下将", "接下来")
+        if len(t) < 300 and any(m in t for m in stub_markers):
+            return True
+        if not re.search(r"\d", t) and "#" not in t:
+            return True
+        return False
+
+    async def _rewrite_report(self, user_msg, plan, results, history) -> str | None:
+        """用 REPORT_SYSTEM 重写报告（一次），失败返回 None（调用方保留原报告）。"""
+        try:
+            from app.services.ai_prompts import REPORT_SYSTEM
+            prompt = self._build_report_prompt(user_msg, plan, results, history=history)
+            prompt[0] = {"role": "system", "content": REPORT_SYSTEM}
+            rewritten = await self.llm.complete(prompt, temperature=0.2, max_tokens=2000)
+            if (rewritten or "").strip() and not self._report_looks_like_stub(rewritten):
+                return rewritten
+            return None
+        except Exception as e:
+            logger.warning(f"[orchestrator] report_rewrite_failed: {e}")
+            return None
 
     # Task 1 (P0-4)：模板化报告 —— 不依赖 LLM，直接根据计划与步骤结果生成结构化 Markdown。
     def _build_steps_info(self, plan: dict, results: dict) -> list[dict]:

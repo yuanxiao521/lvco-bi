@@ -160,3 +160,21 @@ async def test_silent_reason_fallback_apology_when_llm_fails():
         state = await _run(agent, llm)
     assert "text" in state["_events"], "兜底失败仍应输出道歉文案"
     assert llm.complete_calls == 1
+
+
+def test_looks_like_stub_classification():
+    """过场话/欠报告文本判定：偷懒文本触发，完整报告不触发。"""
+    from app.services.agents.react_agent import ReactGraphAgent
+
+    assert ReactGraphAgent._looks_like_stub("好的，开始分析！我同时查询数据。") is True
+    assert ReactGraphAgent._looks_like_stub("已获取所有数据，现在生成图表。") is True
+    assert ReactGraphAgent._looks_like_stub("这里没有任何数字也没有标题结构") is True
+    # 足长完整报告：有标题、有数字、有结构 → 不触发
+    real_report = (
+        "## 分析报告\n"
+        "本报告基于电商订单数据，2024年1月销售额达 **86,805** 元（订单量 42 笔），"
+        "环比上月增长 12.5%，为全年峰值。支付方式分布中支付宝占比 22%、微信支付 21%，"
+        "两者差距极小。城市维度看，南京以 12.27 万元居首，上海次之（12.13 万）。"
+        "综合来看，销售额与订单量呈正相关，Q1 为业务旺季，建议重点关注华东区域。"
+    )
+    assert ReactGraphAgent._looks_like_stub(real_report) is False

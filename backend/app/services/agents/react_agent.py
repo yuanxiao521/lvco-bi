@@ -14,6 +14,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Any
 
 from app.services.agents.graph import Graph
@@ -115,7 +116,7 @@ class ReactGraphAgent:
         text_chunks: list[str] = []
         has_text_output = False
         async for event in self.llm.stream_chat_with_tools(
-            messages, phase_tools, temperature=0.5, max_tokens=3000,
+            messages, phase_tools, temperature=0.3, max_tokens=3000,
         ):
             if event["type"] == "text":
                 has_text_output = True
@@ -134,16 +135,24 @@ class ReactGraphAgent:
             )
             llm_span.finish()
 
-        # 空输出兜底：LLM 既没有工具调用也没有输出文本（ReAct 中常见"静默"收尾，
-        # 如读完全部查询结果后既不渲染也不写报告），此时若直接 done 用户会收到空回复。
-        # 用一次无工具的完整调用来强制生成收尾报告；仍失败则给道歉文案，保证终态必有输出。
-        if not tool_calls and not has_text_output:
-            logger.warning(f"[react] silent_reason iteration={iteration + 1} 无工具调用且无文本，强制收尾")
-            wrapup = await self._run_wrapup_report(messages)
+        # 输出质量兜底：LLM 即将收尾（无工具调用）时，
+        # 1) 完全无文本（静默） → 强制生成收尾报告；
+        # 2) 只有"过场话/摘要级"文本（stub）→ 重写为完整报告。
+        # 两者都保证终态输出是合格报告，而非空回复或一句话偷懒。
+        if not tool_calls:
+            text_out = "".join(text_chunks)
+            if not text_out.strip():
+                logger.warning(f"[react] silent_reason iteration={iteration + 1} 无工具调用且无文本，强制收尾")
+                wrapup = await self._run_wrapup_report(messages)
+            elif self._looks_like_stub(text_out):
+                logger.warning(f"[react] stub_reason iteration={iteration + 1} 文本疑似过场话(len={len(text_out)})，重写报告")
+                wrapup = await self._run_wrapup_report(messages)
+            else:
+                wrapup = ""
             if wrapup:
                 for part in self._chunk_text(wrapup):
                     await emit({"type": "text", "content": part})
-            else:
+            elif not text_out.strip():
                 await emit({"type": "text", "content": "很抱歉，工具执行后未能生成有效的分析结果，请换一种问法重试。"})
 
         return {
@@ -151,6 +160,26 @@ class ReactGraphAgent:
             "has_text_output": has_text_output,
             "iteration": iteration + 1,
         }
+
+    @staticmethod
+    def _looks_like_stub(text: str) -> bool:
+        """判断最终文本是不是"过场话/欠报告"：过短、或命中过渡句标记、或缺数据/结构特征。
+
+        用于在 LLM 偷懒收尾（输出'好的，开始分析''已获取数据'之类）时触发重写。
+        """
+        t = (text or "").strip()
+        if not t:
+            return False  # 空文本走 silent 分支
+        if len(t) < 150:
+            return True  # 太短不可能是完整报告
+        # 命中过渡/过程话标记 → 疑似偷懒（尤其长度仍偏短时）
+        stub_markers = ("开始分析", "已获取", "正在查询", "正在生成", "好的，", "让我", "Let me", "以下将", "接下来")
+        if len(t) < 300 and any(m in t for m in stub_markers):
+            return True
+        # 无数字也无 Markdown 标题 → 缺数据引用与结构，判为 stub
+        if not re.search(r"\d", t) and "#" not in t:
+            return True
+        return False
 
     @staticmethod
     def _chunk_text(text: str, size: int = 200) -> list[str]:
@@ -405,9 +434,11 @@ class ReactGraphAgent:
                     "并建议用户检查数据源连接或简化查询条件。不要再继续重试。"
                 )
             return (
-                "查询成功！现在请**立即**输出分析结果：\n"
+                "查询成功！现在请输出一份**完整**的分析报告（不是摘要或过渡语）：\n"
                 "1. 先用当前可用工具生成至少一张图表（**必须生成，不允许跳过**）\n"
-                "2. 然后输出中文分析报告，用 ## 标题分段，关键数字用 **加粗**\n"
-                "**禁止**再发起新的查询，直接用已有数据完成分析。"
+                "2. 然后输出完整分析报告：结论先行 → 分节详述（每节带具体数值/百分比/排名，"
+                "解读趋势与对比）→ 总结论。不少于 300 字\n"
+                "**禁止**再发起新的查询，直接用已有数据完成分析；"
+                "禁止以'好的，开始分析''已获取数据'等过渡句作为报告内容。"
             )
         return "请根据以上工具执行结果输出回复。用 ## 标题分段，关键数字用 **加粗**。"
