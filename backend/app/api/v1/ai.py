@@ -1543,10 +1543,9 @@ async def canvas_ai_chat(
 
         ai_service = AIService(LLMClient(settings))
         full_content = ""
-        # 画布动作 / 图表 计数器：工具型对话即使 LLM 不落纯文本，
+        # 画布动作计数器：工具型对话即使 LLM 不落纯文本，
         # 也能据此生成兜底 assistant 消息，保证会话链路完整。
         canvas_actions_count = 0
-        charts_count = 0
         session_id: uuid.UUID | None = None
         try:
             # ---- 1. 解析 / 创建会话 ----
@@ -1633,8 +1632,6 @@ async def canvas_ai_chat(
             except Exception:
                 has_ds = datasource is not None
             canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
-            # 最近一次 tool_call 的 args（按工具名缓存），供 render_chart/chart 事件兜底合成 canvas_action 用
-            last_tool_args: dict[str, dict] = {}
             async for event in ai_service.agent_stream(
                 user_id=str(current_user.id),
                 user_msg=user_msg,
@@ -1663,114 +1660,21 @@ async def canvas_ai_chat(
                 elif ev_type == "tool_call":
                     name = event.get("name", "")
                     args = event.get("args", {}) or {}
-                    if name:
-                        last_tool_args[name] = dict(args) if isinstance(args, dict) else {}
                     yield _sse({"type": "tool_call", "name": name, "args": args})
                 elif ev_type == "tool_result":
                     name = event.get("name", "")
                     result_raw = event.get("result", "")
                     yield _sse({"type": "tool_result", "name": name, "result": result_raw})
+                    # 画布工具返回内嵌 canvas_action：提取后转发为独立 SSE 事件，
+                    # 前端据此实时落块。画布白名单不含 render_chart，无需（也不可能）兜底合成。
                     try:
                         r = json.loads(result_raw) if isinstance(result_raw, str) else {}
                         action = r.get("canvas_action") if isinstance(r, dict) else None
                         if isinstance(action, dict):
                             canvas_actions_count += 1
                             yield _sse({"type": "canvas_action", **action})
-                            continue
-                        # 兜底：Agent 在画布路径下可能误用通用 render_chart（仅出 ECharts option，不落块）。
-                        # 当 tool_name == render_chart + 有 option/chart_type + 无 error 时，
-                        # 用 tool_call 时携带的 columns/rows/title 合成等效 add_chart_block 的 canvas_action 落块。
-                        if isinstance(r, dict) and name == "render_chart" and not r.get("error"):
-                            chart_type = r.get("chart_type") or event.get("chart_type") or ""
-                            option = r.get("option")
-                            _log.info(
-                                "[canvas_chat] render_chart_fallback enter: chart_type=%s has_option=%s last_tool_render_keys=%s",
-                                chart_type, option is not None, list(last_tool_args.get("render_chart", {}).keys()),
-                            )
-                            if option is not None and chart_type:
-                                rc_args = last_tool_args.get("render_chart", {}) or {}
-                                title = (rc_args.get("title") or r.get("title") or "")
-                                columns = rc_args.get("columns") or []
-                                rows = rc_args.get("rows") or []
-                                _log.info(
-                                    "[canvas_chat] render_chart_fallback: title=%s cols=%s rows_n=%s ds=%s",
-                                    title, len(columns), len(rows),
-                                    (datasource.id if datasource else None) or body.datasource_id,
-                                )
-                                if columns and rows:
-                                    ds_id = str((datasource.id if datasource else None) or body.datasource_id or "")
-                                    dims = [str(c) for c in columns[:1]]
-                                    measures_cfg = [
-                                        {"field": str(c), "agg": "NONE"}
-                                        for c in columns[1:]
-                                    ]
-                                    fallback_block = {
-                                        "title": str(title) or str(chart_type),
-                                        "chartType": str(chart_type),
-                                        "datasourceId": ds_id,
-                                        "queryConfig": {
-                                            "dimensions": dims,
-                                            "measures": measures_cfg,
-                                            "filters": [],
-                                            "limit": 500,
-                                        },
-                                        "columns": [str(c) for c in columns],
-                                        "rows": [list(x) for x in rows],
-                                    }
-                                    # 项目硬约束：导出 PDF 需要 _chartResult + _chartConfig
-                                    fallback_block["_chartResult"] = {
-                                        "columns": fallback_block["columns"],
-                                        "rows": fallback_block["rows"],
-                                    }
-                                    fallback_block["_chartConfig"] = option
-                                    fallback_action = {
-                                        "action": "add_chart_block",
-                                        "block": fallback_block,
-                                    }
-                                    canvas_actions_count += 1
-                                    _log.info(
-                                        "[canvas_chat] render_chart_fallback YIELDED: title=%s chart_type=%s rows=%d",
-                                        fallback_block["title"], chart_type, len(rows),
-                                    )
-                                    yield _sse({"type": "canvas_action", **fallback_action})
-                                else:
-                                    _log.info("[canvas_chat] render_chart_fallback skipped: cols=%s rows=%s", bool(columns), bool(rows))
-                            else:
-                                _log.info("[canvas_chat] render_chart_fallback skipped: option=%s chart_type=%s", option is not None, bool(chart_type))
                     except (json.JSONDecodeError, TypeError):
                         pass
-                elif ev_type == "chart":
-                    chart_type = event.get("chart_type")
-                    option = event.get("option")
-                    if option is not None:
-                        charts_count += 1
-                        yield _sse({"type": "chart", "chart_type": chart_type, "option": option})
-                        # 同样兜底：chart 事件带 option 时，按 last render_chart 参数追加一个 canvas_action 落块
-                        rc_args = last_tool_args.get("render_chart", {}) or {}
-                        title = rc_args.get("title") or str(chart_type)
-                        columns = rc_args.get("columns") or []
-                        rows = rc_args.get("rows") or []
-                        if columns and rows:
-                            ds_id = str((datasource.id if datasource else None) or body.datasource_id or "")
-                            dims = [str(c) for c in columns[:1]]
-                            measures_cfg = [{"field": str(c), "agg": "NONE"} for c in columns[1:]]
-                            fb = {
-                                "title": str(title) or str(chart_type),
-                                "chartType": str(chart_type),
-                                "datasourceId": ds_id,
-                                "queryConfig": {
-                                    "dimensions": dims, "measures": measures_cfg,
-                                    "filters": [], "limit": 500,
-                                },
-                                "columns": [str(c) for c in columns],
-                                "rows": [list(x) for x in rows],
-                            }
-                            fb["_chartResult"] = {"columns": fb["columns"], "rows": fb["rows"]}
-                            fb["_chartConfig"] = option
-                            canvas_actions_count += 1
-                            yield _sse({"type": "canvas_action", "action": "add_chart_block", "block": fb})
-                elif ev_type == "status":
-                    yield _sse({"type": "step", "title": event.get("message", ""), "status": "running"})
                 elif ev_type == "error":
                     yield _sse({"type": "error", "message": event.get("message", "服务异常")})
                 elif ev_type == "done":
@@ -1780,16 +1684,11 @@ async def canvas_ai_chat(
                     await _save_memory(db, session_id, event)
 
             # ---- 5. 保存助手消息 ----
-            # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作或图表输出，
+            # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作，
             # 也保存一份兜底 assistant 消息到 DB，保证下次加载历史时链路完整。
             save_content = full_content.strip()
-            if not save_content and (canvas_actions_count > 0 or charts_count > 0):
-                parts: list[str] = []
-                if canvas_actions_count:
-                    parts.append(f"已在画布执行 {canvas_actions_count} 次落块操作")
-                if charts_count:
-                    parts.append(f"生成 {charts_count} 张图表")
-                save_content = "本次分析通过画布工具完成：" + "，".join(parts) + "，请查看画布内容与工作台执行记录。"
+            if not save_content and canvas_actions_count > 0:
+                save_content = f"本次分析通过画布工具完成：已在画布执行 {canvas_actions_count} 次落块操作，请查看画布内容与工作台执行记录。"
             if session_id and save_content:
                 assistant_msg = AIMessage(
                     session_id=session_id,

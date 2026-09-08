@@ -430,9 +430,8 @@ export default memo(function AIAssistant({
     setMessages(prev => [...prev, assistantMsg]);
 
     let assistantContent = "";
-    // 本地统计本轮的画布动作 / 图表次数（与后端计数器一致），用于 finally 兜底文案
+    // 本地统计本轮的画布动作数（与后端计数器一致），用于 finally 兜底文案
     let localCanvasActions = 0;
-    let localCharts = 0;
 
     const token = tokenStore.getAccess();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
@@ -566,14 +565,9 @@ export default memo(function AIAssistant({
                 if (onCanvasAction) onCanvasAction(event);
                 break;
               }
-              // 'step'：后端显式步骤事件（如"正在启动多工具编排"）
-              case 'step':
-                runSeq.current += 1;
-                setSteps(prev => [...prev, { id: `${runSeq.current}`, title: event.title ?? "执行中", status: "run", tools: [] }]);
-                break;
-              // 'chart'：图表渲染事件，计数用于兜底文案
+              // 'chart'：兼容旧事件（画布白名单不含 render_chart，后端永不发）
+              // 保留 case 以避免对未知事件报错
               case 'chart':
-                localCharts += 1;
                 break;
               // 兼容旧事件
               // 'query_result': 查询结果数据，由 AI 自行处理，不显示原始数据表
@@ -620,13 +614,10 @@ export default memo(function AIAssistant({
     } catch (err: any) {
       setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `[连接失败] ${err.message}` } : m));
     } finally {
-      // 流结束但 AI 仍然没生成任何文本 → 用本轮统计到的画布动作/图表数生成兜底文案，
+      // 流结束但 AI 仍然没生成任何文本 → 用本轮统计到的画布动作数生成兜底文案，
       // 保证 UI 不再永远显示「思考中...」，也和后端保存到 DB 的兜底 assistant 消息对齐。
-      if (!assistantContent.trim() && (localCanvasActions > 0 || localCharts > 0)) {
-        const parts: string[] = [];
-        if (localCanvasActions > 0) parts.push(`在画布执行 ${localCanvasActions} 次落块操作`);
-        if (localCharts > 0) parts.push(`生成 ${localCharts} 张图表`);
-        assistantContent = `本次分析通过画布工具完成：${parts.join("，")}，请查看画布内容与工作台执行记录。`;
+      if (!assistantContent.trim() && localCanvasActions > 0) {
+        assistantContent = `本次分析通过画布工具完成：在画布执行 ${localCanvasActions} 次落块操作，请查看画布内容与工作台执行记录。`;
         setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
       }
       // 先清 ref（同步互斥标志），再清 state（异步 UI 状态），顺序不能反！
