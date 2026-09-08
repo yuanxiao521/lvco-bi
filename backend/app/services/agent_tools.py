@@ -1,4 +1,4 @@
-﻿"""Agent 工具注册：list_datasources, query_sql, render_chart."""
+"""Agent 工具注册：list_datasources, query_sql, render_chart."""
 import json
 import logging
 import re
@@ -752,7 +752,9 @@ class RenderChartTool(BaseTool):
     name = "render_chart"
     orchestrator_safe = True
     description = (
-        "根据数据生成 ECharts 图表配置。传入 chart_type 和数据。"
+        "根据数据生成 ECharts 图表配置。**四个参数 chart_type/title/columns/rows 均为必填，"
+        "缺一不可**，请一次性填全：chart_type 选图表类型、title 写标题、columns 传列名数组、"
+        "rows 传数据行二维数组（可从查询结果取）。"
         "返回 ECharts option 配置对象。"
         "支持的图表类型: bar(柱状图), line(折线图), pie(饼图), donut(环形图), "
         "area(面积图), scatter(散点图), kpi_card(指标卡), grouped_bar(分组柱状图), "
@@ -807,8 +809,8 @@ class RenderChartTool(BaseTool):
             },
         }
 
-    async def execute(self, chart_type: str, title: str, columns: list,
-                      rows: list, **kwargs) -> str:
+    async def execute(self, chart_type: str = "", title: str = "", columns: list | None = None,
+                  rows: list | None = None, **kwargs) -> str:
         """根据传入的图表类型和数据生成 ECharts 图表 option 配置。
 
         支持多种图表类型：普通柱状图、折线图、饼图、环形图、面积图、散点图、指标卡、
@@ -826,6 +828,28 @@ class RenderChartTool(BaseTool):
         返回：
             JSON 字符串，包含原始 chart_type 和 ECharts option 配置对象
         """
+        # 必填参数显式校验：LLM 流式 function-calling 可能只发出工具名、arguments 为空。
+        # 不靠 Python 的 missing-args TypeError（报错不够友好），而是返回带枚举的引导性错误，
+        # 让 LLM 按 hint 补全后重试。
+        missing = []
+        if not chart_type:
+            missing.append("chart_type")
+        if not title:
+            missing.append("title")
+        if not columns:
+            missing.append("columns")
+        if not rows:
+            missing.append("rows")
+        if missing:
+            return json.dumps({
+                "error": f"render_chart 缺少必填参数: {', '.join(missing)}，请补齐后重新调用",
+                "hint": (
+                    f"chart_type 可选值: bar、line、pie、donut、area、scatter、kpi_card、"
+                    "grouped_bar、stacked_bar、horizontal_bar、heatmap、radar、funnel；"
+                    "title 写图表标题；columns/rows 从查询结果中取"
+                ),
+            }, ensure_ascii=False)
+
         if not rows or not columns:
             return json.dumps({"error": "数据为空"}, ensure_ascii=False)
 

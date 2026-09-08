@@ -1,4 +1,4 @@
-﻿"""Agent 链路回归测试（图引擎 / 编排器 / ReAct / 工具 / 上下文压缩）。
+"""Agent 链路回归测试（图引擎 / 编排器 / ReAct / 工具 / 上下文压缩）。
 
 覆盖 Phase 1.6-1.9 + Phase 2 的关键行为：
 - 编排器：Planner 骨架 → Executor agentic 执行 → 失败重试（≤3）→ 图表 → 报告；trace 观测统计
@@ -720,3 +720,19 @@ def test_orchestrator_prompt_prefers_query_engine():
     idx_qe = text.find("query_engine（标准聚合首选")
     idx_qd = text.find("query_sql（高级 SQL 兜底")
     assert idx_qe != -1 and idx_qd != -1 and idx_qe < idx_qd
+
+
+async def test_render_chart_missing_args_friendly_error():
+    """render_chart 空参数（LLM 只发工具名）返回引导性错误，而非 Python TypeError。"""
+    import json as _json
+
+    from app.services.agent_tools import RenderChartTool
+
+    out = _json.loads(await RenderChartTool().execute())
+    assert "error" in out, f"空参数应返回 error，实际 {out}"
+    assert "chart_type" in out["error"] and "title" in out["error"]
+    assert "hint" in out and "bar" in out["hint"]  # hint 带可用图表类型枚举
+
+    # 部分参数缺失也能指出具体缺项
+    out2 = _json.loads(await RenderChartTool().execute(chart_type="bar", title="t"))
+    assert "columns" in out2["error"] and "rows" in out2["error"]
