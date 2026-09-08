@@ -693,11 +693,30 @@ class QueryDatasourceTool(BaseTool):
                 return str(v)
 
             data_rows = [[_safe(v) for v in row] for row in rows_raw[:50]]
-            # summary：供 LLM 核对结果是否符合用户问题意图（语义自评）
+            # 聚合判断（SQL 结构特征，非 LLM）：含 GROUP BY 或聚合函数 → 聚合查询（结果已浓缩，完整返回）
+            _sql_upper = (final_sql or "").upper()
+            _is_aggregate = bool(
+                re.search(r"\bGROUP\s+BY\b", _sql_upper)
+                or re.search(r"\b(SUM|AVG|COUNT|MIN|MAX|STDDEV|MEDIAN|PERCENTILE|STRING_AGG)\s*\(", _sql_upper)
+            )
+            total_rows = len(data_rows)
+            if _is_aggregate:
+                notice = (
+                    f"聚合查询已完成，已完整返回 {total_rows} 行（聚合结果本身已是浓缩数据），"
+                    "数据已齐全，不要再重复查询"
+                )
+            else:
+                notice = (
+                    f"明细查询已完成，共 {total_rows} 行；rows 仅为展示样本（行数超 50 时被截断）。"
+                    "若确需更多行请显式调大 LIMIT 后再查，否则不要重复查询同一数据"
+                )
+            # summary：供 LLM 核对结果是否符合用户问题意图（语义自评）+ 防恐慌重查声明
             summary = {
                 "columns_count": len(cols),
-                "rows_count": len(data_rows),
+                "rows_count": total_rows,
                 "sample": data_rows[:3],
+                "aggregate": _is_aggregate,
+                "notice": notice,
             }
             return json.dumps({
                 "columns": cols,
@@ -1271,6 +1290,12 @@ class QueryEngineTool(BaseTool):
                     "columns_count": len(result.columns),
                     "rows_count": len(result.rows),
                     "sample": result.rows[:3],
+                    "cached": result.cached,
+                    "computed_at": result.computed_at,
+                    "notice": (
+                        "查询已完成，rows 仅为展示样本，完整结果以 rows_count 为准，"
+                        "不要因样本截断重复查询"
+                    ),
                 },
             }, ensure_ascii=False, default=str)
         except Exception as e:

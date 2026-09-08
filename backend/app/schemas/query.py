@@ -49,3 +49,6 @@ class QueryResult(CamelModel):
     rows: list[dict[str, Any]]
     chart_type: str | None = None
     query_time_ms: int
+    # 数据新鲜度探测：本次结果是否命中缓存 / 数据计算时间（ISO）。供 LLM 与观测判断数据新旧。
+    cached: bool = False
+    computed_at: str | None = None

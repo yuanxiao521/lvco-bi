@@ -300,6 +300,7 @@ class AgentOrchestrator:
                     "tool": "query_sql",
                     "depends_on": [],
                     "purpose": "直接查询数据回答用户问题",
+                    "granularity": "auto",
                 },
                 {
                     "step_id": 2,
@@ -307,6 +308,7 @@ class AgentOrchestrator:
                     "tool": "render_chart",
                     "depends_on": [1],
                     "purpose": "可视化展示分析结果",
+                    "granularity": "auto",
                 },
             ]
         else:

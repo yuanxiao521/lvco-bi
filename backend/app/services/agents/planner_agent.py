@@ -1,4 +1,4 @@
-﻿"""PlannerAgent：动态任务规划——把用户任务分解为工具调用计划。
+"""PlannerAgent：动态任务规划——把用户任务分解为工具调用计划。
 
 与旧版（固定 SQL→Chart 流水线）不同，新版 Planner 生成的计划是**动态的工具调用序列**：
 根据任务复杂度自由组合 ToolRegistry 中的任意工具，带依赖关系，交给执行器按计划执行。
@@ -288,6 +288,9 @@ class PlannerAgent(BaseAgent):
                 "tool": tool,
                 "depends_on": [d for d in s.depends_on if isinstance(d, int)],
                 "purpose": s.purpose[:120],
+                # granularity 预留位：聚合/明细/自动的"数据粒度"期望（当前恒为 auto，
+                # 未来由 planner 按用户意图填充，executor + 缓存策略据此决策）
+                "granularity": "auto",
             })
 
         plan["steps"] = valid_steps
@@ -305,6 +308,7 @@ class PlannerAgent(BaseAgent):
                 "tool": "list_datasources",
                 "depends_on": [],
                 "purpose": "列出可用数据源",
+                "granularity": "auto",
             }],
             "expected_output": "text",
         }

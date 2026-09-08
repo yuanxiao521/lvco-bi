@@ -3,6 +3,7 @@ import hashlib
 import json
 import structlog
 import time
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -622,7 +623,10 @@ async def execute_chart_query(
         cached = cache_repo.get(cache_key)
         if cached:
             data = json.loads(cached)
-            return QueryResult(**data)
+            result = QueryResult(**data)
+            # 从缓存恢复的数据：标记命中（computed_at 保留为原始计算时间，供判断数据新旧）
+            result.cached = True
+            return result
 
     if metric_defs and db is not None:
         for mid, mdef in metric_defs.items():
@@ -720,6 +724,9 @@ async def execute_chart_query(
         rows=rows,
         chart_type=config.chart_type,
         query_time_ms=query_time_ms,
+        # 数据新鲜度：本次为真实计算（非缓存），记录计算时间
+        cached=False,
+        computed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
 
     # --- cache set ---
