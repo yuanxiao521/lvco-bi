@@ -122,6 +122,9 @@ granularity（推荐）** > 独立意图模块（重叠，不推荐）
 - [x] query_engine 返回加 `cached: true/false` + 数据时间戳（探测痕迹）
 - [x] 工具返回标注"聚合完整 / 明细样本+全量数"（治恐慌重查）
 - [x] planner 骨架预留 `granularity` 字段位（先不加逻辑）
-- [ ] （未来）query_sql 任务级 memo + 静态源判断
+- [x] **query_sql 任务级 memo**（成功才缓存）：ToolExecutor 增 `success_cached_tools`
+      （与 `idempotent_tools` 无条件缓存区分，error 不写 memo 保自纠错）；
+      orchestrator 注册 query_sql；query_engine 不重复加（已有 Redis）
+- [ ] （未来）静态/动态数据源判断钩子（动态源跳过 query_sql memo）
 - [ ] （未来）fresh 参数 / TTL 分级 / 快照隔离
 - [ ] （未来）画布助手真实 E2E

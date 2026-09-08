@@ -108,6 +108,7 @@ class ToolExecutor:
         memo: dict | None = None,
         memo_locks: dict | None = None,
         idempotent_tools: frozenset[str] = frozenset(),
+        success_cached_tools: frozenset[str] = frozenset(),
         allowed_tools: set[str] | None = None,
     ):
         self.user_id = user_id
@@ -117,6 +118,9 @@ class ToolExecutor:
         self.memo = memo
         self.memo_locks = memo_locks
         self.idempotent_tools = idempotent_tools
+        # 成功态缓存工具：结果成功才写 memo（error 不缓存，避免固化错误阻断自纠错）。
+        # 用于非幂等但静态数据下"同参数同结果"的工具（如 query_sql 任务内复用）。
+        self.success_cached_tools = success_cached_tools
         # 入口工具白名单：非 None 时，白名单外的工具调用一律拒绝（受限入口防越权）。
         # None 表示不校验（普通 chat / react 路径保持原行为）。
         self.allowed_tools = allowed_tools
@@ -150,7 +154,10 @@ class ToolExecutor:
             return ToolCallResult(name=tname, args=targs, result=result, is_error=True, fatal=True, tc=tc)
 
         if tname in self.idempotent_tools and self.memo is not None:
-            result, memo_hit = await self._exec_with_memo(tname, targs, tool)
+            result, memo_hit = await self._exec_with_memo(tname, targs, tool, cache_errors=True)
+        elif tname in self.success_cached_tools and self.memo is not None:
+            # 成功态缓存：error 不写入 memo（避免固化错误阻断 LLM 自纠错）
+            result, memo_hit = await self._exec_with_memo(tname, targs, tool, cache_errors=False)
         else:
             result, memo_hit = await self._execute_once(tool, tname, targs), False
 
@@ -171,8 +178,14 @@ class ToolExecutor:
             is_error=is_error, fatal=False, memo_hit=memo_hit, tc=tc,
         )
 
-    async def _exec_with_memo(self, tname: str, targs: dict, tool) -> tuple[str, bool]:
-        """幂等工具执行：命中 memo 直接返回缓存，否则执行并写缓存（按 key 加锁防并发重复）。"""
+    async def _exec_with_memo(self, tname: str, targs: dict, tool, cache_errors: bool = True) -> tuple[str, bool]:
+        """幂等/可缓存工具执行：命中 memo 直接返回缓存，否则执行并写缓存（按 key 加锁防并发重复）。
+
+        Args:
+            cache_errors: True（幂等工具）→ 无条件写缓存；
+                          False（成功态工具如 query_sql）→ 仅结果成功才写缓存，
+                          失败/错误结果不缓存，保证 LLM 自纠错不被旧错误锚定。
+        """
         mkey = _make_memo_key(tname, targs)
         lock = None
         if self.memo_locks is not None:
@@ -182,7 +195,8 @@ class ToolExecutor:
             if mkey in self.memo:
                 return self.memo[mkey], True
             result = await self._execute_once(tool, tname, targs)
-            self.memo[mkey] = result
+            if cache_errors or not is_error_result(result):
+                self.memo[mkey] = result
             return result, False
 
         if lock is not None:

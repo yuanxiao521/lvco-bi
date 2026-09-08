@@ -99,6 +99,12 @@ _IDEMPOTENT_TOOLS = frozenset({
     "analyze_column",
 })
 
+# 成功态缓存工具：结果成功才写 memo（error 不缓存，避免固化错误阻断自纠错）。
+# query_sql 无任何跨任务缓存（query_engine 已有 Redis），在编排任务内同 SQL 反复查
+# 是主要浪费（恐慌重查）；任务级成功 memo 让同 SQL 第二次秒回。query_engine 已有
+# Redis 缓存覆盖，不重复加 memo。
+_SUCCESS_CACHED_TOOLS = frozenset({"query_sql"})
+
 
 # Task 2 (P0-2)：失败签名 key —— 同一工具 + 相同参数（JSON 规范化哈希）判定为同一失败签名。
 def _make_fail_key(tool_name: str, args: dict) -> str:
@@ -467,6 +473,7 @@ class AgentOrchestrator:
             memo=_memo,
             memo_locks=_memo_locks,
             idempotent_tools=_IDEMPOTENT_TOOLS,
+            success_cached_tools=_SUCCESS_CACHED_TOOLS,
             allowed_tools=executor_allowed or None,
         )
 
