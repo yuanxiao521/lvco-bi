@@ -1,4 +1,4 @@
-﻿"""ReactGraphAgent：ReAct 循环的图化实现（LangGraph 模式，零依赖）。
+"""ReactGraphAgent：ReAct 循环的图化实现（LangGraph 模式，零依赖）。
 
 图结构：
     reason（LLM 推理：流式调用 + 按 phase 过滤工具 schema）
@@ -17,7 +17,11 @@ import logging
 from typing import Any
 
 from app.services.agents.graph import Graph
-from app.services.agent_tools import ConversationPhase, get_tools_for_phase
+from app.services.agent_tools import (
+    ConversationPhase,
+    _PHASE_TOOLS,
+    get_tools_for_phase,
+)
 from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
 from app.services.context_utils import compact_result_json
 
@@ -27,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 6
 MAX_CONSECUTIVE_FAILURES = 5  # 连续查询失败熔断阈值
+MAX_PARALLEL_TOOL_CALLS = 3   # 单轮并发工具调用上限（防止 LLM 一次性并发大量查询）
+MAX_QUERY_CALLS = 5           # 单任务累计查询（query_sql/query_engine）次数上限，超限强制收尾出报告
 
 # 阶段流转触发工具（与 agent_stream 原逻辑一致）
 _ANALYZING_TRIGGERS = ("query_sql", "query_engine")
@@ -74,6 +80,8 @@ class ReactGraphAgent:
                 "phase": ConversationPhase(initial_phase) if isinstance(initial_phase, str) else initial_phase,
                 "executed_tool_names": [],
                 "consecutive_query_failures": 0,
+                "query_call_count": 0,
+                "invalid_tool_streak": 0,
                 "iteration": 0,
             },
             db_session=db_session,
@@ -126,11 +134,45 @@ class ReactGraphAgent:
             )
             llm_span.finish()
 
+        # 空输出兜底：LLM 既没有工具调用也没有输出文本（ReAct 中常见"静默"收尾，
+        # 如读完全部查询结果后既不渲染也不写报告），此时若直接 done 用户会收到空回复。
+        # 用一次无工具的完整调用来强制生成收尾报告；仍失败则给道歉文案，保证终态必有输出。
+        if not tool_calls and not has_text_output:
+            logger.warning(f"[react] silent_reason iteration={iteration + 1} 无工具调用且无文本，强制收尾")
+            wrapup = await self._run_wrapup_report(messages)
+            if wrapup:
+                for part in self._chunk_text(wrapup):
+                    await emit({"type": "text", "content": part})
+            else:
+                await emit({"type": "text", "content": "很抱歉，工具执行后未能生成有效的分析结果，请换一种问法重试。"})
+
         return {
             "tool_calls": tool_calls,
             "has_text_output": has_text_output,
             "iteration": iteration + 1,
         }
+
+    @staticmethod
+    def _chunk_text(text: str, size: int = 200) -> list[str]:
+        """把长文本切成小段，模拟流式输出（便于前端增量渲染）。"""
+        return [text[i:i + size] for i in range(0, len(text), size)] if text else []
+
+    async def _run_wrapup_report(self, messages: list[dict]) -> str:
+        """强制收尾：用一次无工具 LLM 调用，基于已有消息生成总结报告（降级不抛异常）。"""
+        try:
+            from app.services.ai_prompts import REPORT_SYSTEM
+            report_msg = [{"role": "system", "content": REPORT_SYSTEM}] + [
+                m for m in messages if m.get("role") != "system"
+            ]
+            report = await self.llm.complete(
+                report_msg,
+                temperature=0.4,
+                max_tokens=1500,
+            )
+            return report if isinstance(report, str) and report.strip() else ""
+        except Exception as e:
+            logger.warning(f"[react] wrapup_report_failed: {e}")
+            return ""
 
     async def _route_reason(self, state: dict, **shared) -> str:
         if state.get("tool_calls") and state.get("iteration", 0) <= MAX_ITERATIONS:
@@ -147,6 +189,73 @@ class ReactGraphAgent:
         phase = state["phase"]
         executed_tool_names = list(state.get("executed_tool_names") or [])
         consecutive_query_failures = state.get("consecutive_query_failures", 0)
+        query_call_count = state.get("query_call_count", 0)
+
+        # 单轮并发钳制：防止 LLM 一次性并发大量工具调用（如 8 个查询），
+        # 超出部分丢弃（保留前 N 个），收敛为可管理的小步执行。
+        original_tool_calls = tool_calls
+        if len(tool_calls) > MAX_PARALLEL_TOOL_CALLS:
+            logger.warning(f"[react] tool_calls={len(tool_calls)} 超并发上限，截断为 {MAX_PARALLEL_TOOL_CALLS}")
+            tool_calls = tool_calls[:MAX_PARALLEL_TOOL_CALLS]
+
+        # 执行层白名单：LLM 可能无视 schema 约束编造当前阶段外的工具调用
+        # （如 GENERATING 阶段仍返回 query_sql）。schema 层的过滤只影响 LLM 可见性，
+        # 执行层必须在执行前再校验一次，命中白名单外的工具直接剔除。
+        phase_allowed = _PHASE_TOOLS.get(phase, set())
+        blocked = [tc.get("name") for tc in tool_calls if tc.get("name") not in phase_allowed]
+        if blocked:
+            logger.warning(f"[react] blocked_tools_out_of_phase phase={getattr(phase, 'value', phase)} blocked={blocked}")
+        tool_calls = [tc for tc in tool_calls if tc.get("name") in phase_allowed]
+        if not tool_calls:
+            # 本轮全部调用都不属于当前阶段 → 不执行任何工具：
+            # 先补全 assistant tool_call + tool 拒绝结果（保证消息配对），
+            # 再注入纠正并回 reason。若连续多次无效调用（decode 惯性），不再让 LLM 空转，
+            # 直接强制 wrapup 收尾报告。
+            invalid_tool_streak = state.get("invalid_tool_streak", 0) + 1
+            messages.append(build_assistant_message(tool_calls or original_tool_calls))
+            for tc in (tool_calls or original_tool_calls):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", f"call_{len(messages)}"),
+                    "content": json.dumps(
+                        {"error": f"工具 {tc.get('name')} 在当前阶段不可用"},
+                        ensure_ascii=False,
+                    ),
+                })
+            if invalid_tool_streak >= 2:
+                logger.warning(f"[react] invalid_tool_streak={invalid_tool_streak} 连续无效调用，强制收尾")
+                wrapup = await self._run_wrapup_report(messages)
+                if wrapup:
+                    for part in self._chunk_text(wrapup):
+                        await emit({"type": "text", "content": part})
+                else:
+                    await emit({"type": "text", "content": "很抱歉，工具执行后未能生成有效的分析结果，请换一种问法重试。"})
+                return {
+                    "messages": messages,
+                    "phase": phase,
+                    "executed_tool_names": executed_tool_names,
+                    "consecutive_query_failures": consecutive_query_failures,
+                    "query_call_count": query_call_count,
+                    "invalid_tool_streak": invalid_tool_streak,
+                    "done_reason": "invalid_tool_wrapup",
+                }
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"当前阶段不允许调用工具 {blocked}。"
+                    "请：1) 若已完成数据查询，直接输出中文分析报告并调用 render_chart 生成图表；"
+                    "2) 不要重复调用查询工具。"
+                ),
+            })
+            logger.info(f"[react] no_allowed_tools phase={getattr(phase, 'value', phase)} 本轮无有效工具 streak={invalid_tool_streak}")
+            return {
+                "messages": messages,
+                "phase": phase,
+                "executed_tool_names": executed_tool_names,
+                "consecutive_query_failures": consecutive_query_failures,
+                "query_call_count": query_call_count,
+                "invalid_tool_streak": invalid_tool_streak,
+            }
 
         # 构建 assistant message with tool_calls
         messages.append(build_assistant_message(tool_calls))
@@ -220,6 +329,18 @@ class ReactGraphAgent:
                 new_phase = ConversationPhase.REPORTING
                 logger.info("[react] phase_transition GENERATING→REPORTING")
 
+        # 累计查询次数上限：query_sql/query_engine 调用 ≥ MAX_QUERY_CALLS 后，
+        # 强制收走查询工具（流转到 GENERATING）并提示开始汇总，防止无限逐项查询烧 token。
+        # 判定不再依赖 phase（可能已流转 GENERATING，但 LLM 绕过滤限制仍在尝试查询）。
+        query_used = sum(1 for n in tool_calls if n in _ANALYZING_TRIGGERS)
+        query_call_count += query_used
+        query_exhausted = query_call_count >= MAX_QUERY_CALLS and query_used > 0
+        if query_exhausted and new_phase == ConversationPhase.ANALYZING:
+            new_phase = ConversationPhase.GENERATING
+            logger.info(f"[react] query_limit_reached count={query_call_count} force_generating")
+        if query_exhausted:
+            await emit({"type": "status", "message": f"已到达本任务查询上限（{MAX_QUERY_CALLS} 次），开始汇总出报告"})
+
         # follow_up 注入：引导 LLM 下一轮输出（不重复塞工具结果，role:tool 已携带完整数据）
         follow_up = self._build_follow_up(executed_tool_names, has_error, consecutive_query_failures)
 
@@ -240,21 +361,22 @@ class ReactGraphAgent:
             "phase": new_phase,
             "executed_tool_names": executed_tool_names,
             "consecutive_query_failures": consecutive_query_failures,
+            "query_call_count": query_call_count,
+            "invalid_tool_streak": 0,
         }
 
     async def _route_execute(self, state: dict, **shared) -> str:
-        return "done" if state.get("done_reason") == "circuit_breaker" else "loop"
+        return "done" if state.get("done_reason") in ("circuit_breaker", "invalid_tool_wrapup") else "loop"
 
-    # ── follow_up 构建（与 agent_stream 原逻辑一致）──
+    # ── follow_up 构建：只告诉 LLM"要干什么"，不出现工具名 ──
+    # 工具由当前阶段 tools 参数动态提供，硬编码工具名会让 LLM 在阶段收走工具后
+    # 仍"凭记忆"编造调用（如 GENERATING 阶段伪造 query_sql）。
     def _build_follow_up(self, executed_tool_names: list[str], has_error: bool, consecutive_query_failures: int) -> str:
         if executed_tool_names and all(n == "list_datasources" for n in executed_tool_names):
             return (
-                "以上是当前可用的数据源列表（每个数据源带 ID，可用于 query_sql）。\n"
-                "请结合用户的原始问题判断：\n"
-                "1. 如果用户问题中已明确提到要分析哪个数据源，直接调用 query_sql（用对应数据源 ID）"
-                "继续查询分析，不要停下来询问；\n"
-                "2. 如果用户没有明确指定，再用友好方式展示数据源列表（名称、类型、关键字段），"
-                "引导用户选择要分析哪个数据源。\n"
+                "以上是当前可选的数据源。请结合用户的原始问题判断：\n"
+                "1. 如果用户问题中已明确提到要分析哪个数据源，直接用当前可用工具继续查询分析，不要停下来询问；\n"
+                "2. 如果用户没有明确指定，用友好方式展示数据源列表（名称、类型、关键字段），引导用户选择。\n"
                 "使用 ## 标题和列表格式，关键数字加粗。"
             )
         if any(n == "render_chart" for n in executed_tool_names):
@@ -267,15 +389,14 @@ class ReactGraphAgent:
             if has_error:
                 if consecutive_query_failures == 1:
                     return (
-                        "上次查询失败了。错误提示中已经包含了正确的 table_ref 和可用列名。"
-                        "请**直接用错误提示中的 table_ref 作为 FROM 子句**，用错误提示中的列名拼写 SQL，不要自己编表名或列名。"
-                        "然后调用 query_sql 重试。"
+                        "上次查询失败了。错误提示中已经包含了正确的表引用和可用列名。"
+                        "请**直接复制错误提示中的表引用和列名**重写查询，不要自己编表名或列名，然后重试。"
                     )
                 if consecutive_query_failures <= 3:
                     return (
                         f"已连续失败 {consecutive_query_failures} 次。请再次确认：\n"
-                        "1) 列名是否完全等于 list_datasources 返回的 columns 数组中的字符串（区分大小写）；\n"
-                        "2) FROM 子句是否就是 list_datasources 返回的 table_ref 原样复制；\n"
+                        "1) 列名是否与错误提示中的可用列名完全一致（区分大小写）；\n"
+                        "2) 表引用是否就是错误提示给出的那个；\n"
                         "3) 字符串值是否用了正确的引号。\n"
                         "如果仍然报错，请**最后一次**重试，再失败就把错误信息告诉用户并停止。"
                     )
@@ -285,7 +406,7 @@ class ReactGraphAgent:
                 )
             return (
                 "查询成功！现在请**立即**输出分析结果：\n"
-                "1. 先调用 render_chart 生成图表（**必须生成，不允许跳过**）\n"
+                "1. 先用当前可用工具生成至少一张图表（**必须生成，不允许跳过**）\n"
                 "2. 然后输出中文分析报告，用 ## 标题分段，关键数字用 **加粗**\n"
                 "**禁止**再发起新的查询，直接用已有数据完成分析。"
             )
