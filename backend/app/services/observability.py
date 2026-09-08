@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from contextlib import contextmanager
@@ -138,6 +139,26 @@ def _get_langfuse_client() -> Any | None:
 # ------------------------------------------------------------------
 
 
+def _summarize(value: Any, limit: int = 500, tail: bool = False) -> str:
+    """把 span 的 input/output 转成可读字符串并截断（默认截头，markdown/JSON 取尾更易看报错）。"""
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        try:
+            text = json.dumps(value, ensure_ascii=False)[: limit * 2]
+        except Exception:
+            text = str(value)
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    if tail:
+        return "…" + text[-limit:]
+    return text[:limit] + "…"
+
+
 class Observer:
     """统一的可观测性入口，未启用 Langfuse 时降级为本地日志。"""
 
@@ -189,6 +210,23 @@ class Observer:
                     int((rec.end_time - rec.start_time) * 1000),
                     len(rec.children),
                 )
+                # 本地模式下逐 span 输出（含工具参数如 SQL / 结果摘要），用于日志排查
+                for i, sp in enumerate(rec.children, start=1):
+                    log_parts: list[str] = [
+                        f"#{i}",
+                        f"type={sp.span_type}",
+                        f"name={sp.name}",
+                        f"latency_ms={sp.latency_ms}",
+                    ]
+                    inp = _summarize(sp.input)
+                    if inp:
+                        log_parts.append(f"input={inp}")
+                    out = _summarize(sp.output, tail=True)
+                    if out:
+                        log_parts.append(f"output={out}")
+                    if sp.error:
+                        log_parts.append(f"error={_summarize(sp.error, 200, tail=True)}")
+                    logger.info("trace_span | %s", " | ".join(log_parts))
 
     def flush(self) -> None:
         """强制刷新（建议在请求结束时调用）。"""
