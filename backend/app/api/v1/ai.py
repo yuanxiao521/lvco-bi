@@ -1650,9 +1650,11 @@ async def canvas_ai_chat(
                     full_content += delta
                     yield _sse({"type": "message", "delta": delta})
                 elif ev_type == "plan":
+                    # entry=canvas 与对话入口（entry=chat, mode=orchestrator）区分，
+                    # 观测方可从 SSE 直接识别规划来源；steps 保留工具名与目标
                     steps = (event.get("plan") or {}).get("steps", [])
-                    yield _sse({"type": "plan", "mode": "orchestrator",
-                                "steps": [s.get("tool") for s in steps if isinstance(s, dict)]})
+                    yield _sse({"type": "plan", "entry": "canvas", "mode": "canvas_orchestrator",
+                                "steps": [{"tool": s.get("tool"), "goal": s.get("goal")} for s in steps if isinstance(s, dict)]})
                 elif ev_type == "status":
                     yield _sse({"type": "status", "message": event.get("message", ""),
                                 "phase": event.get("phase"),
