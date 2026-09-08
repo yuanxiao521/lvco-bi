@@ -74,6 +74,50 @@ def _get_table_columns(schema_name: str) -> list[tuple[str, str]]:
     return [(row[0], row[1]) for row in rows]
 
 
+def _validate_measure_types(measures: list[dict], col_types: dict[str, str]) -> str | None:
+    """编译期数值类型校验：SUM/AVG/STDDEV/MEDIAN 要求数值列。
+
+    背景：画布 add_chart_block / LLM 可能对 VARCHAR 列执行 SUM（如 SUM("region")），
+    DuckDB 报 sum(VARCHAR) Binder Error。此校验在拼 SQL 前拦截，
+    返回友好错误引导 LLM 更换字段或聚合方式（COUNT/MIN/MAX 不限类型）。
+
+    Args:
+        measures: 普通度量配置列表（含 field/agg）。
+        col_types: {列名: 数据类型}（大写）。
+
+    Returns:
+        错误信息字符串；全部合法返回 None。
+    """
+    numeric_aggs = {"SUM", "AVG", "STDDEV", "MEDIAN"}
+    for m in measures:
+        agg = (m.get("agg") or "").upper()
+        field = m.get("field") or ""
+        if agg not in numeric_aggs or not field:
+            continue
+        dtype = (col_types.get(field) or "").upper()
+        if not dtype:
+            continue
+        if not any(tok in dtype for tok in ("INT", "DOUBLE", "DECIMAL", "FLOAT", "REAL", "NUMER")):
+            return (
+                f"度量字段 '{field}' 类型为 {dtype}，不支持 {agg} 数值聚合；"
+                "请改用数值字段，或改用 COUNT/MIN/MAX 聚合"
+            )
+    return None
+
+
+def _get_column_types(schema_name: str, source_type: SourceType | None, pg_table_name: str = "data") -> dict[str, str]:
+    """获取数据源 {列名: 数据类型} 映射（大小写保持原始，值转大写）。"""
+    if source_type in (SourceType.mysql, SourceType.postgresql):
+        rows = duckdb_client.fetchall(
+            f'SELECT column_name, data_type FROM "{schema_name}".information_schema.columns '
+            f'WHERE table_schema = ? AND table_name = ?',
+            ["public", pg_table_name],
+        )
+    else:
+        rows = _get_table_columns(schema_name)
+    return {name: (dtype or "").upper() for name, dtype in rows}
+
+
 def _ensure_datasource_ready(schema_name: str, source_type: SourceType | None = None, pg_table_name: str = "data") -> set[str]:
     """检查数据源是否就绪，返回该数据源的所有列名集合。
 
@@ -658,6 +702,10 @@ async def execute_chart_query(
         for i, actual in enumerate(meas_fields):
             plain_measures[i]["field"] = actual
         _validate_aggregations([m["agg"] for m in plain_measures])
+        # 编译期数值类型校验：SUM/AVG/STDDEV/MEDIAN 需要数值列（拦截 sum(VARCHAR) Binder Error）
+        type_err = _validate_measure_types(plain_measures, _get_column_types(schema_name, source_type, pg_table_name))
+        if type_err:
+            raise QueryEngineError(type_err, code="INVALID_MEASURE_TYPE")
         # 将修正后的普通度量写回 measure_dicts（按原位置）
         plain_iter = iter(plain_measures)
         measure_dicts = [next(plain_iter) if not m.get("expression") else m for m in measure_dicts]

@@ -86,3 +86,29 @@ def test_query_engine_tool_schema_exposes_dimension_buckets():
     assert "dimension_buckets" in props
     desc = json.dumps(schema, ensure_ascii=False)
     assert "month" in desc and "day" in desc
+
+
+def test_validate_measure_types_blocks_non_numeric_for_sum():
+    """SUM/AVG 对 VARCHAR 列 → 编译期拦截（返回友好错误而非 DuckDB Binder Error）。"""
+    from app.services.query_engine import _validate_measure_types
+
+    # VARCHAR 列 + SUM → 拦截
+    err = _validate_measure_types(
+        [{"field": "region", "agg": "SUM"}], {"region": "VARCHAR"}
+    )
+    assert err is not None and "region" in err and "SUM" in err
+    # 数值列 + SUM → 通过
+    assert _validate_measure_types(
+        [{"field": "amount", "agg": "SUM"}], {"amount": "DOUBLE"}
+    ) is None
+    # VARCHAR + COUNT/MIN/MAX → 通过（类型无关聚合不校验）
+    assert _validate_measure_types(
+        [{"field": "region", "agg": "COUNT"}], {"region": "VARCHAR"}
+    ) is None
+    assert _validate_measure_types(
+        [{"field": "name", "agg": "MIN"}], {"name": "VARCHAR"}
+    ) is None
+    # 大小写：整数类型（INTEGER/BIGINT）也通过
+    assert _validate_measure_types(
+        [{"field": "qty", "agg": "AVG"}], {"qty": "INTEGER"}
+    ) is None
