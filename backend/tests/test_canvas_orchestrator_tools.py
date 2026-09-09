@@ -65,6 +65,45 @@ def test_orchestrator_default_has_no_extra_tools():
     assert o.planner.extra_plannable_tools == set()
 
 
+# ---------- Executor：执行阶段工具集再次收紧 ----------
+# 入口白名单含查询类工具（query_engine/query_sql/list_*），但执行器只暴露
+# 纯落块工具——add_chart_block 自带取数验证，裸查工具会诱导 LLM"取数不建图"。
+
+_EXECUTOR_BLOCK_TOOLS = frozenset({
+    "add_chart_block", "add_text_block",
+    "update_chart_block", "remove_block", "arrange_layout",
+})
+_QUERY_TOOLS = frozenset({
+    "query_engine", "query_sql", "list_datasources", "list_fields",
+    "stats_analyzer", "recommend_charts",
+})
+
+
+def test_canvas_executor_tools_limited_to_block_tools():
+    """执行器可见工具 = 入口白名单 ∩ 纯落块工具，查询类工具不可见。"""
+    from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+
+    orch = CanvasOrchestrator(
+        MagicMock(spec=LLMClient), MagicMock(),
+        extra_plannable_tools=_EXECUTOR_BLOCK_TOOLS | _QUERY_TOOLS,
+    )
+    names = {
+        t["function"]["name"]
+        for t in orch._executor_tools()
+        if isinstance(t, dict) and isinstance(t.get("function"), dict)
+    }
+    assert names == _EXECUTOR_BLOCK_TOOLS
+    assert not (names & _QUERY_TOOLS)
+
+
+def test_canvas_executor_tools_empty_without_extra():
+    """未注入白名单时执行器无可用工具。"""
+    from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+
+    orch = CanvasOrchestrator(MagicMock(spec=LLMClient), MagicMock())
+    assert orch._executor_tools() == []
+
+
 # ---------- agent_stream：入口参数透传到 Orchestrator ----------
 
 class _FakeOrchestrator:

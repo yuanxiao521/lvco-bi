@@ -1,4 +1,4 @@
-﻿"""CanvasOrchestrator：画布专用编排器（报告骨架 → 落块执行 → 简短总结）。
+"""CanvasOrchestrator：画布专用编排器（报告骨架 → 落块执行 → 简短总结）。
 
 与 AgentOrchestrator 的关系：**编排策略独立**，仅复用底层设施。
 - 独立：Planner 用画布版 prompt（canvas_planner_system）规划"报告骨架"
@@ -9,8 +9,11 @@
 
 设计取舍：
 - add_chart_block 后端自验证取数，因此骨架里不需要单独的 query_sql 步骤；
-- 工具白名单严格 = 入口注入的画布工具集（由 ai.py 画布入口传入 CANVAS_ALLOWED_TOOL_NAMES），
-  Executor 只能执行白名单内工具；
+- 执行阶段工具集**再次收紧**：入口注入的白名单（CANVAS_ALLOWED_TOOL_NAMES）
+  含查询类工具（query_engine/query_sql/list_*），那是 Planner/入口用的；
+  但执行器（Executor）只暴露纯落块工具（add_chart_block 自带取数验证，
+  不再需要裸查数工具），避免 LLM"先查数据却不建图"（实践踩坑：执行步骤
+  反复调 query_engine 拿数据而不调 add_chart_block，导致图表/叙事块缺失）；
 - 步骤依赖（depends_on）控制叙事/章节顺序，同层并发执行。
 """
 from __future__ import annotations
@@ -36,6 +39,13 @@ logger = logging.getLogger(__name__)
 _MAX_TOOL_CALLS_PER_STEP = 4  # 单步内最多工具调用次数
 _STEP_TIMEOUT = 45  # 单步超时（秒）
 _MAX_STEP_FAILURES = 3  # 同一工具+参数连续失败跳过阈值
+
+# 执行器可见工具：仅纯落块工具。查询/取数由 add_chart_block 内部完成，
+# 不再让 LLM 在"建图"步骤里先 query_engine 再落块（会查而不建）。
+_EXECUTOR_TOOL_NAMES = frozenset({
+    "add_chart_block", "add_text_block",
+    "update_chart_block", "remove_block", "arrange_layout",
+})
 
 
 class CanvasOrchestrator:
@@ -295,14 +305,21 @@ class CanvasOrchestrator:
             results[sid] = json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
 
     def _executor_tools(self) -> list[dict]:
-        """Executor 可见工具 schema：严格按入口白名单（画布工具集）。"""
+        """Executor 可见工具 schema：执行阶段只暴露纯落块工具（入口白名单 ∩ 落块工具集）。
+
+        查数/分析类工具（query_engine/query_sql/list_*）对执行器不可见：
+        add_chart_block 自带取数验证，裸查工具只会诱导 LLM"取数但不建图"。
+        """
         if not self.extra_plannable_tools:
+            return []
+        allowed = set(self.extra_plannable_tools) & _EXECUTOR_TOOL_NAMES
+        if not allowed:
             return []
         return [
             t for t in ToolRegistry.schemas()
             if isinstance(t, dict)
             and isinstance(t.get("function"), dict)
-            and t["function"].get("name") in self.extra_plannable_tools
+            and t["function"].get("name") in allowed
         ]
 
     def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
