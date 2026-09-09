@@ -1,4 +1,4 @@
-﻿"""Agent 评测运行入口。
+"""Agent 评测运行入口。
 
 执行：
     cd backend && python -m tests.agent_evals.run_eval
@@ -75,12 +75,13 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 
-async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108-b721-d8448db678e4", mode: str = "real") -> AttemptTrace:
+async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108-b721-d8448db678e4", mode: str = "real", entry: str = "chat", selected_datasource_id: str | None = None) -> AttemptTrace:
     """运行一次 Agent，返回完整轨迹。
 
     默认使用真实 AIService，通过 --user-id 指定评测账号（数据源归属于该账号）。
     如要离线测试，可 patch 为 mock 实现。
     mode: "real" 单 Agent ReAct, "orchestrator" 多 Agent 编排模式
+    entry: "chat" 对话入口（AgentOrchestrator）、"canvas" 画布入口（CanvasOrchestrator）
     """
     from app.core.database import async_session_factory
     from app.services.ai_service import AIService
@@ -98,6 +99,16 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
     if mode == "orchestrator" and len(user_msg) <= 20:
         user_msg = f"请帮我详细分析以下问题：{user_msg}"
 
+    # 画布入口需要注入画布工具集（含落块+查询工具），否则 CanvasOrchestrator 执行器无工具可用
+    extra_plannable_tools = None
+    if entry == "canvas":
+        from app.services.canvas_tools import CANVAS_TOOL_NAMES
+
+        extra_plannable_tools = CANVAS_TOOL_NAMES | {
+            "list_datasources", "list_fields", "query_sql", "query_engine",
+            "stats_analyzer", "recommend_charts",
+        }
+
     try:
         ai = AIService(LLMClient())
         events: list[dict[str, Any]] = []
@@ -109,6 +120,9 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
                 history=[],
                 db_session=db,
                 initial_phase=initial_phase,
+                entry=entry,
+                extra_plannable_tools=extra_plannable_tools,
+                selected_datasource_id=selected_datasource_id,
             ):
                 events.append(ev)
                 if ev.get("type") == "text":
@@ -500,7 +514,8 @@ async def main_async(args: argparse.Namespace) -> int:
         if args.mode == "mock":
             attempt = await run_agent_mock(q)
         else:
-            attempt = await run_agent(q, user_id=args.user_id, mode=args.mode)
+            entry = "canvas" if q.get("category") == "canvas" and args.entry == "auto" else args.entry
+            attempt = await run_agent(q, user_id=args.user_id, mode=args.mode, entry=entry)
         executor = build_sql_executor(attempt) if args.mode in ("real", "orchestrator") else None
         result = judge_attempt(q, attempt, sql_executor=executor)
         results.append(result)
@@ -575,6 +590,12 @@ def main() -> int:
         "--user-id",
         default="21bee02f-dcb3-4108-b721-d8448db678e4",
         help="real 模式下 Agent 使用的用户 ID（数据源归属于该账号）",
+    )
+    parser.add_argument(
+        "--entry",
+        choices=["chat", "canvas", "auto"],
+        default="auto",
+        help="agent 入口：chat=对话编排、canvas=画布编排、auto=画布题自动走 canvas",
     )
     args = parser.parse_args()
     return asyncio.run(main_async(args))
