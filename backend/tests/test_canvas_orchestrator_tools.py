@@ -104,6 +104,64 @@ def test_canvas_executor_tools_empty_without_extra():
     assert orch._executor_tools() == []
 
 
+# ---------- 全局计划注入（AB 实验开关） ----------
+
+def _overview_fixture():
+    from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+
+    orch = CanvasOrchestrator(MagicMock(spec=LLMClient), MagicMock())
+    state = {"plan": {"steps": [
+        {"step_id": 1, "tool": "add_text_block", "goal": "写报告大标题"},
+        {"step_id": 2, "tool": "add_chart_block", "goal": "按地区销售额建图"},
+        {"step_id": 3, "tool": "add_text_block", "goal": "写结论叙事"},
+    ]}}
+    step = {"step_id": 2, "goal": "按地区销售额建图", "tool": "add_chart_block", "depends_on": [1]}
+    results = {1: '{"ok": true}'}
+    return orch, state, step, results
+
+
+def test_plan_overview_injected_when_enabled(monkeypatch):
+    """开关开启且 plan 存在时，context 注入全局计划（含状态标记与当前步骤）。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_PLAN_INJECTION_ENABLED", True)
+    orch, state, step, results = _overview_fixture()
+    context = orch._build_executor_context(state, step, results)
+    assert "整体计划" in context
+    assert "共 3 步" in context
+    assert "当前执行第 2 步" in context
+    assert "⚡当前" in context
+    assert "✓完成" in context
+    assert "·待办" in context
+    assert "-- 已完成" not in context  # 防误注
+
+
+def test_plan_overview_skipped_when_disabled(monkeypatch):
+    """开关关闭时 context 回到纯单步行为（不含全景图）。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_PLAN_INJECTION_ENABLED", False)
+    orch, state, step, results = _overview_fixture()
+    context = orch._build_executor_context(state, step, results)
+    assert "整体计划" not in context
+
+
+def test_plan_overview_empty_without_plan(monkeypatch):
+    """plan 缺失时即使开关开启也不注入。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_PLAN_INJECTION_ENABLED", True)
+    from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+
+    orch = CanvasOrchestrator(MagicMock(spec=LLMClient), MagicMock())
+    context = orch._build_executor_context(
+        {"plan": None},
+        {"step_id": 1, "goal": "g", "tool": "add_text_block"},
+        {},
+    )
+    assert "整体计划" not in context
+
+
 # ---------- agent_stream：入口参数透传到 Orchestrator ----------
 
 class _FakeOrchestrator:

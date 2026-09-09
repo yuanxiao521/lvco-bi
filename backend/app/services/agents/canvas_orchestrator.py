@@ -322,6 +322,38 @@ class CanvasOrchestrator:
             and t["function"].get("name") in allowed
         ]
 
+    def _build_plan_overview(self, state: dict, step: dict, results: dict) -> str:
+        """构建「全局计划全景图」注入 Executor 上下文（AB 实验开关 AGENT_PLAN_INJECTION_ENABLED）。
+
+        让单步执行 LLM 看到整体骨架：共几步 / 第几步 / 每一步状态（✓完成/⚡当前/·待办），
+        弥补纯单步工单的衔接盲区（如叙事步骤看不到兄弟图表的存在，导致引用不全）。
+        开关关闭或 plan 缺失时返回空串（不注入），保持原单步行为。
+        """
+        from app.config import settings
+
+        if not settings.AGENT_PLAN_INJECTION_ENABLED:
+            return ""
+        plan = state.get("plan") or {}
+        steps = plan.get("steps") or []
+        if not steps:
+            return ""
+        cur_id = step.get("step_id")
+        done_ids = set(results.keys())
+        lines = [f"整体计划（共 {len(steps)} 步，当前执行第 {cur_id} 步；只需完成当前步骤，不要执行其他步骤）："]
+        for s in steps:
+            sid = s.get("step_id")
+            tool = s.get("tool") or s.get("purpose") or "?"
+            goal = str(s.get("goal") or "")[:40]
+            if sid == cur_id:
+                mark = "⚡当前"
+            elif sid in done_ids:
+                mark = "✓完成"
+            else:
+                mark = "·待办"
+            lines.append(f"  {mark} [{sid}] {tool}: {goal}")
+        lines.append("已完成步骤的详细结果见下方「已完成的依赖步骤结果」。")
+        return "\n".join(lines)
+
     def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
         """构建执行 Agent 上下文：用户问题 + 当前步骤 + 依赖结果 + 数据源信息。"""
         parts: list[str] = []
@@ -335,6 +367,9 @@ class CanvasOrchestrator:
             f"当前步骤（step_id={step['step_id']}）：目标：{step.get('goal', '')}；"
             f"建议工具：{step.get('tool') or '（无）'}"
         )
+        overview = self._build_plan_overview(state, step, results)
+        if overview:
+            parts.append(overview)
         prior: list[str] = []
         for dep in (step.get("depends_on") or []):
             r = results.get(dep)

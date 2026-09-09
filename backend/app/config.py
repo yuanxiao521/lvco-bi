@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # 4-6 步查询+图表任务轻松超过 60s（实测固定 60s 常触发模板报告降级），放宽到 180s
     AGENT_ORCHESTRATOR_TIMEOUT: int = 180
 
+    # Executor 上下文是否注入「全局计划」（步骤全景图：共几步/第几步/已完成/待执行）
+    # 开关用于 AB 实验：True 给执行 LLM 补全局视野，False 保持纯单步工单
+    AGENT_PLAN_INJECTION_ENABLED: bool = True
+
     # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
     INSIGHT_ENABLED: bool = True
     INSIGHT_INTERVAL_MINUTES: int = 5
