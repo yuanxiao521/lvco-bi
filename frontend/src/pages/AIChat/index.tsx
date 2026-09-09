@@ -27,6 +27,9 @@ import {
 import type { AISession, AIMessage } from "../../types/api";
 import { listDatasources } from "../../api/datasources";
 import { tokenStore } from "../../api/client";
+// 复用画布助手的 Agent 工作台步骤条：tool_call/tool_result 驱动的工具执行状态展示
+import ActivityFeed from "../FreeCanvas/components/ActivityFeed";
+import type { FeedStep } from "../FreeCanvas/components/ActivityFeed";
 
 /** 防御性兜底：去掉历史消息里残留的 ``` 代码块。流式阶段通常已丢，这里只处理从数据库读出来的旧消息。 */
 function stripCodeBlocks(text: string): string {
@@ -238,6 +241,9 @@ export default function AIChat() {
   const [editingTitle, setEditingTitle] = useState("");
   const [datasourceList, setDatasourceList] = useState<Array<{id: string; name: string}>>([]);
   const [selectedDsId, setSelectedDsId] = useState<string>('');
+  // Agent 工作台步骤时间线（tool_call/tool_result 驱动），与画布助手一致的执行过程展示
+  const [agentSteps, setAgentSteps] = useState<FeedStep[]>([]);
+  const runSeq = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevSessionRef = useRef<string | null>(null);
@@ -404,6 +410,10 @@ export default function AIChat() {
     };
     setMessages((prev) => [...prev, assistantMsg]);
 
+    // 新一轮流式开始：清空上一轮的 Agent 工作台步骤条
+    runSeq.current = 0;
+    setAgentSteps([]);
+
     const token = tokenStore.getAccess();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
     // 使用 ref 避免闭包陈旧，获取最新的 messages
@@ -535,6 +545,40 @@ export default function AIChat() {
                 assistantContent += event.delta;
                 appendVisible(event.delta);
                 break;
+              // 'tool_call': Agent 开始调用某工具 → 在当前运行步骤挂一个工具 chip（running）
+              case 'tool_call': {
+                const stepId = `${runSeq.current}`;
+                setAgentSteps(prev => {
+                  const runIdx = [...prev].reverse().findIndex(s => s.status === "run");
+                  const hasRun = runIdx !== -1;
+                  if (!hasRun) runSeq.current += 1;
+                  const idx = hasRun ? prev.length - 1 - runIdx : prev.length;
+                  const next = prev.slice();
+                  if (!hasRun) {
+                    next.push({ id: `${runSeq.current}`, title: `执行 ${event?.name ?? "工具"}`, status: "run", tools: [] });
+                    return next;
+                  }
+                  next[idx] = { ...next[idx], tools: [...next[idx].tools, { name: event.name, args: event.args, status: "run" }] };
+                  return next;
+                });
+                void stepId;
+                break;
+              }
+              // 'tool_result': 工具执行完成 → 更新对应 chip 状态（ok/err）
+              case 'tool_result': {
+                const isErr = (() => {
+                  try {
+                    const r = event.result ? JSON.parse(event.result) : null;
+                    return !!(r && r.error);
+                  } catch { return false; }
+                })();
+                setAgentSteps(prev => prev.map((s, i) =>
+                  i === prev.length - 1
+                    ? { ...s, tools: s.tools.map((t, j) => j === s.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t) }
+                    : s
+                ));
+                break;
+              }
               case 'query_error':
                 visibleContent += `\n\n> ${event.message}`;
                 break;
@@ -566,6 +610,8 @@ export default function AIChat() {
     } catch {
       // fetch error
     } finally {
+      // 流中断/异常也收尾：不让工作台残留"执行中"状态
+      setAgentSteps(prev => prev.map(s => s.status === "run" ? { ...s, status: "done", tools: s.tools } : s));
       isAgentStreamingRef.current = false;
     }
   };
@@ -959,6 +1005,8 @@ export default function AIChat() {
               );
             })
           )}
+          {/* Agent 工作台：工具执行过程展示（与画布助手一致的步骤时间线） */}
+          {agentSteps.length > 0 && <ActivityFeed steps={agentSteps} />}
           <div ref={messagesEndRef} />
         </div>
 
