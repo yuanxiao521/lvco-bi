@@ -1,4 +1,4 @@
-﻿"""Agent 评测评分逻辑。
+"""Agent 评测评分逻辑。
 
 四个核心指标：
 1. SQL 准确率：执行 expected_sql 与 agent_sql，比较结果集是否一致
@@ -444,6 +444,7 @@ def _normalize_chart_types(types: list[str]) -> list[str]:
         "horizontal_bar": "bar",
         "area": "line",
         "stacked_area": "line",
+        "donut": "pie",  # donut 是空心饼图，占比语义与 pie 等价
     }
     return [alias.get(t, t) for t in types if t]
 

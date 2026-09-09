@@ -725,8 +725,12 @@ export default function FreeCanvas() {
       toast.warning("请先选择数据源");
       return;
     }
-    if (dimensions.length === 0 || measures.length === 0) {
-      toast.warning("请至少添加一个维度和一个度量");
+    if (measures.length === 0) {
+      toast.warning("请至少添加一个度量");
+      return;
+    }
+    if (dimensions.length === 0 && chartType !== "kpi_card") {
+      toast.warning("请至少添加一个维度（KPI 卡片可无维度）");
       return;
     }
     setApplying(true);
@@ -912,11 +916,13 @@ export default function FreeCanvas() {
     }
     const dims = config.dimensions || [];
     const meas = config.measures || [];
-    if (dims.length === 0 || meas.length === 0) return;
+    const ct = (config.chartType || chartType) as ChartType;
+    if (meas.length === 0) return;
+    // KPI 卡片允许零维度（全表聚合单值），其他图表至少一个维度
+    if (dims.length === 0 && ct !== "kpi_card") return;
 
     setDimensions(dims);
     setMeasures(meas as MeasureConfig[]);
-    const ct = (config.chartType || chartType) as ChartType;
     if (config.chartType) setChartType(ct);
     setSelectedBlockIdx(null);
 
@@ -956,11 +962,12 @@ export default function FreeCanvas() {
         const block = action.block || {};
         const dsId = block.datasourceId || selectedDatasourceId;
         if (!dsId) { toast.warning("需要数据源才能生成图表"); return; }
+        const ct = (block.chartType || "bar") as ChartType;
         const dims = block.queryConfig?.dimensions || [];
         const meas = (block.queryConfig?.measures || []) as MeasureConfig[];
-        if (dims.length === 0 || meas.length === 0) return;
-
-        const ct = (block.chartType || "bar") as ChartType;
+        if (meas.length === 0) return;
+        // KPI 卡片允许零维度（全表聚合单值），其他图表至少一个维度
+        if (dims.length === 0 && ct !== "kpi_card") return;
         const queryConfig: ChartQueryConfig = {
           dimensions: dims,
           measures: meas,

@@ -78,6 +78,8 @@ class AddChartBlockTool(BaseTool):
     description = (
         "在分析画布上新增一个图表块。会在后端先用真实数据验证查询可行性并取回数据，"
         "成功后才能被前端渲染。用于批量搭建分析报告。"
+        "注意：展示单个聚合数值（如总销售额、订单总数）用 kpi_card，其 dimensions 可为空数组；"
+        "其他图表类型必须提供至少一个维度。"
     )
 
     def schema(self) -> dict:
@@ -108,10 +110,18 @@ class AddChartBlockTool(BaseTool):
         measures 支持两种形态：{field, agg}（普通度量）或 {metric_id/metric_key, [field], [agg]}
         （引用指标中心的命名指标）。指标度量会被解析为当前口径的表达式，前端据此随口径刷新。
 
+        维度约束：普通图表需要至少一个维度；kpi_card 允许零维度（全表聚合单值），
+        查询引擎对空 dimensions 天然支持（无 GROUP BY）。
+
         查询失败时返回 error（触发 LLM 自纠错）；成功时返回含 rows/columns 的 canvas_action。
         """
-        if not dimensions or not measures:
-            return json.dumps({"error": "add_chart_block 需要至少一个维度和一个度量"}, ensure_ascii=False)
+        if not measures:
+            return json.dumps({"error": "add_chart_block 需要至少一个度量"}, ensure_ascii=False)
+        if not dimensions and chart_type != "kpi_card":
+            return json.dumps({
+                "error": f"add_chart_block 维度为空：{chart_type} 需要至少一个维度字段；"
+                         "如需展示单个聚合数值（如总销售额）请改用 kpi_card（KPI 卡片，无需维度）"
+            }, ensure_ascii=False)
 
         try:
             from app.services.metric_service import resolve_measures

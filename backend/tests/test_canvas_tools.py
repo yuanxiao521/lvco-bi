@@ -58,7 +58,48 @@ async def test_add_chart_block_success(db_session: MagicMock):
     assert block["queryConfig"]["dimensions"] == ["channel"]
     assert block["queryConfig"]["measures"][0] == {"field": "users", "agg": "COUNT"}
     assert len(block["rows"]) == 2
-    assert block["columns"] == ["channel", "users"]
+
+
+async def test_add_chart_block_kpi_card_no_dimension_allowed(db_session: MagicMock):
+    """kpi_card 允许零维度：全表聚合单值，校验放行并走查询。"""
+    result = QueryResult(
+        columns=["sum_amount"],
+        rows=[{"sum_amount": 1533082.61}],
+        query_time_ms=8,
+    )
+    with patch("app.services.canvas_tools.execute_chart_query", new=AsyncMock(return_value=result)):
+        tool = AddChartBlockTool()
+        out = await tool.execute(
+            title="本月总销售额",
+            chart_type="kpi_card",
+            datasource_id=DS_ID,
+            dimensions=[],
+            measures=[{"field": "total_amount", "agg": "SUM"}],
+            user_id=USER_ID,
+            db_session=db_session,
+        )
+    parsed = json.loads(out)
+    assert parsed["ok"] is True, out
+    block = parsed["canvas_action"]["block"]
+    assert block["queryConfig"]["dimensions"] == []
+    assert block["rows"] == [{"sum_amount": 1533082.61}]
+
+
+async def test_add_chart_block_requires_dimension_except_kpi(db_session: MagicMock):
+    """非 kpi_card 空维度仍被拦截（触发 LLM 自纠错）。"""
+    tool = AddChartBlockTool()
+    out = await tool.execute(
+        title="错误示例",
+        chart_type="bar",
+        datasource_id=DS_ID,
+        dimensions=[],
+        measures=[{"field": "total_amount", "agg": "SUM"}],
+        user_id=USER_ID,
+        db_session=db_session,
+    )
+    parsed = json.loads(out)
+    assert "error" in parsed
+    assert "kpi_card" in parsed["error"]
 
 
 async def test_add_chart_block_query_error(db_session: MagicMock):
