@@ -18,6 +18,9 @@ frontend/.venv/
 # ── Python 缓存与构建产物 ─────────────────────────────────────────
 __pycache__/
 *.py[cod]
+
+# ── Agent 评测产物（运行时生成，不入库）─────────────────────────
+backend/tests/agent_evals/ab_output/
 *$py.class
 *.so
 *.egg-info/

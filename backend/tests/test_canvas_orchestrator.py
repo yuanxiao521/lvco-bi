@@ -1,4 +1,4 @@
-﻿"""CanvasOrchestrator 单测：报告骨架规划 → 落块执行 → 总结，严格白名单。
+"""CanvasOrchestrator 单测：报告骨架规划 → 落块执行 → 总结，严格白名单。
 
 覆盖核心差异化：
 - 图结构（plan → execute_steps → finish）
@@ -10,7 +10,7 @@ import json
 from unittest.mock import MagicMock
 
 from app.services.agent_tools import ToolRegistry
-from app.services.agents.canvas_orchestrator import CanvasOrchestrator
+from app.services.agents.canvas_orchestrator import CanvasOrchestrator, _has_canvas_action
 
 
 class MockLLM:
@@ -207,6 +207,86 @@ def test_fallback_plan_structure():
     assert steps[1]["tool"] == "add_chart_block"
     assert steps[2]["tool"] == "add_text_block"
     assert steps[2]["depends_on"] == [2]
+
+
+# ── goal 达成校验（防"无工具调用直接收尾"逃逸） ──
+
+
+def test_has_canvas_action_judge():
+    """达成判据：带 canvas_action 才算完成；纯文本/error/非 JSON 均未达成。"""
+    assert _has_canvas_action('{"ok": true, "canvas_action": {"action": "add_chart_block", "block": {}}}') is True
+    assert _has_canvas_action('{"error": "维度为空"}') is False
+    assert _has_canvas_action('{"text": "我看了下数据"}') is False
+    assert _has_canvas_action("不是 JSON") is False
+
+
+async def test_no_tool_call_text_output_forced_retry(monkeypatch):
+    """LLM 第一轮只输出文本（无工具调用）→ 不收尾，回灌强制落块 → 第二轮成功。
+
+    旧逻辑把纯文本当结果直接结束（2a 逃逸），导致建图步骤不建图也被判成功；
+    新逻辑必须产出 canvas_action 才算完成。
+    """
+    install_tool_registry(monkeypatch, {
+        "add_text_block": _FakeTool("add_text_block", lambda **kw: json.dumps({
+            "ok": True,
+            "canvas_action": {"action": "add_text_block", "block": {"blockType": kw.get("block_type"), "content": kw.get("content")}},
+        }, ensure_ascii=False)),
+    })
+    mock_llm = MockLLM()
+    # 第一轮：偷懒只输出文本；第二轮：正确落块
+    mock_llm.push_text("先总结一下，暂不落块")
+    mock_llm.push_tool_call("add_text_block", {"block_type": "h2", "content": "章节标题"})
+    orch = _make_orch()
+    orch.llm = mock_llm
+
+    results: dict = {}
+    async def emit(ev):
+        pass
+
+    shared = {
+        "emit": emit, "db_session": None, "user_msg": "报告", "history": [],
+        "available_datasources": [], "state_sink": {}, "tool_memo": {}, "tool_memo_locks": {},
+    }
+    state = {"user_id": "u1"}
+
+    await orch._agentic_run_step(_make_step(1, "add_text_block"), results, state, **shared)
+
+    parsed = json.loads(results[1])
+    assert parsed["ok"] is True, results[1]
+    assert parsed["canvas_action"]["action"] == "add_text_block"
+    # 落块成功前没有把"纯文本"当结果
+    assert not results[1].startswith('{"text"')
+
+
+async def test_no_tool_call_twice_skipped(monkeypatch):
+    """连续两轮无工具调用 → 判定 goal 未达成，显式跳过（不当成功）。"""
+    install_tool_registry(monkeypatch, {
+        "add_chart_block": _FakeTool("add_chart_block", lambda **kw: json.dumps({
+            "ok": True,
+            "canvas_action": {"action": "add_chart_block", "block": {"title": kw.get("title")}},
+        }, ensure_ascii=False)),
+    })
+    mock_llm = MockLLM()
+    mock_llm.push_text("第一轮：不好弄")
+    mock_llm.push_text("第二轮：还是不弄")  # 第二轮仍无工具调用 → streak 达到阈值
+    orch = _make_orch()
+    orch.llm = mock_llm
+
+    results: dict = {}
+    async def emit(ev):
+        pass
+
+    shared = {
+        "emit": emit, "db_session": None, "user_msg": "报告", "history": [],
+        "available_datasources": [], "state_sink": {}, "tool_memo": {}, "tool_memo_locks": {},
+    }
+    state = {"user_id": "u1"}
+
+    await orch._agentic_run_step(_make_step(1, "add_chart_block"), results, state, **shared)
+
+    parsed = json.loads(results[1])
+    assert parsed.get("skipped") is True, results[1]
+    assert "goal 未达成" in parsed.get("skipped_reason", "")
 
 
 # ── 收尾节点 ──

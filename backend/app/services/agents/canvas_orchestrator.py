@@ -47,6 +47,29 @@ _EXECUTOR_TOOL_NAMES = frozenset({
     "update_chart_block", "remove_block", "arrange_layout",
 })
 
+# goal 达成校验：连续"无工具调用直接收尾"的最大容忍次数。
+# 画布每个步骤的目标都是落到一个块（文本/图表/改/删/布局），
+# 达成的唯一判据 = 本轮产出了 canvas_action；纯文本收尾 = 未达成。
+_MAX_NO_TOOL_STREAK = 2
+
+
+def _has_canvas_action(result_str: str) -> bool:
+    """判定工具执行结果是否成功产出可落块的 canvas_action（goal 达成判据）。
+
+    画布步骤完成的标准：结果 JSON 中携带 canvas_action（add_text_block /
+    add_chart_block / update_chart_block / remove_block / arrange_layout 都会返回）。
+    纯文本、error、或非 JSON 一律视为未达成。
+    """
+    try:
+        parsed = json.loads(result_str)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("error"):
+        return False
+    return isinstance(parsed.get("canvas_action"), dict)
+
 
 class CanvasOrchestrator:
     """画布编排器：报告骨架规划 → 逐步落块 → 简短总结，流式产出事件。"""
@@ -238,6 +261,7 @@ class CanvasOrchestrator:
         tool_call_count = 0
         fail_counts: dict[str, int] = {}
         consecutive_errors = 0
+        no_tool_streak = 0  # goal 达成校验：连续"无工具调用直接收尾"次数
 
         while tool_call_count < _MAX_TOOL_CALLS_PER_STEP:
             # 1. LLM 决策
@@ -260,10 +284,28 @@ class CanvasOrchestrator:
                     msg.pop("reasoning_content", None)
                 continue
 
-            # 2a. 无工具调用：文本输出即为步骤结果
+            # 2a. 无工具调用：goal 达成校验。画布步骤必须靠工具落块，
+            #     纯文本输出不等于完成 → 回灌强制调用（连续逃逸才跳过错）
             if not tool_calls:
-                results[sid] = json.dumps({"text": "".join(text_parts)}, ensure_ascii=False)
-                return
+                no_tool_streak += 1
+                text_out = "".join(text_parts)
+                if text_out:
+                    messages.append({"role": "assistant", "content": text_out})
+                if no_tool_streak >= _MAX_NO_TOOL_STREAK:
+                    results[sid] = json.dumps({
+                        "skipped": True,
+                        "skipped_reason": f"步骤 {sid} 连续 {no_tool_streak} 轮未调用画布落块工具，goal 未达成，跳过",
+                    }, ensure_ascii=False)
+                    logger.warning("[canvas_orchestrator] 步骤 %s 无工具调用逃逸 %d 次，跳过", sid, no_tool_streak)
+                    return
+                tool_call_count += 1
+                messages.append({
+                    "role": "user",
+                    "content": "步骤未完成：本步骤的目标是把内容落到画布上，但本轮没有调用任何画布工具"
+                               "（add_text_block / add_chart_block / update_chart_block 等）。"
+                               "请立即调用相应工具完成落块，禁止只输出文字后结束步骤。",
+                })
+                continue
 
             # 2b. 并行执行工具（ToolExecutor 统一执行/观测/白名单校验/emit）
             messages.append(build_assistant_message(tool_calls))
@@ -294,13 +336,33 @@ class CanvasOrchestrator:
             if any_fatal:
                 results[sid] = next(pr.result for pr in parallel_results if pr.fatal)
                 return
-            # 4. 全部成功：记录最后结果并结束本步骤（落块动作已 emit canvas_action）
-            results[sid] = parallel_results[-1].result
-            logger.info("[canvas_orchestrator] 步骤 %s 落块成功", sid)
-            return
+            # 4. goal 达成校验：必须产出可落块的 canvas_action 才结束本步骤。
+            #    工具全部"成功"但没落块（理论上执行器白名单只有落块工具，防御性兜底）
+            block_ok = any(
+                _has_canvas_action(pr.result) for pr in parallel_results
+            )
+            if block_ok:
+                results[sid] = parallel_results[-1].result
+                logger.info("[canvas_orchestrator] 步骤 %s 落块成功", sid)
+                return
+            if tool_call_count >= _MAX_TOOL_CALLS_PER_STEP:
+                results[sid] = json.dumps({
+                    "skipped": True,
+                    "skipped_reason": f"步骤 {sid} 工具调用均未产出 canvas_action（goal 未达成），超上限跳过",
+                }, ensure_ascii=False)
+                return
+            messages.append({
+                "role": "user",
+                "content": "本轮工具调用虽已成功，但未在画布上产出任何块（缺少 canvas_action 落块结果）。"
+                           "请继续调用 add_text_block / add_chart_block（或 update_chart_block）完成本步骤的落块目标。",
+            })
 
         if tool_call_count > 0:
-            results[sid] = parallel_results[-1].result
+            # 走到这里说明已超工具调用上限且仍未落块（goal 未达成）——显式跳过，不当成功
+            results[sid] = json.dumps({
+                "skipped": True,
+                "skipped_reason": f"步骤 {sid} 超过工具调用上限且未完成落块（goal 未达成）",
+            }, ensure_ascii=False)
         else:
             results[sid] = json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
 
