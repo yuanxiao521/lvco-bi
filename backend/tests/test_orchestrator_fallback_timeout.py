@@ -1,4 +1,4 @@
-﻿"""编排器 Report 模板化 fallback（Task 1）与超时控制（Task 6）回归测试。
+"""编排器 Report 模板化 fallback（Task 1）与超时控制（Task 6）回归测试。
 
 覆盖：
 - _generate_template_report：纯模板报告（rows 前 5 行摘要 / chart 说明 / 超时状态 / 默认摘要）
@@ -16,6 +16,8 @@ import json
 
 from app.config import settings
 from app.services.agents.agent_orchestrator import AgentOrchestrator
+from app.services.agent_tools import ToolRegistry
+from app.services.agents import planner_agent as _pa
 
 PLAN = {
     "task_summary": "测试任务：查询并可视化销售额",
@@ -71,11 +73,42 @@ class ReportOkLLM:
         yield {"type": "text", "content": "步骤完成"}
 
 
+class _MockTool:
+    """模拟工具：execute 返回固定结果。"""
+
+    def __init__(self, name: str, result: str) -> None:
+        self.name = name
+        self._result = result
+
+    async def execute(self, **kwargs) -> str:
+        return self._result
+
+
+def _install_fake_tools(monkeypatch, tools: dict) -> None:
+    """注入 mock 工具注册表 + 对齐 Executor 白名单（供步骤真实调用工具达成 goal）。"""
+
+    def fake_get(name):
+        return tools.get(name)
+
+    def fake_schemas():
+        return [
+            {"type": "function", "function": {
+                "name": n, "description": f"mock {n}",
+                "parameters": {"type": "object", "properties": {}}}}
+            for n in tools
+        ]
+
+    monkeypatch.setattr(ToolRegistry, "get", staticmethod(fake_get))
+    monkeypatch.setattr(ToolRegistry, "schemas", staticmethod(fake_schemas))
+    monkeypatch.setattr(_pa, "_ORCHESTRATOR_TOOLS_CACHE", frozenset(tools.keys()))
+
+
 class StepTimeoutLLM:
-    """步骤 1 执行 sleep 超过 AGENT_STEP_TIMEOUT；步骤 2 正常；报告正常。"""
+    """步骤 1 执行 sleep 超过 AGENT_STEP_TIMEOUT；步骤 2 调用工具正常达成；报告正常。"""
 
     def __init__(self) -> None:
         self.step2_done = False
+        self._step2_calls = 0
 
     async def complete(self, messages, **kwargs):
         text = " ".join(str(m.get("content") or "") for m in messages)
@@ -87,9 +120,19 @@ class StepTimeoutLLM:
         text = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "user")
         if "step_id=1" in text:
             await asyncio.sleep(1.0)  # 远超测试中调低的步骤超时（0.1s）
+            yield {"type": "text", "content": "步骤1未完成"}
+            return
+        # 步骤 2：首轮真实调用工具（goal 达成判据），次轮文本收尾
+        self.step2_done = True
+        self._step2_calls += 1
+        if self._step2_calls == 1:
+            yield {
+                "type": "tool_call", "name": "query_sql",
+                "arguments": json.dumps({"sql": "select 1"}, ensure_ascii=False),
+                "id": "call_s2",
+            }
         else:
-            self.step2_done = True
-        yield {"type": "text", "content": "步骤2完成"}
+            yield {"type": "text", "content": "步骤2完成"}
 
 
 class SlowStepLLM:
@@ -232,6 +275,12 @@ async def test_execute_task_report_fallback_stream():
 
 async def test_step_timeout_marks_skipped_and_continues(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_STEP_TIMEOUT", 0.1)  # 加速：步骤超时降到 0.1s
+    _install_fake_tools(monkeypatch, {
+        "query_sql": _MockTool("query_sql", json.dumps(
+            {"columns": ["x"], "rows": [["步骤2完成"]]}, ensure_ascii=False)),
+        "render_chart": _MockTool("render_chart", json.dumps(
+            {"chart_type": "bar", "option": {}}, ensure_ascii=False)),
+    })
     ml = StepTimeoutLLM()
     orch = AgentOrchestrator(ml, None)
     events = await _collect_events(orch)

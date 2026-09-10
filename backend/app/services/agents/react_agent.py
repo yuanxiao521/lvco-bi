@@ -300,7 +300,14 @@ class ReactGraphAgent:
         has_error = False
         tool_success_count = 0
         tool_error_count = 0
-        for tc in tool_calls:
+        # React 进度反馈：每个工具一条 progress（index 递增，total=0 表示无骨架序号），
+        # 让前端工作台在 ReAct 路径也有"执行中 → ok/err"的实时反馈（与编排器路径对齐）。
+        for tool_idx, tc in enumerate(tool_calls, start=1):
+            tname = str(tc.get("name") or "工具")
+            await emit({
+                "type": "progress", "index": tool_idx, "total": 0,
+                "title": f"执行 {tname}", "status": "start", "tool": tname,
+            })
             pr = await executor.execute_tool_call(tc)
             executed_tool_names.append(pr.name)
             logger.info(f"[react] tool_call name={pr.name} result_length={len(pr.result)}")
@@ -319,6 +326,11 @@ class ReactGraphAgent:
             elif pr.name == "query_sql":
                 consecutive_query_failures = 0
                 tool_success_count += 1
+            # 汇报该工具执行结果状态
+            await emit({
+                "type": "progress", "index": tool_idx, "total": 0,
+                "title": f"执行 {tname}", "status": "fail" if has_error else "ok", "tool": tname,
+            })
 
             messages.append({
                 "role": "tool",

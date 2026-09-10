@@ -107,6 +107,34 @@ _IDEMPOTENT_TOOLS = frozenset({
 _SUCCESS_CACHED_TOOLS = frozenset({"query_sql"})
 
 
+# goal 达成校验：连续"无工具调用直接收尾"的最大容忍次数（对齐 canvas_orchestrator）。
+# 普通编排步骤的目标是"用工具完成一件事"（查数/取表结构/画图/统计…），
+# 达成的判据 = 本轮真实调用了工具并拿到工具结果；纯文本收尾 = 未达成。
+_MAX_NO_TOOL_STREAK = 2
+
+
+def _has_tool_action(result_str: str) -> bool:
+    """判定步骤结果是否来自真实工具动作（goal 达成判据）。
+
+    工具返回的业务 JSON 视为真实动作；以下占位结果一律视为未达成：
+    - 纯文本收尾占位：`{"text": ...}`（LLM 没调工具只说了话）
+    - 跳过：`{"skipped": ...}`
+    - 错误：`{"error": ...}`
+    非 JSON 同样视为未达成。
+    """
+    try:
+        parsed = json.loads(result_str)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("error") or parsed.get("skipped"):
+        return False
+    if set(parsed.keys()) == {"text"}:
+        return False
+    return True
+
+
 # Task 2 (P0-2)：失败签名 key —— 同一工具 + 相同参数（JSON 规范化哈希）判定为同一失败签名。
 def _make_fail_key(tool_name: str, args: dict) -> str:
     """生成失败签名：`tool_name:sha1(args)[:8]`。"""
@@ -519,6 +547,7 @@ class AgentOrchestrator:
         consecutive_errors = 0  # 连续错误计数
         # Task 2 (P0-2)：同一步骤内按失败签名（工具+参数哈希）记录连续失败次数。
         fail_counts: dict[str, int] = {}
+        no_tool_streak = 0  # goal 达成校验：连续"无工具调用直接收尾"次数
 
         # P1-9 全局 LLM 调用计数器：每次 LLM 调用前检查并递增
         counter = shared.get("llm_call_counter")
@@ -571,10 +600,41 @@ class AgentOrchestrator:
                 f"  tool_calls: {json.dumps([{'name': tc.get('name', ''), 'args_preview': str(tc.get('arguments', '{}'))[:200]} for tc in tool_calls], ensure_ascii=False)[:500]}"
             )
 
-            # 2a. 无工具调用：文本输出即为步骤结果，结束本步骤
+            # 2a. 无工具调用：goal 达成校验。本步骤目标是用工具完成一件事，
+            #     纯文本收尾 ≠ 完成 → 回灌强制调用工具（连续逃逸才跳过错）
             if not tool_calls:
                 text_out = "".join(text_parts)
+                # goal 已达成（本步骤此前已有成功工具动作）→ 纯文本收尾视为正常结束，
+                # 保留工具结果，不把文字摘要当成步骤结果（对齐 canvas_orchestrator 的
+                # "落块即 return"语义，避免误判为逃逸）。
+                if last_result and _has_tool_action(last_result):
+                    results[sid] = last_result
+                    logger.info(f"[orchestrator] 步骤 {sid} 已有工具动作，文本收尾正常结束")
+                    self._record_step_trace(shared.get("trace"), sid, "text", tool_call_count + 1, False)
+                    return
+                no_tool_streak += 1
                 results[sid] = json.dumps({"text": text_out}, ensure_ascii=False)
+                # 真实工具动作才算达成；纯文本占位未达成 → 重试/跳过
+                if not _has_tool_action(results[sid]):
+                    if no_tool_streak >= _MAX_NO_TOOL_STREAK:
+                        results[sid] = json.dumps({
+                            "skipped": True,
+                            "skipped_reason": f"步骤 {sid} 连续 {no_tool_streak} 轮未调用任何工具，goal 未达成，跳过",
+                        }, ensure_ascii=False)
+                        await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
+                        logger.warning(f"[orchestrator] 步骤 {sid} 无工具调用逃逸 {no_tool_streak} 次，跳过")
+                        self._record_step_trace(shared.get("trace"), sid, "no_tool", tool_call_count, True)
+                        return
+                    if text_out.strip():
+                        messages.append({"role": "assistant", "content": text_out})
+                    tool_call_count += 1
+                    messages.append({
+                        "role": "user",
+                        "content": "步骤未完成：本步骤的目标是调用工具完成一件事，但本轮没有调用任何工具。"
+                                   "请立即调用合适的工具（如 query_engine / describe_table / stats_analyzer / "
+                                   "render_chart 等）完成本步骤，禁止只输出文字后结束步骤。",
+                    })
+                    continue
                 if text_out.strip():
                     await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
                 logger.info(f"[orchestrator] 步骤 {sid} 文本输出 len={len(text_out)}")
@@ -630,6 +690,7 @@ class AgentOrchestrator:
                 self._record_step_trace(shared.get("trace"), sid, pr.name, tool_call_count + i + 1, _is_error or _is_fatal)
 
             tool_call_count += len(tool_calls)
+            no_tool_streak = 0  # 已发生工具动作 → 逃逸计数归零（"连续"语义）
             last_result = parallel_results[-1].result if parallel_results else ""
             consecutive_errors = 0
 

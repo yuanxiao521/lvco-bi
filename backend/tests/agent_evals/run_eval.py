@@ -82,7 +82,11 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
     如要离线测试，可 patch 为 mock 实现。
     mode: "real" 单 Agent ReAct, "orchestrator" 多 Agent 编排模式
     entry: "chat" 对话入口（AgentOrchestrator）、"canvas" 画布入口（CanvasOrchestrator）
+
+    当 `settings.LEAD_AGENT_ENABLED=True` 时，改走主导 Agent（LeadAgent）统一入口，
+    与 `api/v1/ai.py` 的接线保持一致（构造 LeadContext + extra_plannable_tools）。
     """
+    from app.config import settings
     from app.core.database import async_session_factory
     from app.services.ai_service import AIService
     from app.services.llm_client import LLMClient
@@ -109,28 +113,49 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
             "stats_analyzer", "recommend_charts",
         }
 
+    def _track(events: list[dict[str, Any]], ev: dict[str, Any]) -> None:
+        events.append(ev)
+        if ev.get("type") == "text":
+            attempt.final_response += ev.get("content", "")
+        attempt.iteration_count = max(
+            attempt.iteration_count,
+            sum(1 for e in events if e.get("type") == "tool_call"),
+        )
+
     try:
-        ai = AIService(LLMClient())
         events: list[dict[str, Any]] = []
         # db_session 必须真实：list_datasources / query_sql 都要查库
         async with async_session_factory() as db:
-            async for ev in ai.agent_stream(
-                user_id=user_id,
-                user_msg=user_msg,
-                history=[],
-                db_session=db,
-                initial_phase=initial_phase,
-                entry=entry,
-                extra_plannable_tools=extra_plannable_tools,
-                selected_datasource_id=selected_datasource_id,
-            ):
-                events.append(ev)
-                if ev.get("type") == "text":
-                    attempt.final_response += ev.get("content", "")
-                attempt.iteration_count = max(
-                    attempt.iteration_count,
-                    sum(1 for e in events if e.get("type") == "tool_call"),
+            if settings.LEAD_AGENT_ENABLED:
+                from app.services.agents.lead import LeadAgent, LeadContext
+                from app.services.observability import get_observer
+
+                ctx = LeadContext(
+                    user_id=user_id,
+                    session_id=f"eval-{question['id']}",
+                    entry=entry,
+                    datasource_id=selected_datasource_id,
                 )
+                agent = LeadAgent(
+                    llm=LLMClient(),
+                    observer=get_observer(),
+                    extra_plannable_tools=extra_plannable_tools,
+                )
+                async for ev in agent.stream(user_msg, ctx=ctx, db_session=db):
+                    _track(events, ev)
+            else:
+                ai = AIService(LLMClient())
+                async for ev in ai.agent_stream(
+                    user_id=user_id,
+                    user_msg=user_msg,
+                    history=[],
+                    db_session=db,
+                    initial_phase=initial_phase,
+                    entry=entry,
+                    extra_plannable_tools=extra_plannable_tools,
+                    selected_datasource_id=selected_datasource_id,
+                ):
+                    _track(events, ev)
         attempt.events = events
     except Exception as e:
         attempt.error = str(e)

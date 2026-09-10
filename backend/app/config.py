@@ -82,6 +82,22 @@ class Settings(BaseSettings):
     # 开关用于 AB 实验：True 给执行 LLM 补全局视野，False 保持纯单步工单
     AGENT_PLAN_INJECTION_ENABLED: bool = True
 
+    # 主导 Agent（LeadAgent）Feature Flag
+    # True: 两个入口（/chat/stream、/canvas/chat）先经 LeadAgent 做意图识别 → 决策 → 调度，
+    #       编排器/ReAct 降级为「被调用工具」，不再直接对用户说话
+    # False: 保持旧双路径（路由分类器 → simple 走 ReAct / complex 走 AgentOrchestrator）
+    LEAD_AGENT_ENABLED: bool = False
+    # 意图识别超时（秒）：超时降级为规则意图，不阻塞主链路
+    LEAD_INTENT_TIMEOUT: float = 8.0
+    # 决策超时（秒）：超时降级为确定性决策（按意图直接映射动作）
+    LEAD_DECISION_TIMEOUT: float = 10.0
+    # 注入 LeadContext 的最近轮次上限（短期记忆窗口）
+    LEAD_MAX_TURNS_IN_CTX: int = 20
+    # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
+    LEAD_PROGRESS_VERBOSE: bool = False
+    # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
+    LEAD_MAX_SUPERVISOR_ROUNDS: int = 4
+
     # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
     INSIGHT_ENABLED: bool = True
     INSIGHT_INTERVAL_MINUTES: int = 5
