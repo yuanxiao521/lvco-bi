@@ -167,7 +167,8 @@ h1, h2 { color: #111; }
 
 class CanvasCreateBody(CamelModel):
     title: str = Field(..., max_length=200)
-    datasource_id: UUID
+    # 新建空白画布时允许未选数据源（datasource_id 为空）
+    datasource_id: UUID | None = None
     table_name: str | None = None
 
 

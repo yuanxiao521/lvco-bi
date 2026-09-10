@@ -11,15 +11,14 @@ import {
   X,
   Loader2,
   CheckCircle2,
-  History,
   Check,
-  Trash2,
 } from "lucide-react";
-// 导入子组件：字段面板、画布块渲染、配置面板、AI 助手
+// 导入子组件：字段面板、画布块渲染、配置面板、AI 助手、画布列表侧边栏
 import FieldPanel from "../../components/blocks/FieldPanel";
 import CanvasBlocks from "../../components/blocks/CanvasBlocks";
 import ConfigPanel from "../../components/blocks/ConfigPanel";
 import AIAssistant from "./components/AIAssistant";
+import CanvasListSidebar from "./components/CanvasListSidebar";
 // 导入画布相关 API
 import {
   executeChartQuery,
@@ -30,7 +29,6 @@ import {
   saveCanvasAsReport,
   exportCanvasPdf,
   getCanvas,
-  listCanvases,
   deleteCanvas,
 } from "../../api/canvases";
 // 导入仪表盘相关 API
@@ -71,25 +69,6 @@ const DEFAULT_BLOCKS: CanvasBlock[] = [
 
 // localStorage 存储键名：画布草稿数据
 const CANVAS_DRAFT_KEY = "lvco:canvas:draft:v1";
-// localStorage 存储键名：已隐藏（软删除）的画布 ID 列表
-const HIDDEN_CANVAS_KEY = "lvco:canvas:hidden:v1";
-
-// 从 localStorage 读取已隐藏的画布 ID 集合
-function getHiddenCanvasIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(HIDDEN_CANVAS_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-// 将画布 ID 加入隐藏列表（避免在"最近画布"中重复出现）
-function hideCanvasId(id: string) {
-  const set = getHiddenCanvasIds();
-  set.add(id);
-  localStorage.setItem(HIDDEN_CANVAS_KEY, JSON.stringify([...set]));
-}
 
 // 画布草稿的数据结构，用于 localStorage 持久化
 interface CanvasDraft {
@@ -254,12 +233,8 @@ export default function FreeCanvas() {
   // 是否正在编辑标题
   const [editingTitle, setEditingTitle] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  // 最近画布列表
-  const [recentCanvases, setRecentCanvases] = useState<Array<{ id: string; title: string; updatedAt: string | null }>>([]);
-  // 已隐藏（软删除）的画布 ID 集合
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(getHiddenCanvasIds);
-  // 是否显示最近画布下拉面板
-  const [showRecentCanvases, setShowRecentCanvases] = useState(false);
+  // 侧边栏列表外部刷新信号：header 删除当前画布后自增
+  const [listRefreshTick, setListRefreshTick] = useState(0);
 
   // 字段面板和配置面板的显示/折叠状态
   const [showFields, setShowFields] = useState(false);
@@ -1372,7 +1347,114 @@ export default function FreeCanvas() {
     if (hasRemote) {
       toast.success("画布已移入回收站");
     }
+    setListRefreshTick((t) => t + 1);
   };
+
+  // 打开指定画布继续编辑：加载其 blocks 与图表配置，并绑定 canvasId（对该画布 autosave）
+  const openCanvasById = useCallback(async (id: string) => {
+    try {
+      const source = await getCanvas(id);
+      const sourceBlocks: CanvasBlock[] = Array.isArray(source.blocks)
+        ? (source.blocks as CanvasBlock[])
+        : [];
+      // 从后端保存的 blocks 中提取 _chartConfig / _chartResult，恢复图表状态
+      const extractedConfigs: Record<string, ChartQueryConfig> = {};
+      const extractedResults: Record<string, QueryResult> = {};
+      const cleaned = sourceBlocks.map((b) => {
+        if (b.type === "chart") {
+          const raw = b as Record<string, unknown>;
+          const blockId = raw.blockId as string;
+          if (blockId && raw._chartConfig) {
+            extractedConfigs[blockId] = raw._chartConfig as ChartQueryConfig;
+          }
+          if (blockId && raw._chartResult) {
+            extractedResults[blockId] = raw._chartResult as QueryResult;
+          }
+          const { _chartConfig, _chartResult, ...rest } = raw;
+          return rest as CanvasBlock;
+        }
+        return b;
+      });
+      setBlocks(cleaned);
+      setChartConfigs(extractedConfigs);
+      setChartResults(extractedResults);
+      setSelectedDatasourceId(source.datasourceId ?? null);
+      // 编辑原画布：canvasId 绑到该画布，后续 autosave 更新它而非新建
+      setCanvasId(source.id);
+      setCanvasTitle(source.title || "分析画布");
+      setEditingTitle(false);
+      setDimensions([]);
+      setMeasures([]);
+      setFilters([]);
+      setChartType("bar");
+      setRenderer("echarts");
+      setHydrated(true);
+      // 清掉本地草稿，避免下一次挂载用旧草稿覆盖刚打开的画布
+      try {
+        window.localStorage.removeItem(CANVAS_DRAFT_KEY);
+      } catch {
+        // ignore
+      }
+      toast.success(`已打开「${source.title || "未命名画布"}」`);
+    } catch {
+      toast.error("加载画布失败，画布可能已删除");
+    }
+  }, []);
+
+  // 新建空白画布：真实创建画布记录（可无数据源），绑定 canvasId 并刷新侧边栏列表
+  const handleNewCanvas = useCallback(async () => {
+    try {
+      const created = await createCanvas({
+        title: "分析画布",
+        datasourceId: selectedDatasourceId ?? null,
+      });
+      setCanvasId(created.id);
+      setBlocks([]);
+      setChartConfigs({});
+      setChartResults({});
+      setDimensions([]);
+      setMeasures([]);
+      setFilters([]);
+      setChartType("bar");
+      setRenderer("echarts");
+      setCanvasTitle(created.title || "分析画布");
+      setEditingTitle(false);
+      setHydrated(true);
+      try {
+        window.localStorage.removeItem(CANVAS_DRAFT_KEY);
+      } catch {
+        // ignore
+      }
+      // 通知侧边栏刷新列表，让新画布立刻出现在「我的画布」中
+      setListRefreshTick((t) => t + 1);
+      toast.success("已新建画布");
+    } catch {
+      toast.error("新建画布失败");
+    }
+  }, [selectedDatasourceId]);
+
+  // 侧边栏删除画布成功：若删的是当前正在编辑的画布，同步清空工作区
+  const handleCanvasDeleted = useCallback((id: string) => {
+    if (id === canvasId) {
+      setBlocks([]);
+      setChartConfigs({});
+      setChartResults({});
+      setDimensions([]);
+      setMeasures([]);
+      setFilters([]);
+      setChartType("bar");
+      setRenderer("echarts");
+      setCanvasId(null);
+      setCanvasTitle("分析画布");
+      setEditingTitle(false);
+      try {
+        window.localStorage.removeItem(CANVAS_DRAFT_KEY);
+      } catch {
+        // ignore
+      }
+      toast.info("当前画布已移入回收站");
+    }
+  }, [canvasId]);
 
   // 工具栏按钮配置：标题块、文本块、图片块、图表块
   const toolbarButtons: Array<{
@@ -1502,114 +1584,6 @@ export default function FreeCanvas() {
               />
             </>
           )}
-
-          {/* 最近画布下拉面板 */}
-          <div className="relative ml-2">
-            <button
-              onClick={async () => {
-                setShowRecentCanvases(!showRecentCanvases);
-                if (!showRecentCanvases) {
-                  try {
-                    const res = await listCanvases({ page: 1, pageSize: 10 });
-                    setRecentCanvases((res.items ?? []).map(c => ({
-                      id: c.id,
-                      title: c.title,
-                      updatedAt: c.updatedAt ?? null,
-                    })));
-                  } catch {}
-                }
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-[6px] text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="最近画布"
-            >
-              <History className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">最近</span>
-            </button>
-            {showRecentCanvases && (
-              <div className="absolute top-full left-0 mt-1 w-[240px] bg-white border border-border-light rounded-[8px] shadow-lg z-50 max-h-[280px] overflow-y-auto">
-                <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground/70 border-b border-border-light flex items-center justify-between">
-                  <span>最近画布</span>
-                  <button
-                    onClick={async () => {
-                      // 把当前可见的画布（除当前打开的）全部软删除到回收站，
-                      // 这样下次打开"最近"时它们就不会再出现了
-                      const toDelete = recentCanvases.filter(c => !hiddenIds.has(c.id) && c.id !== canvasId);
-                      for (const c of toDelete) {
-                        try {
-                          await deleteCanvas(c.id);
-                          hideCanvasId(c.id);
-                        } catch {
-                          // 单个失败不阻塞其他
-                        }
-                      }
-                      setHiddenIds(new Set(getHiddenCanvasIds()));
-                      setRecentCanvases([]);
-                    }}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground hover:text-danger hover:bg-danger-light transition-colors"
-                    title="清空历史（画布将移入回收站）"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    清空
-                  </button>
-                </div>
-                {/* 已隐藏的画布不显示，过滤后的列表 */}
-                {(() => {
-                  const filtered = recentCanvases.filter(c => !hiddenIds.has(c.id));
-                  if (filtered.length === 0) {
-                    return (
-                      <div className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                        暂无最近画布
-                      </div>
-                    );
-                  }
-                  return filtered.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`flex items-center group/item hover:bg-muted transition-colors ${
-                        c.id === canvasId ? 'bg-primary-light/30' : ''
-                      }`}
-                    >
-                      <button
-                        onClick={() => {
-                          setShowRecentCanvases(false);
-                          window.location.href = `/?template=${encodeURIComponent(c.id)}`;
-                        }}
-                        className="flex-1 text-left px-3 py-2 text-[12px] flex items-center justify-between min-w-0"
-                      >
-                        <span className={`truncate ${c.id === canvasId ? 'text-primary' : 'text-foreground'}`}>
-                          {c.title}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground ml-2 flex-shrink-0">
-                          {c.updatedAt ? new Date(c.updatedAt).toLocaleDateString('zh-CN') : ''}
-                        </span>
-                      </button>
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          // 软删除画布到回收站，并在隐藏列表中标记
-                          try {
-                            await deleteCanvas(c.id);
-                          } catch {
-                            // 即使删除失败也要本地隐藏，避免重复显示
-                          }
-                          hideCanvasId(c.id);
-                          setHiddenIds(prev => {
-                            const next = new Set(prev);
-                            next.add(c.id);
-                            return next;
-                          });
-                        }}
-                        className="px-2 py-2 text-muted-foreground hover:text-danger opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0"
-                        title="从列表中移除"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ));
-                })()}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* 数据源绑定状态提示 */}
@@ -1664,8 +1638,16 @@ export default function FreeCanvas() {
         </div>
       </header>
 
-      {/* —— 主体区域：左栏字段面板 + 中间画布 + 右栏配置面板 —— */}
+      {/* —— 主体区域：画布列表 + 左栏字段面板 + 中间画布 + 右栏配置面板 —— */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        {/* 最左侧：我的画布列表（完整管理：新建/切换/重命名/删除/搜索） */}
+        <CanvasListSidebar
+          currentCanvasId={canvasId}
+          onOpenCanvas={openCanvasById}
+          onNewCanvas={handleNewCanvas}
+          onCanvasDeleted={handleCanvasDeleted}
+          refreshTick={listRefreshTick}
+        />
         {/* 左侧：数据源与字段面板 */}
         <div className={`${showFields ? 'block' : 'hidden'} md:block`}>
           <FieldPanel
@@ -1861,6 +1843,7 @@ export default function FreeCanvas() {
 
       {/* —— 底部悬浮 AI 助手 —— */}
       <AIAssistant
+        canvasId={canvasId}
         datasourceId={selectedDatasourceId}
         fieldMeta={fieldMeta}
         canvasBlocks={blocks}
@@ -1871,6 +1854,7 @@ export default function FreeCanvas() {
         onApplyChartConfig={handleAIChatConfig}
         onCanvasAction={handleCanvasAction}
         onStreamingChange={setAiStreaming}
+        onEnsureCanvas={ensureCanvas}
       />
 
       {/* —— 保存到仪表盘弹窗 —— */}

@@ -238,6 +238,8 @@ class AISessionResponse(CamelModel):
     id: UUID
     user_id: UUID
     model: str
+    entry: str
+    canvas_id: UUID | None
     title: str | None
     created_at: datetime
 
@@ -309,7 +311,8 @@ class CanvasChatRequest(CamelModel):
     session_id: str | None = None
     message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
     canvas_context: dict | None = None  # blocks, current config, etc.
-    canvas_id: str | None = None  # 画布 ID；供前端落块后保存定位（可选）
+    canvas_id: str | None = None  # 画布 ID；用于会话按画布隔离（可为空 = 未保存草稿）
+    new_session: bool | None = None  # 强制新建会话（忽略该画布最近会话），供"新对话"使用
 
 
 class DataChatRequest(CamelModel):

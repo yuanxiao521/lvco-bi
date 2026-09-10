@@ -94,7 +94,8 @@ export interface Canvas {
 
 export interface CanvasCreatePayload {
   title: string;
-  datasourceId: string;
+  // 新建空白画布时可为空（未选数据源）
+  datasourceId: string | null;
   tableName?: string | null;
 }
 
