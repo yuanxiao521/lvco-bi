@@ -16,20 +16,12 @@ import {
   Pencil,
 } from "lucide-react";
 import ChartCard from "./components/ChartCard";
-import { useSSE } from "../../hooks/useSSE";
-import {
-  listSessions,
-  createSession,
-  listMessages,
-  deleteSession,
-  updateSession,
-} from "../../api/ai";
-import type { AISession, AIMessage } from "../../types/api";
+import { useAIChatStore } from "../../stores/aiChatStore";
+import type { StreamingChart } from "../../stores/aiChatStore";
+import { createSession, deleteSession, updateSession } from "../../api/ai";
 import { listDatasources } from "../../api/datasources";
-import { tokenStore } from "../../api/client";
 // 复用画布助手的 Agent 工作台步骤条：tool_call/tool_result 驱动的工具执行状态展示
 import ActivityFeed from "../FreeCanvas/components/ActivityFeed";
-import type { FeedStep } from "../FreeCanvas/components/ActivityFeed";
 
 /** 防御性兜底：去掉历史消息里残留的 ``` 代码块。流式阶段通常已丢，这里只处理从数据库读出来的旧消息。 */
 function stripCodeBlocks(text: string): string {
@@ -229,11 +221,18 @@ function relativeTime(dateStr: string): string {
 }
 
 export default function AIChat() {
-  const [sessions, setSessions] = useState<AISession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<AIMessage[]>([]);
+  // 全局 store：会话/消息/工作台/流式状态跨路由保活（切走再切回不丢失）
+  const sessions = useAIChatStore((s) => s.sessions);
+  const activeSessionId = useAIChatStore((s) => s.activeSessionId);
+  const messages = useAIChatStore((s) => s.messages);
+  const agentSteps = useAIChatStore((s) => s.agentSteps);
+  const agentMeta = useAIChatStore((s) => s.agentMeta);
+  const isStreaming = useAIChatStore((s) => s.isStreaming);
+  const aiNotConfigured = useAIChatStore((s) => s.aiNotConfigured);
+  const setSessions = useAIChatStore((s) => s.setSessions);
+  const setActiveSession = useAIChatStore((s) => s.setActiveSession);
+
   const [inputValue, setInputValue] = useState("");
-  const [aiNotConfigured, setAiNotConfigured] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -241,29 +240,13 @@ export default function AIChat() {
   const [editingTitle, setEditingTitle] = useState("");
   const [datasourceList, setDatasourceList] = useState<Array<{id: string; name: string}>>([]);
   const [selectedDsId, setSelectedDsId] = useState<string>('');
-  // Agent 工作台步骤时间线（tool_call/tool_result 驱动），与画布助手一致的执行过程展示
-  const [agentSteps, setAgentSteps] = useState<FeedStep[]>([]);
-  const runSeq = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const prevSessionRef = useRef<string | null>(null);
-  const isAgentStreamingRef = useRef(false); // P1: 防并发
-  const selectedDsIdRef = useRef(selectedDsId); // P5: 防闭包陈旧
-  const messagesRef = useRef<AIMessage[]>([]); // 修复: streamDataChat 闭包陈旧导致新会话发送失败
-
-  // Agent streaming state
-  interface StreamingChart {
-    chart_type: string;
-    option: Record<string, unknown>;
-  }
-
-  const { sendMessage, isStreaming } = useSSE();
 
   const fetchSessions = useCallback(async () => {
     try {
       setSessionsLoading(true);
-      const list = await listSessions();
-      setSessions(list);
+      await useAIChatStore.getState().refreshSessions();
     } catch {
       // silently fail
     } finally {
@@ -274,8 +257,7 @@ export default function AIChat() {
   const fetchMessages = useCallback(async (sid: string) => {
     try {
       setMessagesLoading(true);
-      const msgs = await listMessages(sid);
-      setMessages(msgs);
+      await useAIChatStore.getState().loadMessages(sid);
     } catch {
       // silently fail
     } finally {
@@ -293,18 +275,10 @@ export default function AIChat() {
     }).catch(() => {});
   }, []);
 
-  // P5: 保持 ref 与 state 同步
-  useEffect(() => { selectedDsIdRef.current = selectedDsId; }, [selectedDsId]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]); // 修复闭包陈旧
-
+  // 切换会话：加载该会话历史（store 内过滤"未完成"的空 assistant 占位行）
   useEffect(() => {
     if (activeSessionId) {
-      if (prevSessionRef.current !== activeSessionId) {
-        fetchMessages(activeSessionId);
-        prevSessionRef.current = activeSessionId;
-      }
-    } else {
-      prevSessionRef.current = null;
+      fetchMessages(activeSessionId);
     }
   }, [activeSessionId, fetchMessages]);
 
@@ -325,9 +299,9 @@ export default function AIChat() {
   const handleNewSession = async () => {
     try {
       const session = await createSession("新对话");
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(session.id);
-      setMessages([]);
+      useAIChatStore.getState().setActiveSession(session.id);
+      useAIChatStore.getState().setSessions([session, ...sessions]);
+      useAIChatStore.setState({ messages: [] });
     } catch {
       // silently fail
     }
@@ -337,10 +311,10 @@ export default function AIChat() {
     e.stopPropagation();
     try {
       await deleteSession(id);
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+      setSessions(sessions.filter((s) => s.id !== id));
       if (activeSessionId === id) {
-        setActiveSessionId(null);
-        setMessages([]);
+        setActiveSession(null);
+        useAIChatStore.setState({ messages: [] });
       }
     } catch {
       // silently fail
@@ -357,7 +331,7 @@ export default function AIChat() {
     if (newTitle && newTitle !== sessions.find(s => s.id === id)?.title) {
       try {
         await updateSession(id, newTitle);
-        setSessions(prev => prev.map(s => s.id === id ? { ...s, title: newTitle } : s));
+        setSessions(sessions.map(s => s.id === id ? { ...s, title: newTitle } : s));
       } catch { /* ignore */ }
     }
     setEditingSessionId(null);
@@ -373,343 +347,19 @@ export default function AIChat() {
     textareaRef.current?.focus();
   };
 
-  /** Reusable SSE streaming for data chat */
-  const streamDataChat = async (
-    sid: string | null,
-    content: string,
-  ) => {
-    // P1: 防并发 - 如果已有流在执行中，直接返回
-    if (isAgentStreamingRef.current) return;
-    isAgentStreamingRef.current = true;
-
-    // P5: 使用 ref 避免闭包陈旧
-    const currentDsId = selectedDsIdRef.current;
-
-    const userMsg: AIMessage = {
-      id: `temp-${Date.now()}`,
-      sessionId: sid || '',
-      role: "user",
-      content,
-      chartData: null,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-
-    let assistantContent = "";
-    let visibleContent = "";
-    let codeFenceState: "open" | "closed" = "closed";
-    let codeFenceBuffer = "";
-    const assistantId = `streaming-${Date.now()}`;
-    const assistantMsg: AIMessage = {
-      id: assistantId,
-      sessionId: sid || '',
-      role: "assistant",
-      content: "",
-      chartData: null,
-      createdAt: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, assistantMsg]);
-
-    // 新一轮流式开始：清空上一轮的 Agent 工作台步骤条
-    runSeq.current = 0;
-    setAgentSteps([]);
-
-    const token = tokenStore.getAccess();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
-    // 使用 ref 避免闭包陈旧，获取最新的 messages
-    const historySnapshot = messagesRef.current.slice(-10).map(m => ({ role: m.role, content: m.content }));
-    const history = [...historySnapshot, { role: userMsg.role, content: userMsg.content }];
-
-    /** 把一段 delta 累积进 visibleContent，自动识别 ``` 代码块并整块丢弃。 */
-    const appendVisible = (delta: string): string => {
-      let next = "";
-      for (let i = 0; i < delta.length; i++) {
-        const ch = delta[i];
-        if (codeFenceState === "open") {
-          if (ch === "\n") {
-            codeFenceBuffer += ch;
-          } else {
-            codeFenceBuffer += ch;
-          }
-          // 检测闭合
-          const last3 = codeFenceBuffer.slice(-3);
-          if (last3.includes("```")) {
-            codeFenceState = "closed";
-            codeFenceBuffer = "";
-            // 代码块闭合后强制加一个段落分隔，避免前后两段文本粘在一起
-            if (!next.endsWith("\n\n")) {
-              if (next.endsWith("\n")) {
-                next += "\n";
-              } else {
-                next += "\n\n";
-              }
-            }
-          }
-          continue;
-        }
-        // 在 closed 状态：识别开 fence
-        if (ch === "`") {
-          // 收集一段看是否为 ```
-          codeFenceBuffer += ch;
-          if (codeFenceBuffer.length >= 3 && codeFenceBuffer.endsWith("```")) {
-            // 进入 open 前确保前面有段落分隔
-            if (next.length > 0 && !next.endsWith("\n\n") && !next.endsWith("\n")) {
-              next += "\n\n";
-            }
-            codeFenceState = "open";
-            codeFenceBuffer = "";
-            continue;
-          }
-          // 还没到 3 个 backtick：暂存到 buffer，不输出
-          if (codeFenceBuffer.length >= 3) {
-            // 超过 3 个：视为普通文本冲刷 buffer
-            next += codeFenceBuffer;
-            codeFenceBuffer = "";
-          }
-          continue;
-        }
-        // 普通字符：先 flush buffer
-        if (codeFenceBuffer.length > 0) {
-          next += codeFenceBuffer;
-          codeFenceBuffer = "";
-        }
-        next += ch;
-      }
-      // 末尾 buffer 残留（可能是不闭合的 ``` 起始）：暂存不输出，避免后续拼到 closing 时混淆
-      if (codeFenceState === "closed" && codeFenceBuffer.length > 0) {
-        next += codeFenceBuffer;
-        codeFenceBuffer = "";
-      }
-      visibleContent += next;
-      return next;
-    };
-
-    try {
-      const response = await fetch(`${baseUrl}/ai/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          datasource_id: currentDsId || null,
-          session_id: sid,
-          message: content,
-          history,
-        }),
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        const msg = err?.detail?.message || err?.error?.message || `HTTP ${response.status}`;
-        if (msg.includes("AI_NOT_CONFIGURED") || msg.includes("OPENAI_API_KEY")) {
-          setAiNotConfigured(true);
-        }
-        setMessages((prev) =>
-          prev.map((m) => m.id === assistantId ? { ...m, content: `[错误] ${msg}` } : m)
-        );
-        return;
-      }
-
-      const reader = response.body?.getReader();
-      if (!reader) return;
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const event = JSON.parse(jsonStr);
-            switch (event.type) {
-              case 'session_created':
-                if (event.session?.id) {
-                  const backendSid = event.session.id;
-                  if (sid !== backendSid) {
-                    sid = backendSid;
-                    setActiveSessionId(backendSid);
-                    setSessions((prev) => {
-                      const exists = prev.some(s => s.id === backendSid);
-                      return exists ? prev : [event.session, ...prev];
-                    });
-                  }
-                }
-                break;
-              case 'message':
-                assistantContent += event.delta;
-                appendVisible(event.delta);
-                break;
-              // 'tool_call': Agent 开始调用某工具 → 在当前运行步骤挂一个工具 chip（running）
-              case 'tool_call': {
-                const stepId = `${runSeq.current}`;
-                setAgentSteps(prev => {
-                  const runIdx = [...prev].reverse().findIndex(s => s.status === "run");
-                  const hasRun = runIdx !== -1;
-                  if (!hasRun) runSeq.current += 1;
-                  const idx = hasRun ? prev.length - 1 - runIdx : prev.length;
-                  const next = prev.slice();
-                  if (!hasRun) {
-                    next.push({ id: `${runSeq.current}`, title: `执行 ${event?.name ?? "工具"}`, status: "run", tools: [] });
-                    return next;
-                  }
-                  next[idx] = { ...next[idx], tools: [...next[idx].tools, { name: event.name, args: event.args, status: "run" }] };
-                  return next;
-                });
-                void stepId;
-                break;
-              }
-              // 'tool_result': 工具执行完成 → 更新对应 chip 状态（ok/err）
-              case 'tool_result': {
-                const isErr = (() => {
-                  try {
-                    const r = event.result ? JSON.parse(event.result) : null;
-                    return !!(r && r.error);
-                  } catch { return false; }
-                })();
-                setAgentSteps(prev => prev.map((s, i) =>
-                  i === prev.length - 1
-                    ? { ...s, tools: s.tools.map((t, j) => j === s.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t) }
-                    : s
-                ));
-                break;
-              }
-              case 'query_error':
-                visibleContent += `\n\n> ${event.message}`;
-                break;
-              case 'error':
-                visibleContent = `[错误] ${event.message}`;
-                break;
-              case 'done':
-                // 从 done 事件中提取批量图表（后端已缓存所有图表，一次性发送）
-                const doneCharts: StreamingChart[] = event.charts || [];
-                if (doneCharts.length > 0) {
-                  setMessages((prev) =>
-                    prev.map((m) =>
-                      m.id === assistantId
-                        ? { ...m, content: visibleContent, chartData: { charts: doneCharts } }
-                        : m
-                    )
-                  );
-                }
-                break;
-            }
-            if (event.type !== 'done') {
-              setMessages((prev) =>
-                prev.map((m) => m.id === assistantId ? { ...m, content: visibleContent } : m)
-              );
-            }
-          } catch { /* skip unparseable */ }
-        }
-      }
-    } catch {
-      // fetch error
-    } finally {
-      // 流中断/异常也收尾：不让工作台残留"执行中"状态
-      setAgentSteps(prev => prev.map(s => s.status === "run" ? { ...s, status: "done", tools: s.tools } : s));
-      isAgentStreamingRef.current = false;
-    }
-  };
-
+  /** 发送消息：委托给全局 store（SSE 消费在 store 内进行，组件卸载不中断流） */
   const handleSend = async () => {
-    if (!inputValue.trim() || isStreaming || isAgentStreamingRef.current) return;
+    if (!inputValue.trim() || useAIChatStore.getState().isStreaming) return;
 
     const content = inputValue.trim();
     setInputValue("");
 
-    // Reset agent streaming state
-
-    try {
-      let sid = activeSessionId;
-
-      // Create session if needed
-      if (!sid) {
-        const session = await createSession("新对话");
-        sid = session.id;
-        setActiveSessionId(sid);
-        setSessions((prev) => [session, ...prev]);
-      }
-
-      // If datasource available, use agent mode
-      if (selectedDsId || datasourceList.length > 0) {
-        await streamDataChat(sid, content);
-        return;
-      }
-
-      // Fallback: regular chat (only when no data sources exist)
-      const userMsg: AIMessage = {
-        id: `temp-${Date.now()}`,
-        sessionId: sid,
-        role: "user",
-        content,
-        chartData: null,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-
-      let assistantContent = "";
-      const assistantId = `streaming-${Date.now()}`;
-      const assistantMsg: AIMessage = {
-        id: assistantId,
-        sessionId: sid,
-        role: "assistant",
-        content: "",
-        chartData: null,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-
-      sendMessage(sid, content, {
-        onDelta: (delta) => {
-          assistantContent += delta;
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: assistantContent } : m
-            )
-          );
-        },
-        onChart: (payload) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, chartData: payload as Record<string, unknown> }
-                : m
-            )
-          );
-        },
-        onDone: () => {
-          if (sid) fetchMessages(sid);
-          if (
-            sessions.find((s) => s.id === sid && (s.title === "新对话" || !s.title))
-          ) {
-            fetchSessions();
-          }
-        },
-        onError: (msg) => {
-          if (
-            msg.includes("AI_NOT_CONFIGURED") ||
-            msg.includes("OPENAI_API_KEY")
-          ) {
-            setAiNotConfigured(true);
-          }
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? { ...m, content: `[错误] ${msg}` }
-                : m
-            )
-          );
-        },
-      });
-    } catch {
-      // handle fetch errors silently
-    }
+    void useAIChatStore.getState().sendChat(content, {
+      selectedDsId,
+      hasDatasources: datasourceList.length > 0,
+    });
   };
+      // 旧 fallback 发送逻辑已迁移至 aiChatStore.sendFallback
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -772,7 +422,7 @@ export default function AIChat() {
               return (
                 <div
                   key={session.id}
-                  onClick={() => isEditing ? null : setActiveSessionId(session.id)}
+                  onClick={() => isEditing ? null : setActiveSession(session.id)}
                   onDoubleClick={() => startRename(session.id, session.title || "")}
                   className={`group px-3 py-3 rounded-[var(--radius-md)] cursor-pointer transition-colors flex items-center justify-between ${
                     isActive
@@ -853,7 +503,7 @@ export default function AIChat() {
               Lvco AI 助手
             </span>
             <span
-              className={`w-2 h-2 rounded-full ${(isStreaming || isAgentStreamingRef.current) ? "bg-ai animate-pulse" : "bg-success"}`}
+              className={`w-2 h-2 rounded-full ${isStreaming ? "bg-ai animate-pulse" : "bg-success"}`}
             />
           </div>
           <div className="flex items-center gap-3">
@@ -938,8 +588,9 @@ export default function AIChat() {
             </>
           ) : (
             /* Messages */
-            messages.map((msg) => {
+            messages.map((msg, idx) => {
               const isUser = msg.role === "user";
+              const isLastAssistant = !isUser && idx === messages.length - 1 && !msg.id.startsWith("streaming-");
               return (
                 <div
                   key={msg.id}
@@ -985,6 +636,12 @@ export default function AIChat() {
                             </div>
                           );
                         })()}
+                        {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示 */}
+                        {isLastAssistant && agentSteps.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border-light/60">
+                            <ActivityFeed steps={agentSteps} meta={agentMeta ?? undefined} />
+                          </div>
+                        )}
                       </div>
                     )}
                     {!isUser && msg.content && !msg.id.startsWith("streaming-") && (
@@ -1005,8 +662,6 @@ export default function AIChat() {
               );
             })
           )}
-          {/* Agent 工作台：工具执行过程展示（与画布助手一致的步骤时间线） */}
-          {agentSteps.length > 0 && <ActivityFeed steps={agentSteps} />}
           <div ref={messagesEndRef} />
         </div>
 
@@ -1054,7 +709,7 @@ export default function AIChat() {
             />
             <button
               onClick={handleSend}
-              disabled={!inputValue.trim() || isStreaming || isAgentStreamingRef.current || aiNotConfigured}
+              disabled={!inputValue.trim() || isStreaming || aiNotConfigured}
               className="w-8 h-8 rounded-full bg-ai hover:bg-ai-hover flex items-center justify-center transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <ArrowUp className="w-4 h-4 text-white" />

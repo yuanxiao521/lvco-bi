@@ -9,8 +9,14 @@ import type {
   AISessionDetail,
 } from "./types";
 
-export async function listSessions(): Promise<AISession[]> {
-  const response = await apiClient.get("/ai/sessions");
+export async function listSessions(params?: { entry?: string; canvasId?: string }): Promise<AISession[]> {
+  const response = await apiClient.get("/ai/sessions", { params });
+  return unwrapApi<AISession[]>(response.data);
+}
+
+/** 画布内会话列表（entry='canvas'），供画布助手"历史列表"使用 */
+export async function listCanvasSessions(canvasId: string): Promise<AISession[]> {
+  const response = await apiClient.get(`/ai/canvases/${canvasId}/sessions`);
   return unwrapApi<AISession[]>(response.data);
 }
 

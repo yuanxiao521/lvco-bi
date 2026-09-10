@@ -8,19 +8,20 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import get_current_user
+from app.api.deps import get_cache_repository, get_current_user
 from app.config import settings
 from app.core.database import get_db
 from app.core.duckdb_client import duckdb_client
 from app.core.limiter import limiter
 from app.models.ai_message import AIMessage, AIMessageRole
 from app.models.ai_session import AISession
+from app.models.canvas import Canvas
 from app.models.datasource import DataSource
 from app.models.user import User
 from app.schemas import (
@@ -84,20 +85,107 @@ async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
         _log.warning("save_ai_memory_failed", exc_info=True)
 
 
+async def _lead_stream_guard(lead_stream, legacy_factory):
+    """主导 Agent 流式消费护栏（阶段 4 兜底）。
+
+    - 未产出任何事件即异常 → 整体回落旧路径（用户无感知），done 标记 degraded=True。
+    - 已产出部分事件后异常 → 无法重跑，补发 status + done(degraded=True) 收尾。
+    `legacy_factory` 为惰性构造旧路径事件流的零参可调用对象（避免未降级时白建）。
+    """
+    emitted = False
+    try:
+        async for ev in lead_stream:
+            emitted = True
+            yield ev
+    except Exception as exc:  # noqa: BLE001
+        _log.exception(f"lead_agent_stream_failed: {exc}")
+        if emitted:
+            yield {"type": "status", "message": "主导 Agent 执行异常，已降级收尾。", "degradation": "lead_agent_error"}
+            yield {"type": "done", "degraded": True}
+            return
+        yield {"type": "status", "message": "主导 Agent 不可用，已回落既有路径。", "degradation": "lead_agent_fallback"}
+        async for ev in legacy_factory():
+            if isinstance(ev, dict) and ev.get("type") == "done":
+                ev = {**ev, "degraded": True}
+            yield ev
+
+
 @router.get("/sessions")
 async def list_sessions(
+    entry: str | None = Query(None, description="会话入口：chat / canvas，不传返回全部"),
+    canvas_id: UUID | None = Query(None, description="归属画布（配合 entry='canvas' 使用）"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SuccessResponse:
+    conditions = [AISession.user_id == current_user.id]
+    if entry is not None:
+        conditions.append(AISession.entry == entry)
+    if canvas_id is not None:
+        conditions.append(AISession.entry == "canvas")
+        conditions.append(AISession.canvas_id == canvas_id)
     result = await db.execute(
         select(AISession)
-        .where(AISession.user_id == current_user.id)
+        .where(*conditions)
         .order_by(AISession.created_at.desc())
     )
     items = list(result.scalars().all())
-    return SuccessResponse(
-        data=[AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True) for s in items]
+    cache_repo = get_cache_repository()
+    data = []
+    for s in items:
+        d = AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True)
+        # Redis 任务态标记：供前端提示「上次对话未完成」（正常完成时 key 已被删除）
+        try:
+            task_json = cache_repo.get(f"ai:chat:task:{s.id}")
+            d["interrupted"] = bool(
+                task_json and json.loads(task_json).get("status") == "interrupted"
+            )
+        except Exception:
+            d["interrupted"] = False
+        data.append(d)
+    return SuccessResponse(data=data)
+
+
+@router.get("/canvases/{canvas_id}/sessions")
+async def list_canvas_sessions(
+    canvas_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse:
+    """画布内会话列表（entry='canvas'），按创建时间倒序，供画布助手"历史列表"使用。"""
+    canvas = (
+        await db.execute(
+            select(Canvas).where(Canvas.id == canvas_id, Canvas.user_id == current_user.id)
+        )
+    ).scalar_one_or_none()
+    if canvas is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "画布不存在"},
+        )
+    result = await db.execute(
+        select(AISession)
+        .where(
+            AISession.user_id == current_user.id,
+            AISession.entry == "canvas",
+            AISession.canvas_id == canvas_id,
+        )
+        .order_by(AISession.created_at.desc())
     )
+    items = list(result.scalars().all())
+    cache_repo = get_cache_repository()
+    data = []
+    for s in items:
+        d = AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True)
+        # Redis 任务态标记：供前端提示「上次对话未完成」（正常完成时 key 已被删除）
+        try:
+            task_json = cache_repo.get(f"ai:canvas:task:{s.id}")
+            d["interrupted"] = bool(
+                task_json and json.loads(task_json).get("status") == "interrupted"
+            )
+        except Exception:
+            d["interrupted"] = False
+        data.append(d)
+    return SuccessResponse(data=data)
 
 
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
@@ -109,6 +197,7 @@ async def create_session(
     payload = body or AISessionCreate()
     session = AISession(
         user_id=current_user.id,
+        entry="chat",
         title=payload.title,
     )
     db.add(session)
@@ -371,11 +460,15 @@ async def data_chat_stream(
                         )
                     )
                 ).scalar_one_or_none()
+                # 加固：对话入口不允许续聊画布会话，防止误串记忆
+                if session is not None and session.entry == "canvas":
+                    session = None
 
         # Create session if not exists
         if session is None and body.message.strip():
             session = AISession(
                 user_id=current_user.id,
+                entry="chat",
                 title="新对话",
             )
             db.add(session)
@@ -384,7 +477,9 @@ async def data_chat_stream(
 
         session_id = session.id if session else None
 
-        # Save user message
+        # Save user message + 占位 assistant 行（立即落库：断流/切页也不丢）
+        assistant_msg: AIMessage | None = None
+        task_key: str | None = None
         if session_id:
             user_msg_model = AIMessage(
                 session_id=session_id,
@@ -392,14 +487,35 @@ async def data_chat_stream(
                 content=body.message,
             )
             db.add(user_msg_model)
-            await db.flush()
 
             # Auto-title
             if session.title in (None, "新对话"):
                 title = body.message[:30] + ("..." if len(body.message) > 30 else "")
                 session.title = title
                 db.add(session)
-                await db.flush()
+
+            # 占位 assistant 行：先落库标记"生成中"，正常结束/中断时统一更新内容
+            assistant_msg = AIMessage(
+                session_id=session_id,
+                role=AIMessageRole.assistant,
+                content="",
+            )
+            db.add(assistant_msg)
+
+            # 会话 + 用户消息 + 占位行一次性提交，保证客户端断开后历史仍可读到
+            await db.commit()
+            task_key = f"ai:chat:task:{session_id}"
+            try:
+                get_cache_repository().set(
+                    task_key,
+                    json.dumps({
+                        "status": "running",
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                    }),
+                    ttl=settings.redis_ttl,
+                )
+            except Exception:
+                _log.debug("chat task running cache set failed", exc_info=True)
 
             # Notify frontend about the new session
             yield f"data: {json.dumps({'type': 'session_created', 'session': AISessionResponse.model_validate(session).model_dump(mode='json', by_alias=True)}, ensure_ascii=False)}\n\n"
@@ -611,15 +727,45 @@ async def data_chat_stream(
                 full_content += visible_delta
                 return visible_delta
 
-            async for event in ai_service.agent_stream(
-                user_id=str(current_user.id),
-                user_msg=agent_message,
-                history=history,
-                db_session=db,
-                initial_phase="analyzing" if body.datasource_id else "selecting",
-                memory_summary=await _load_memory_summary(db, session_id),
-                selected_datasource_id=body.datasource_id,
-            ):
+            # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
+            memory_summary = await _load_memory_summary(db, session_id)
+
+            def _legacy_stream():
+                return ai_service.agent_stream(
+                    user_id=str(current_user.id),
+                    user_msg=agent_message,
+                    history=history,
+                    db_session=db,
+                    initial_phase="analyzing" if body.datasource_id else "selecting",
+                    memory_summary=memory_summary,
+                    selected_datasource_id=body.datasource_id,
+                )
+
+            if settings.LEAD_AGENT_ENABLED:
+                from app.services.agents.lead import LeadAgent, LeadContext
+                from app.services.observability import get_observer
+
+                lead_ctx = LeadContext(
+                    user_id=str(current_user.id),
+                    session_id=str(session_id) if session_id else "",
+                    entry="chat",
+                    datasource_id=body.datasource_id,
+                    history_summary=memory_summary or "",
+                )
+                for h in history:
+                    if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+                        lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+                # 阶段 4 兜底：主导 Agent 异常 → 自动回落旧路径
+                event_iter = _lead_stream_guard(
+                    LeadAgent(llm=llm_client, observer=get_observer()).stream(
+                        agent_message, ctx=lead_ctx, db_session=db
+                    ),
+                    _legacy_stream,
+                )
+            else:
+                event_iter = _legacy_stream()
+
+            async for event in event_iter:
                 if event["type"] == "text":
                     raw_delta = event["content"]
                     visible_delta = _strip_and_normalize(raw_delta)
@@ -679,25 +825,44 @@ async def data_chat_stream(
                     seen_chart_keys.add(key)
                     collected_charts.append(chart_obj)
                     # 不再逐个发送图表事件，done 时一次性批量发送
+                elif event["type"] == "intent":
+                    # 主导 Agent 增量事件：意图识别结果（前端可先忽略）
+                    yield f"data: {json.dumps({'type': 'intent', 'intent': event.get('intent'), 'confidence': event.get('confidence'), 'needs_plan': event.get('needs_plan'), 'degraded': event.get('degraded')}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "decision":
+                    # 主导 Agent 增量事件：Supervisor 决策结果（含 round，前端可按轮分组）
+                    yield f"data: {json.dumps({'type': 'decision', 'round': event.get('round'), 'action': event.get('action'), 'tool': event.get('tool'), 'reason': event.get('reason'), 'degraded': event.get('degraded')}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "progress":
+                    # 主导 Agent 增量事件：编排器步骤进度（含 round）
+                    yield f"data: {json.dumps({'type': 'progress', 'round': event.get('round'), 'index': event.get('index'), 'total': event.get('total'), 'title': event.get('title'), 'status': event.get('status'), 'note': event.get('note'), 'tool': event.get('tool')}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "report":
+                    # 最终报告：若流式文本已被过滤导致正文为空，用报告兜底补齐
+                    if not full_content.strip():
+                        visible = _filter_status_text(_strip_and_normalize(event.get("content", "")))
+                        if visible.strip():
+                            yield f"data: {json.dumps({'type': 'message', 'delta': visible}, ensure_ascii=False)}\n\n"
+                elif event["type"] == "memory_saved":
+                    yield f"data: {json.dumps({'type': 'memory_saved', 'chars': event.get('chars', 0)}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "done":
-                    yield f"data: {json.dumps({'type': 'done', 'charts': collected_charts}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'charts': collected_charts, 'degraded': event.get('degraded', False)}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "error":
                     yield f"data: {json.dumps({'type': 'error', 'message': event['message']}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "compressed_history":
                     # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
                     await _save_memory(db, session_id, event)
 
-            # Save assistant message
-            if session_id and (full_content.strip() or collected_charts):
-                chart_payload = {"charts": collected_charts} if collected_charts else None
-                assistant_msg_model = AIMessage(
-                    session_id=session_id,
-                    role=AIMessageRole.assistant,
-                    content=full_content,
-                    chart_data=chart_payload,
-                )
-                db.add(assistant_msg_model)
-                await db.commit()
+            # Save assistant message：更新占位行为最终内容，并清除 Redis 任务态
+            if assistant_msg is not None:
+                assistant_msg.content = full_content
+                assistant_msg.chart_data = {"charts": collected_charts} if collected_charts else None
+                try:
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                # 任务正常结束：清除 running 标记，避免误报"未完成"
+                try:
+                    get_cache_repository().delete(task_key)
+                except Exception:
+                    pass
 
         except AINotConfiguredError:
             yield f"data: {json.dumps({'type': 'error', 'message': 'AI 未配置'}, ensure_ascii=False)}\n\n"
@@ -706,6 +871,34 @@ async def data_chat_stream(
         except Exception as e:
             _log.exception("Agent chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': f'服务异常: {str(e)}'}, ensure_ascii=False)}\n\n"
+        finally:
+            # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
+            # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
+            if assistant_msg is not None:
+                try:
+                    if not assistant_msg.content and full_content.strip():
+                        assistant_msg.content = full_content
+                    await db.commit()
+                except Exception:
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                if task_key:
+                    try:
+                        repo = get_cache_repository()
+                        if repo.exists(task_key):
+                            repo.set(
+                                task_key,
+                                json.dumps({
+                                    "status": "interrupted",
+                                    "chars": len(full_content),
+                                    "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                                }),
+                                ttl=settings.redis_ttl,
+                            )
+                    except Exception:
+                        pass
 
     return StreamingResponse(
         event_generator(),
@@ -1538,6 +1731,30 @@ async def canvas_ai_chat(
     def _sse(payload: dict) -> str:
         return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
+    # 画布归属校验：canvas_id 存在时确认画布属于当前用户（未传 = 新画布草稿，跳过绑定）。
+    # 放在 SSE 生成器之外，归属非法时直接返回 404，避免流中途抛错。
+    canvas_uid: uuid.UUID | None = None
+    canvas_owner_ok = False
+    if body.canvas_id:
+        try:
+            canvas_uid = uuid.UUID(body.canvas_id)
+        except (ValueError, TypeError):
+            canvas_uid = None
+        if canvas_uid:
+            cvs = (
+                await db.execute(
+                    select(Canvas).where(
+                        Canvas.id == canvas_uid, Canvas.user_id == current_user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if cvs is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"code": "NOT_FOUND", "message": "画布不存在"},
+                )
+            canvas_owner_ok = True
+
     async def event_generator():
         from app.schemas import AISessionResponse
 
@@ -1548,39 +1765,63 @@ async def canvas_ai_chat(
         canvas_actions_count = 0
         session_id: uuid.UUID | None = None
         try:
-            # ---- 1. 解析 / 创建会话 ----
+            # ---- 1. 解析 / 创建会话（画布按 canvas_id 隔离 + 画布内多会话） ----
             if body.session_id:
                 try:
                     sid_uuid = uuid.UUID(body.session_id)
                 except (ValueError, TypeError):
                     sid_uuid = None
                 if sid_uuid:
-                    sess = (
-                        await db.execute(
-                            select(AISession).where(
-                                AISession.id == sid_uuid,
-                                AISession.user_id == current_user.id,
-                            )
+                    sess_q = select(AISession).where(
+                        AISession.id == sid_uuid,
+                        AISession.user_id == current_user.id,
+                    )
+                    if canvas_owner_ok:
+                        # 已绑定画布：只允许复用属于当前画布的 canvas 会话，防止跨画布/跨入口串记忆
+                        sess_q = sess_q.where(
+                            AISession.entry == "canvas",
+                            AISession.canvas_id == canvas_uid,
                         )
-                    ).scalar_one_or_none()
+                    sess = (await db.execute(sess_q)).scalar_one_or_none()
                     if sess:
                         session_id = sess.id
 
+            # 无有效 session_id：优先复用该画布最近会话，未命中才新建（草稿无 canvas_id / new_session=true 时直接新建）
             if session_id is None and body.message.strip():
-                sess = AISession(
-                    user_id=current_user.id,
-                    title="画布对话",
-                )
-                db.add(sess)
-                await db.flush()
-                await db.refresh(sess)
-                session_id = sess.id
-                yield _sse({
-                    "type": "session_created",
-                    "session_id": str(session_id),
-                })
+                if canvas_owner_ok and canvas_uid is not None and not body.new_session:
+                    latest = (
+                        await db.execute(
+                            select(AISession)
+                            .where(
+                                AISession.user_id == current_user.id,
+                                AISession.entry == "canvas",
+                                AISession.canvas_id == canvas_uid,
+                            )
+                            .order_by(AISession.created_at.desc())
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if latest is not None:
+                        session_id = latest.id
 
-            # ---- 2. 保存用户消息 ----
+                if session_id is None:
+                    sess = AISession(
+                        user_id=current_user.id,
+                        entry="canvas",
+                        canvas_id=canvas_uid,
+                        title="画布对话",
+                    )
+                    db.add(sess)
+                    await db.flush()
+                    await db.refresh(sess)
+                    session_id = sess.id
+                    yield _sse({
+                        "type": "session_created",
+                        "session_id": str(session_id),
+                    })
+
+            # ---- 2. 保存用户消息 + 占位 assistant 行（立即落库：断流/切页也不丢） ----
+            assistant_msg: AIMessage | None = None
             if session_id:
                 user_msg_model = AIMessage(
                     session_id=session_id,
@@ -1588,18 +1829,36 @@ async def canvas_ai_chat(
                     content=body.message,
                 )
                 db.add(user_msg_model)
-                await db.flush()
                 # Auto-title
-                if session_id:
-                    sess_result = await db.execute(
-                        select(AISession).where(AISession.id == session_id)
+                sess_result = await db.execute(
+                    select(AISession).where(AISession.id == session_id)
+                )
+                sess = sess_result.scalar_one_or_none()
+                if sess and sess.title in (None, "新对话", "画布对话"):
+                    title = body.message[:30] + ("..." if len(body.message) > 30 else "")
+                    sess.title = title
+                    db.add(sess)
+                # 占位 assistant 行：先落库标记"生成中"，正常结束/中断时统一更新内容
+                assistant_msg = AIMessage(
+                    session_id=session_id,
+                    role=AIMessageRole.assistant,
+                    content="",
+                )
+                db.add(assistant_msg)
+                # 会话 + 用户消息 + 占位行一次性提交，保证客户端断开后历史仍可读到
+                await db.commit()
+                # Redis 任务态：标记 running（供"上次未完成"提示）
+                try:
+                    get_cache_repository().set(
+                        f"ai:canvas:task:{session_id}",
+                        json.dumps({
+                            "status": "running",
+                            "started_at": datetime.now(timezone.utc).isoformat(),
+                        }),
+                        ttl=settings.redis_ttl,
                     )
-                    sess = sess_result.scalar_one_or_none()
-                    if sess and sess.title in (None, "新对话", "画布对话"):
-                        title = body.message[:30] + ("..." if len(body.message) > 30 else "")
-                        sess.title = title
-                        db.add(sess)
-                        await db.flush()
+                except Exception:
+                    _log.debug("canvas task running cache set failed", exc_info=True)
 
             # ---- 3. 加载历史（最近 6 轮） ----
             history: list[dict] = []
@@ -1632,18 +1891,51 @@ async def canvas_ai_chat(
             except Exception:
                 has_ds = datasource is not None
             canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
-            async for event in ai_service.agent_stream(
-                user_id=str(current_user.id),
-                user_msg=user_msg,
-                history=history,
-                db_session=db,
-                initial_phase=canvas_initial_phase,
-                system_prompt_override=CANVAS_AGENT_SYSTEM,
-                extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
-                memory_summary=await _load_memory_summary(db, session_id),
-                entry="canvas",
-                selected_datasource_id=str(datasource.id) if datasource else body.datasource_id,
-            ):
+            # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
+            memory_summary = await _load_memory_summary(db, session_id)
+
+            def _legacy_stream():
+                return ai_service.agent_stream(
+                    user_id=str(current_user.id),
+                    user_msg=user_msg,
+                    history=history,
+                    db_session=db,
+                    initial_phase=canvas_initial_phase,
+                    system_prompt_override=CANVAS_AGENT_SYSTEM,
+                    extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
+                    memory_summary=memory_summary,
+                    entry="canvas",
+                    selected_datasource_id=str(datasource.id) if datasource else body.datasource_id,
+                )
+
+            if settings.LEAD_AGENT_ENABLED:
+                from app.services.agents.lead import LeadAgent, LeadContext
+                from app.services.observability import get_observer
+
+                lead_ctx = LeadContext(
+                    user_id=str(current_user.id),
+                    session_id=str(session_id) if session_id else "",
+                    entry="canvas",
+                    canvas_id=body.canvas_id,
+                    datasource_id=str(datasource.id) if datasource else body.datasource_id,
+                    history_summary=memory_summary or "",
+                )
+                for h in history:
+                    if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+                        lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+                # 阶段 4 兜底：主导 Agent 异常 → 自动回落旧路径
+                event_iter = _lead_stream_guard(
+                    LeadAgent(
+                        llm=LLMClient(settings),
+                        observer=get_observer(),
+                        extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
+                    ).stream(body.message, ctx=lead_ctx, db_session=db),
+                    _legacy_stream,
+                )
+            else:
+                event_iter = _legacy_stream()
+
+            async for event in event_iter:
                 ev_type = event.get("type")
                 if ev_type == "text":
                     delta = event.get("content", "")
@@ -1677,28 +1969,55 @@ async def canvas_ai_chat(
                             yield _sse({"type": "canvas_action", **action})
                     except (json.JSONDecodeError, TypeError):
                         pass
+                elif ev_type == "intent":
+                    yield _sse({"type": "intent", "intent": event.get("intent"),
+                                "confidence": event.get("confidence"),
+                                "needs_plan": event.get("needs_plan"),
+                                "degraded": event.get("degraded")})
+                elif ev_type == "decision":
+                    yield _sse({"type": "decision", "round": event.get("round"),
+                                "action": event.get("action"),
+                                "tool": event.get("tool"), "reason": event.get("reason"),
+                                "degraded": event.get("degraded")})
+                elif ev_type == "progress":
+                    yield _sse({"type": "progress", "round": event.get("round"),
+                                "index": event.get("index"),
+                                "total": event.get("total"), "title": event.get("title"),
+                                "status": event.get("status"), "note": event.get("note"),
+                                "tool": event.get("tool")})
+                elif ev_type == "report":
+                    if not full_content.strip():
+                        report_delta = event.get("content", "")
+                        if report_delta:
+                            full_content += report_delta
+                            yield _sse({"type": "message", "delta": report_delta})
+                elif ev_type == "memory_saved":
+                    yield _sse({"type": "memory_saved", "chars": event.get("chars", 0)})
                 elif ev_type == "error":
                     yield _sse({"type": "error", "message": event.get("message", "服务异常")})
                 elif ev_type == "done":
-                    yield _sse({"type": "done"})
+                    yield _sse({"type": "done", "degraded": event.get("degraded", False)})
                 elif ev_type == "compressed_history":
                     # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
                     await _save_memory(db, session_id, event)
 
-            # ---- 5. 保存助手消息 ----
+            # ---- 5. 保存助手消息：更新占位行为最终内容，并清除 Redis 任务态 ----
             # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作，
-            # 也保存一份兜底 assistant 消息到 DB，保证下次加载历史时链路完整。
+            # 也生成一份兜底文案，保证下次加载历史时链路完整。
             save_content = full_content.strip()
             if not save_content and canvas_actions_count > 0:
                 save_content = f"本次分析通过画布工具完成：已在画布执行 {canvas_actions_count} 次落块操作，请查看画布内容与工作台执行记录。"
-            if session_id and save_content:
-                assistant_msg = AIMessage(
-                    session_id=session_id,
-                    role=AIMessageRole.assistant,
-                    content=save_content,
-                )
-                db.add(assistant_msg)
-                await db.commit()
+            if assistant_msg is not None:
+                assistant_msg.content = save_content
+                try:
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                # 任务正常结束：清除 running 标记，避免误报"未完成"
+                try:
+                    get_cache_repository().delete(f"ai:canvas:task:{session_id}")
+                except Exception:
+                    pass
 
         except AINotConfiguredError:
             yield _sse({"type": "error", "message": "AI 未配置"})
@@ -1707,6 +2026,34 @@ async def canvas_ai_chat(
         except Exception as e:
             _log.exception("Canvas AI chat error")
             yield _sse({"type": "error", "message": f"服务异常: {str(e)}"})
+        finally:
+            # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
+            # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
+            if assistant_msg is not None:
+                try:
+                    if not assistant_msg.content and full_content.strip():
+                        assistant_msg.content = full_content.strip()
+                    await db.commit()
+                except Exception:
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                task_key = f"ai:canvas:task:{session_id}"
+                try:
+                    repo = get_cache_repository()
+                    if repo.exists(task_key):
+                        repo.set(
+                            task_key,
+                            json.dumps({
+                                "status": "interrupted",
+                                "chars": len(full_content),
+                                "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                            }),
+                            ttl=settings.redis_ttl,
+                        )
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),

@@ -1,21 +1,12 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
-import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical, Trash2 } from "lucide-react";
-import { tokenStore } from "../../../api/client";
-import { listMessages } from "../../../api/ai";
+import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical, Plus } from "lucide-react";
+import { useCanvasAssistantStore } from "../../../stores/canvasAssistantStore";
+import type { CanvasAssistantCtx } from "../../../stores/canvasAssistantStore";
 import ActivityFeed from "./ActivityFeed";
-import type { FeedStep } from "./ActivityFeed";
-
-/** 生成稳定唯一的消息 id，避免同一毫秒内多次发送时 key 冲突（Date.now 碰撞） */
-function makeMsgId(prefix: string): string {
-  // crypto.randomUUID 在现代浏览器里可用；回退到高熵字符串保证唯一性
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
 
 // Props 接口：AI 助手组件的所有外部输入属性
 interface AIAssistantProps {
+  canvasId?: string | null;                                // 当前画布 ID（null = 未保存的新画布草稿），用于会话隔离
   datasourceId: string | null;                            // 当前选中的数据源 ID
   fieldMeta: Array<{ name: string; data_type: string; category?: string }> | null;  // 当前数据源的字段元信息（名称、类型、分类）
   canvasBlocks?: Array<Record<string, any>>;              // 画布上已有的块（供 AI 感知现状，避免重复建图/支持改删）
@@ -26,13 +17,7 @@ interface AIAssistantProps {
   onApplyChartConfig?: (config: { chartType?: string; dimensions?: string[]; measures?: Array<{ field: string; agg: string }> }) => void;  // 应用 AI 推荐图表配置的回调
   onCanvasAction?: (action: any) => void;                 // 接收 canvas_action，交由父组件实时落块
   onStreamingChange?: (streaming: boolean) => void;       // 流式状态变化上报（父组件据此禁用画布拖动）
-}
-
-// 聊天消息的数据结构
-interface ChatMessage {
-  id: string;           // 消息唯一标识
-  role: "user" | "assistant";  // 发送者角色：用户或 AI 助手
-  content: string;      // 消息文本内容
+  onEnsureCanvas?: () => Promise<string>;                 // 画布草稿（canvasId=null）时先创建画布，确保会话绑定真实 canvas_id
 }
 
 /** 从显示内容中剥离 ```json、```sql 等代码块，防止原始结构数据暴露给用户 */
@@ -170,37 +155,8 @@ function renderInline(text: string): React.ReactNode {
 }
 
 
-/** 工具名 → 中文名（驱动工作台默认步骤标题） */
-function TOOL_FALLBACK_NAME(name: string): string {
-  const map: Record<string, string> = {
-    add_chart_block: "新增图表", add_text_block: "写文本", add_h1: "写标题",
-    add_h2: "写章节", update_chart_block: "改图表",
-  };
-  return map[name] ?? name;
-}
-
-/** canvas_action 类型 → 动作中文 */
-const ACTION_LABEL: Record<string, string> = {
-  add_chart_block: "添加图表", add_text_block: "添加文本", update_chart_block: "更新图表",
-  remove_block: "删除块", arrange_layout: "自动布局",
-};
-
-/** 根据 canvas_action 生成一段可读的描述文本 */
-function actionDesc(action: any): string {
-  const block = action?.block;
-  const title = block?.title || block?.content || "";
-  const target = action?.blockId || "";
-  switch (action?.action) {
-    case "add_chart_block": return `「${title}」已添加`;
-    case "add_text_block": return `「${title}」已添加`;
-    case "update_chart_block": return `块 ${target} 已更新`;
-    case "remove_block": return `块 ${target} 已删除`;
-    default: return "";
-  }
-}
-
-
 export default memo(function AIAssistant({
+  canvasId,
   datasourceId,
   fieldMeta,
   canvasBlocks,
@@ -211,10 +167,8 @@ export default memo(function AIAssistant({
   onApplyChartConfig,
   onCanvasAction,
   onStreamingChange,
+  onEnsureCanvas,
 }: AIAssistantProps) {
-  // 面板展开/折叠状态
-  const [open, setOpen] = useState(false);
-
   // ---------- 悬浮球拖拽状态 ----------
   const [ballPos, setBallPos] = useState<{ x: number; y: number } | null>(null);  // 悬浮球当前位置（null 表示使用默认右下角位置）
   const [isDraggingBall, setIsDraggingBall] = useState(false);  // 是否正在拖拽悬浮球
@@ -233,36 +187,26 @@ export default memo(function AIAssistant({
   const [isResizing, setIsResizing] = useState(false);     // 是否正在缩放面板
   const resizeStart = useRef({ x: 0, y: 0, w: 0, h: 0 }); // 缩放开始时鼠标位置和面板尺寸
 
-  // 聊天消息列表，初始包含一条根据数据源状态生成的欢迎语
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: datasourceId && fieldMeta?.length
-        ? `你好！我已了解当前数据源，共有 ${fieldMeta.length} 个字段。你可以让我帮你分析数据、推荐图表。`
-        : "你好！我是 AI 画布助手。先选择数据源，我就能帮你分析数据和配置图表。",
-    },
-  ]);
+  // 面板展开状态（提升到全局 store：切路由回来后仍保持展开）
+  const open = useCanvasAssistantStore((s) => s.open);
+  const setOpen = useCanvasAssistantStore((s) => s.setOpen);
+  // 画布助手全局状态订阅：组件卸载后 store 仍存活，SSE 流与对话状态不随路由销毁
+  const messages = useCanvasAssistantStore((s) => s.messages);
+  const steps = useCanvasAssistantStore((s) => s.steps);
+  const meta = useCanvasAssistantStore((s) => s.meta);
+  const isStreaming = useCanvasAssistantStore((s) => s.isStreaming);
+  const canvasSessions = useCanvasAssistantStore((s) => s.canvasSessions);
+  const curSessionId = useCanvasAssistantStore((s) => s.curSessionId);
+
   const [inputValue, setInputValue] = useState("");       // 输入框当前文本
-  const [isStreaming, setIsStreaming] = useState(false);   // 是否正在接收 AI 流式响应（用于 UI 展示，如禁用按钮）
-  // ⚠️ 真正的并发互斥标志必须是同步级 useRef，不能依赖异步批处理的 setState：
-  // 毫秒级快速连点/连按回车时，第二次 handleSend 读 state 读到的是旧值 false，
-  // 会绕过 guard 造成"两个思考一起转"。streamingRef 原子、同步、即时。
-  const streamingRef = useRef(false);
-  // 当前未完成的 SSE reader.cancel，用于组件卸载 / 清空时主动中断流
-  const activeReaderCancelRef = useRef<(() => void) | null>(null);
-  {/* 流式状态上报：父组件据此在 Agent 落块期间禁用画布拖动，避免位置冲突 */}
-  useEffect(() => {
-    onStreamingChange?.(isStreaming);
-  }, [isStreaming, onStreamingChange]);
-  // Agent 工作台步骤时间线状态
-  const [steps, setSteps] = useState<FeedStep[]>([]);     // 板内步骤（tool_call/tool_result 驱动）
-  const runSeq = useRef(0);                               // 步骤自增 id 计数器
   const messagesEndRef = useRef<HTMLDivElement>(null);     // 消息列表底部引用，用于自动滚动
   const inputRef = useRef<HTMLInputElement>(null);          // 输入框引用
   const panelRef = useRef<HTMLDivElement>(null);            // 面板容器引用
-  const sessionIdRef = useRef<string | null>(localStorage.getItem("canvas_session_id"));
-  const sessionLoaded = useRef(false);
+
+  // 流式状态上报：父组件据此在 Agent 落块期间禁用画布拖动，避免位置冲突
+  useEffect(() => {
+    onStreamingChange?.(isStreaming);
+  }, [isStreaming, onStreamingChange]);
 
   // 悬浮球鼠标按下事件：进入拖拽状态，记录初始位置
   const onBallMouseDown = useCallback((e: React.MouseEvent) => {
@@ -334,343 +278,103 @@ export default memo(function AIAssistant({
     };
   }, [isDraggingBall, isDragging, isResizing]);
 
-  // 数据源变化时更新欢迎语，展示字段数量或可选数据源列表
+  // 数据源变化时更新欢迎语（store 内只更新首条 welcome 消息）
   useEffect(() => {
-    if (datasourceId && fieldMeta?.length) {
-      setMessages((prev) =>
-        prev[0]?.id === "welcome"
-          ? [
-              {
-                id: "welcome",
-                role: "assistant",
-                content: `当前数据源有 ${fieldMeta.length} 个字段，包括：${fieldMeta
-                  .slice(0, 8)
-                  .map((f) => f.name)
-                  .join("、")}${fieldMeta.length > 8 ? "等" : ""}。\n\n- 推荐适合的图表类型\n- 分析数据分布\n- 查找数据规律`,
-              },
-              ...prev.slice(1),
-            ]
-          : prev
-      );
-    } else if (allDatasources?.length) {
-      const dsNames = allDatasources.map(d => d.name).join('、');
-      setMessages((prev) =>
-        prev[0]?.id === "welcome"
-          ? [
-              {
-                id: "welcome",
-                role: "assistant",
-                content: `你好！当前有以下数据源可用：${dsNames}。\n\n请选择一个数据源开始分析，或直接告诉我你想分析什么数据。`,
-              },
-              ...prev.slice(1),
-            ]
-          : prev
-      );
-    }
+    useCanvasAssistantStore.getState().syncWelcome({
+      canvasId: canvasId ?? null,
+      datasourceId,
+      fieldMeta,
+      canvasBlocks,
+      currentDimensions,
+      currentMeasures,
+      currentChartType,
+      allDatasources,
+      onApplyChartConfig,
+      onCanvasAction,
+      ensureCanvas: onEnsureCanvas,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasourceId, fieldMeta, allDatasources]);
 
-  // 加载已有会话的历史消息（页面刷新后恢复）
+  // 构建一次通用的画布上下文（事件触发时携带当前最新闭包值，供 store 发起流式请求）
+  const buildCtx = useCallback(
+    (): CanvasAssistantCtx => ({
+      canvasId: canvasId ?? null,
+      datasourceId,
+      fieldMeta,
+      canvasBlocks,
+      currentDimensions,
+      currentMeasures,
+      currentChartType,
+      allDatasources,
+      onApplyChartConfig,
+      onCanvasAction,
+      ensureCanvas: onEnsureCanvas,
+    }),
+    [canvasId, datasourceId, fieldMeta, canvasBlocks, currentDimensions, currentMeasures, currentChartType, allDatasources, onApplyChartConfig, onCanvasAction, onEnsureCanvas],
+  );
+
+  // 画布切换：重置当前会话与消息（防跨画布串记忆），并拉取该画布的会话列表。
+  // 注意：画布"落盘"（canvasId 从 null → 真实 ID，AI 对话中 ensureCanvas 触发）不算切换，
+  // 只刷新会话列表，不能打断正在进行的对话或清空当前会话。
+  const prevCanvasIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (sessionLoaded.current) return;
-    sessionLoaded.current = true;
-    const sid = sessionIdRef.current;
-    if (!sid) return;
-    (async () => {
-      try {
-        const msgs = await listMessages(sid);
-        if (msgs.length > 0) {
-          setMessages(msgs.map(m => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-          })));
-        }
-      } catch {
-        sessionIdRef.current = null;
-        localStorage.removeItem("canvas_session_id");
-      }
-    })();
-  }, []);
+    const cid = canvasId ?? null;
+    const prev = prevCanvasIdRef.current;
+    prevCanvasIdRef.current = cid;
+    // 首次挂载 / 值未变 / 画布落盘（null → ID）：只刷新会话列表
+    if (prev === cid || (prev === null && cid)) {
+      void useCanvasAssistantStore.getState().refreshSessions(cid);
+      return;
+    }
+    // 真正的画布切换：ID → 另一个 ID / ID → null → 交 store 清空会话状态防串记忆
+    useCanvasAssistantStore.getState().resetForCanvas(buildCtx());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId]);
+
+  // 会话列表就绪后：默认选中最近一条会话并加载其历史（刷新页面/切回画布时恢复）
+  useEffect(() => {
+    void useCanvasAssistantStore.getState().onCanvasReady(canvasId ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasId, canvasSessions]);
 
   // 新消息到达时自动滚动到消息列表底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // 发送消息的核心处理函数：校验输入、构建请求、处理 SSE 流式响应
+  // 发送消息：委托给全局 store（SSE 消费在 store 内进行，组件卸载不中断流）
   const handleSend = async (text?: string) => {
-    // [关键] 同步级 guard：streamingRef.current 为 true 直接 return，
-    // 毫秒级连点/连按回车也不会绕过（setState 是异步的，这里是原子同步判断）。
-    if (streamingRef.current) return;
+    if (useCanvasAssistantStore.getState().isStreaming) return;
     const content = (text || inputValue).trim();
     if (!content) return;
-
-    // 先同步清掉输入框 DOM（inputRef）+ 异步清 state，
-    // 避免用户在 setState 生效前再按回车时把同一条内容再发一遍。
+    // 先同步清掉输入框（DOM + state），避免用户连按回车重复发送同一条内容
     if (inputRef.current) inputRef.current.value = "";
     setInputValue("");
-
-    // 未选择数据源时给出提示，不发起请求
-    if (!datasourceId) {
-      setMessages(prev => [...prev, { id: makeMsgId("e"), role: "assistant", content: "请先在左侧选择一个数据源" }]);
-      return;
-    }
-
-    // --- 并发互斥点：进请求前立刻置 streaming 标志 ---
-    streamingRef.current = true;
-    setIsStreaming(true);
-
-    // 添加用户消息
-    const userMsg: ChatMessage = { id: makeMsgId("u"), role: "user", content };
-    setMessages(prev => [...prev, userMsg]);
-
-    // 预先创建一条空的 AI 消息占位，后续流式追加内容
-    const assistantId = makeMsgId("a");
-    const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "" };
-    setMessages(prev => [...prev, assistantMsg]);
-
-    let assistantContent = "";
-    // 本地统计本轮的画布动作数（与后端计数器一致），用于 finally 兜底文案
-    let localCanvasActions = 0;
-
-    const token = tokenStore.getAccess();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
-
-    // 校验当前图表的维度和度量字段是否在数据源字段列表中，过滤掉已删除的字段
-    const validFieldNames = new Set((fieldMeta ?? []).map(f => f.name).concat((fieldMeta ?? []).map(f => f.name.toLowerCase())));
-    const cleanDims = (currentDimensions ?? []).filter(
-      d => validFieldNames.has(d) || validFieldNames.has(d.toLowerCase())
-    );
-    const cleanMeasures = (currentMeasures ?? []).filter(
-      m => validFieldNames.has(m.field) || validFieldNames.has(m.field.toLowerCase())
-    );
-    const hasValidCurrentConfig = cleanDims.length > 0 || cleanMeasures.length > 0;
-
-    // 构建 canvas_context：包含当前图表配置（如有）和完整字段列表，供 AI 参考
-    const canvasContext: Record<string, unknown> = {};
-    if (hasValidCurrentConfig) {
-      canvasContext.currentConfig = { dimensions: cleanDims, measures: cleanMeasures, chartType: currentChartType };
-    }
-    // 始终传递完整字段列表，即使没有选中图表，AI 也能据此智能推荐
-    canvasContext.availableFields = (fieldMeta ?? []).map(f => ({ name: f.name, data_type: f.data_type, category: f.category }));
-    // 传递画布已有块摘要，让 AI 感知现状（避免重复建图、支持改/删已有块）
-    if (Array.isArray(canvasBlocks) && canvasBlocks.length) {
-      canvasContext.blocks = canvasBlocks
-        .filter((b) => b && b.type === "chart")
-        .map((b) => ({
-          block_id: b.blockId,
-          title: b.title,
-          chartType: b.chartType,
-          dimensions: b.queryConfig?.dimensions ?? b.dimensions ?? [],
-          measures: b.queryConfig?.measures ?? b.measures ?? [],
-        }));
-    }
-    // 每次新任务重置工作台步骤时间线
-    setSteps([]);
-
-    try {
-      // 发起 POST 请求，后端返回 SSE（Server-Sent Events）流
-      const response = await fetch(`${baseUrl}/ai/canvas/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          datasource_id: datasourceId,
-          session_id: sessionIdRef.current,
-          message: content,
-          canvas_context: canvasContext,
-        }),
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err?.detail?.message || err?.error?.message || `HTTP ${response.status}`);
-      }
-
-      // 读取 SSE 流，逐行解析 data: 前缀的 JSON 事件
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
-
-      // 把 reader.cancel 登记在 ref 上，方便组件卸载/清空时主动断流
-      activeReaderCancelRef.current = () => {
-        try { reader.cancel(); } catch { /* ignore */ }
-      };
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const event = JSON.parse(jsonStr);
-            switch (event.type) {
-              // 'message': AI 返回的文本增量，逐段追加到助手消息中
-              case 'message':
-                assistantContent += event.delta;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                break;
-              // 'tool_call': Agent 开始调用某工具 → 在当前运行步骤挂一个工具 chip（running）
-              case 'tool_call': {
-                const stepId = `${runSeq.current}`;
-                // 若当前还没有运行中的步骤，创建默认步骤
-                setSteps(prev => {
-                  const runIdx = [...prev].reverse().findIndex(s => s.status === "run");
-                  const hasRun = runIdx !== -1;
-                  if (!hasRun) runSeq.current += 1;
-                  const idx = hasRun ? prev.length - 1 - runIdx : prev.length;
-                  const next = prev.slice();
-                  if (!hasRun) {
-                    next.push({ id: `${runSeq.current}`, title: `执行 ${TOOL_FALLBACK_NAME(event?.name ?? "工具")}`, status: "run", tools: [] });
-                    return next;
-                  }
-                  next[idx] = { ...next[idx], tools: [...next[idx].tools, { name: event.name, args: event.args, status: "run" }] };
-                  return next;
-                });
-                void stepId;
-                break;
-              }
-              // 'tool_result': 工具执行完成 → 更新对应 chip 状态
-              case 'tool_result': {
-                const isErr = (() => {
-                  try {
-                    const r = event.result ? JSON.parse(event.result) : null;
-                    return !!(r && r.error);
-                  } catch { return false; }
-                })();
-                setSteps(prev => prev.map((s, i) =>
-                  i === prev.length - 1
-                    ? {
-                        ...s,
-                        tools: s.tools.map((t, j) =>
-                          j === s.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t
-                        ),
-                      }
-                    : s
-                ));
-                break;
-              }
-              // 'canvas_action': Agent 的落块指令 → 转交父组件实时渲染，并给出提示
-              case 'canvas_action': {
-                localCanvasActions += 1;
-                assistantContent += `\n\n> 已${ACTION_LABEL[event.action] ?? event.action}: ${actionDesc(event)}\n`;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                if (onCanvasAction) onCanvasAction(event);
-                break;
-              }
-              // 'chart'：兼容旧事件（画布白名单不含 render_chart，后端永不发）
-              // 保留 case 以避免对未知事件报错
-              case 'chart':
-                break;
-              // 兼容旧事件
-              // 'query_result': 查询结果数据，由 AI 自行处理，不显示原始数据表
-              case 'query_result': {
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                break;
-              }
-              // 'query_error': AI 查询出错，将错误信息附加到消息中
-              case 'query_error':
-                assistantContent += `\n\n> ${event.message}`;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                break;
-              // 'chart_config': AI 推荐的图表配置到达，显示提示并调用 onApplyChartConfig 回调应用配置（旧链路兼容）
-              case 'chart_config':
-                assistantContent += `\n\n[图表配置已应用]`;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                if (onApplyChartConfig && event.config) {
-                  onApplyChartConfig(event.config);
-                }
-                break;
-              // 'chart_config_error': 图表配置生成失败
-              case 'chart_config_error':
-                assistantContent += `\n\n> ${event.message}`;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                break;
-              // 'error': 通用错误事件
-              case 'error':
-                assistantContent += `\n\n> ${event.message}`;
-                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-                break;
-              // 'session_created': 后端新建了会话，保存 sessionId
-              case 'session_created':
-                sessionIdRef.current = event.session_id;
-                localStorage.setItem("canvas_session_id", event.session_id);
-                break;
-              // 'done': 任务结束，标记当前运行步骤完成
-              case 'done':
-                setSteps(prev => prev.map(s => s.status === "run" ? { ...s, status: "done", tools: s.tools } : s));
-                break;
-            }
-          } catch { /* 跳过解析失败的非法事件行 */ }
-        }
-      }
-    } catch (err: any) {
-      setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `[连接失败] ${err.message}` } : m));
-    } finally {
-      // 流结束但 AI 仍然没生成任何文本 → 用本轮统计到的画布动作数生成兜底文案，
-      // 保证 UI 不再永远显示「思考中...」，也和后端保存到 DB 的兜底 assistant 消息对齐。
-      if (!assistantContent.trim() && localCanvasActions > 0) {
-        assistantContent = `本次分析通过画布工具完成：在画布执行 ${localCanvasActions} 次落块操作，请查看画布内容与工作台执行记录。`;
-        setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: assistantContent } : m));
-      }
-      // 先清 ref（同步互斥标志），再清 state（异步 UI 状态），顺序不能反！
-      activeReaderCancelRef.current = null;
-      streamingRef.current = false;
-      setIsStreaming(false);
-    }
+    void useCanvasAssistantStore.getState().send(content, buildCtx());
   };
 
   // 输入框键盘事件：Enter 键发送消息（Shift+Enter 不拦截，用于换行）
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // 键盘层也补一次同步 guard，防止快速连按 Enter 在 handleSend 之外冒泡重复
-      if (streamingRef.current) return;
+      if (useCanvasAssistantStore.getState().isStreaming) return;
       handleSend();
     }
   };
 
-  /** 清空当前对话：重置 UI 消息、工作台步骤、会话 ID，后端会在下一次发送时新建会话。 */
-  const handleClearChat = useCallback(() => {
-    // 正在运行 → 先主动断 SSE，保证状态彻底释放再清空
-    if (streamingRef.current) {
-      try { activeReaderCancelRef.current?.(); } catch { /* ignore */ }
-      activeReaderCancelRef.current = null;
-      streamingRef.current = false;
-      setIsStreaming(false);
-    }
-    // 清会话持久化
-    sessionIdRef.current = null;
-    sessionLoaded.current = false;
-    try { localStorage.removeItem("canvas_session_id"); } catch { /* ignore */ }
-    // 清 UI
-    setSteps([]);
-    // 重置欢迎语（根据当前数据源）
-    const welcome: ChatMessage = {
-      id: "welcome",
-      role: "assistant",
-      content: datasourceId && fieldMeta?.length
-        ? `你好！我已了解当前数据源，共有 ${fieldMeta.length} 个字段。你可以让我帮你分析数据、推荐图表。`
-        : "你好！我是 AI 画布助手。先选择数据源，我就能帮你分析数据和配置图表。",
-    };
-    setMessages([welcome]);
-  }, [datasourceId, fieldMeta]);
+  /** 新对话：断开当前会话，下一次发送时后端按 canvas_id 新建独立会话（画布内多会话） */
+  const handleNewSession = () => {
+    useCanvasAssistantStore.getState().newConversation(buildCtx());
+  };
 
-  // 组件卸载 / 面板关闭：主动断流，避免 SSE 连接泄漏、streamingRef 卡在 true（下一次重开面板 guard 永远挡）
-  useEffect(() => {
-    return () => {
-      try { activeReaderCancelRef.current?.(); } catch { /* ignore */ }
-      activeReaderCancelRef.current = null;
-      streamingRef.current = false;
-    };
-  }, []);
+  /** 切换画布内历史会话：换 session_id 并加载该会话消息 */
+  const handleSwitchSession = (sid: string) => {
+    void useCanvasAssistantStore.getState().switchSession(sid, buildCtx());
+  };
+
+  // 注意：组件卸载时【不再主动断流】。SSE 与对话状态驻留于全局 store，
+  // 用户切到其它路由后任务继续在后台跑，切回画布时无缝恢复。
 
   // 面板样式：结合拖拽偏移和缩放尺寸，拖拽/缩放时禁用文本选择
   const panelStyle: React.CSSProperties = {
@@ -710,11 +414,11 @@ export default memo(function AIAssistant({
             <div className="flex items-center gap-1">
               <button
                 className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                onClick={handleClearChat}
-                disabled={isStreaming}
-                title="清空当前对话"
+                onClick={handleNewSession}
+                disabled={isStreaming || !canvasId}
+                title={canvasId ? "新对话（本画布内另开一条对话）" : "保存画布后即可开新对话"}
               >
-                <Trash2 className="w-4 h-4 text-muted-foreground" />
+                <Plus className="w-4 h-4 text-muted-foreground" />
               </button>
               <button className="p-1 rounded hover:bg-muted" onClick={() => setOpen(false)}>
                 <X className="w-4 h-4 text-muted-foreground" />
@@ -722,9 +426,30 @@ export default memo(function AIAssistant({
             </div>
           </div>
 
+          {/* 会话切换条：列出本画布的历史对话（仅已保存画布显示） */}
+          {canvasId && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border-light bg-card">
+              <select
+                value={curSessionId ?? ""}
+                onChange={(e) => { if (e.target.value) handleSwitchSession(e.target.value); }}
+                disabled={isStreaming}
+                className="flex-1 min-w-0 text-[11.5px] px-2 py-1 rounded border border-border bg-background text-foreground outline-none"
+                title="切换本画布的历史对话"
+              >
+                <option value="">{canvasSessions.length > 0 ? "当前为新对话" : "暂无历史对话"}</option>
+                {canvasSessions.map((s) => (
+                  <option key={s.id} value={s.id}>{s.title || "未命名对话"}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* 消息列表区域 — 可滚动，每条消息按角色分别左右对齐 */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-            {messages.map((msg) => (
+            {messages.map((msg, idx) => {
+              // 仅最后一条 assistant 消息（非欢迎语）才嵌入 Agent 工作台
+              const isLastAssistant = msg.role === "assistant" && idx === messages.length - 1 && msg.id !== "welcome";
+              return (
               <div
                 key={msg.id}
                 className={`flex gap-2 ${msg.role === "user" ? "justify-end" : ""}`}
@@ -758,10 +483,16 @@ export default memo(function AIAssistant({
                       已完成分析并更新画布，请查看工作台执行记录与画布内容。
                     </span>
                   )}
+                  {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示 */}
+                  {isLastAssistant && steps.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-border-light/60">
+                      <ActivityFeed steps={steps} meta={meta ?? undefined} />
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
-            {steps.length > 0 && <ActivityFeed steps={steps} />}
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
 
@@ -834,7 +565,7 @@ export default memo(function AIAssistant({
       <button
         className={`w-12 h-12 rounded-full flex items-center justify-center text-white bg-ai hover:bg-ai-hover shadow-float transition-all duration-200 hover:scale-110 active:scale-90 select-none ${isDraggingBall ? 'cursor-grabbing' : 'cursor-grab'}`}
         onMouseDown={onBallMouseDown}
-        onClick={() => { if (!ballDragMoved.current) setOpen((v) => !v); }}
+        onClick={() => { if (!ballDragMoved.current) setOpen(!open); }}
         title="AI 画布助手"
       >
         <MessageCircle className="w-5 h-5" />

@@ -43,8 +43,12 @@ export interface AISession {
   id: string;
   userId: string;
   model: string;
+  entry: string;          // "chat" | "canvas"
+  canvasId: string | null;
   title: string | null;
   createdAt: string;
+  /** Redis 任务态标记：true 表示该会话上次任务中断未完成（画布会话列表返回） */
+  interrupted?: boolean;
 }
 
 export interface AISessionDetail extends AISession {
