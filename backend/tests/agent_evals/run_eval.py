@@ -75,6 +75,45 @@ def load_dataset(path: Path) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 
 
+async def _ensure_preset_canvas(db, question: dict[str, Any], user_id: str):
+    """若题目声明了 preset_blocks（初始画布内容），创建/复用评测画布并写入初始块。
+
+    返回 canvas_id（无预置则返回 None）。这样 update 定位类题（用户要求改某张已存在的
+    图，如"把 A1 改成折线"）才有真实的画布初始状态可让 Agent 感知并定位，真正测到
+    update_chart_block 的"无 id 语义定位"链路，而不是空画布上新建图。
+    """
+    preset = question.get("preset_blocks")
+    if not preset:
+        return None
+    from uuid import UUID, uuid4
+
+    from sqlalchemy import select
+
+    from app.models.canvas import Canvas
+
+    user_uuid = UUID(str(user_id))
+    # 优先复用该用户的同标题评测画布，避免每次新建堆积；否则新建
+    stmt = select(Canvas).where(
+        Canvas.user_id == user_uuid,
+        Canvas.title == f"eval-{question.get('id', '')}",
+        Canvas.deleted_at.is_(None),
+    ).limit(1)
+    canvas = (await db.execute(stmt)).scalars().first()
+    if canvas is None:
+        canvas = Canvas(
+            id=uuid4(),
+            user_id=user_uuid,
+            title=f"eval-{question.get('id', '')}",
+            blocks=list(preset),
+        )
+        db.add(canvas)
+    else:
+        canvas.blocks = list(preset)
+    await db.commit()
+    log.info("preset_canvas q=%s canvas_id=%s blocks=%d", question.get("id"), canvas.id, len(preset))
+    return str(canvas.id)
+
+
 async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108-b721-d8448db678e4", mode: str = "real", entry: str = "chat", selected_datasource_id: str | None = None) -> AttemptTrace:
     """运行一次 Agent，返回完整轨迹。
 
@@ -130,11 +169,13 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
                 from app.services.agents.lead import LeadAgent, LeadContext
                 from app.services.observability import get_observer
 
+                canvas_id = await _ensure_preset_canvas(db, question, user_id)
                 ctx = LeadContext(
                     user_id=user_id,
                     session_id=f"eval-{question['id']}",
                     entry=entry,
                     datasource_id=selected_datasource_id,
+                    canvas_id=canvas_id,
                 )
                 agent = LeadAgent(
                     llm=LLMClient(),

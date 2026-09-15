@@ -183,6 +183,28 @@ docs/
 *.err
 *.out
 
+# ── 面试/方案文档（不属于仓库源码）─────────────────────────────
+LvcoBI_*.md
+CANVAS_IMPROVEMENT_TODO.md
+PROJECT_WIKI.md
+TODO.md
+
+# ── 评测运行时产物（结果/报告不入库）────────────────────────
+backend/tests/agent_evals/final_v5*
+backend/tests/agent_evals/semantic_results*
+backend/tests/agent_evals/semantic_events*
+backend/tests/agent_evals/semantic_report*.md
+backend/tests/agent_evals/*.norm.jsonl
+backend/tests/reports/
+
+# ── 临时诊断/调试脚本───────────────────────────────────────────
+backend/tests/_diag_*.py
+backend/tests/_probe_*.py
+backend/tests/_smoke_*.py
+backend/tests/_t_*.py
+backend/tests/agent_evals/_rejudge_*.py
+backend/tests/capture_*.py
+
 # ── 临时脚本/敏感文件 ────────────────────────────────────────────
 backend/_check_fields.py
 **/reset_pwd*.sql

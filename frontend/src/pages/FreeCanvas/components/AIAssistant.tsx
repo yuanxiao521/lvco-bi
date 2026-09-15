@@ -363,14 +363,9 @@ export default memo(function AIAssistant({
     }
   };
 
-  /** 新对话：断开当前会话，下一次发送时后端按 canvas_id 新建独立会话（画布内多会话） */
+  /** 新对话：断开当前会话并清空界面，下一次发送时后端复用本画布唯一会话并清空历史（1:1 清空重来） */
   const handleNewSession = () => {
     useCanvasAssistantStore.getState().newConversation(buildCtx());
-  };
-
-  /** 切换画布内历史会话：换 session_id 并加载该会话消息 */
-  const handleSwitchSession = (sid: string) => {
-    void useCanvasAssistantStore.getState().switchSession(sid, buildCtx());
   };
 
   // 注意：组件卸载时【不再主动断流】。SSE 与对话状态驻留于全局 store，
@@ -426,21 +421,12 @@ export default memo(function AIAssistant({
             </div>
           </div>
 
-          {/* 会话切换条：列出本画布的历史对话（仅已保存画布显示） */}
+          {/* 会话状态条：画布已保存时提示"本画布唯一对话"（1:1 绑定，不再多会话切换） */}
           {canvasId && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border-light bg-card">
-              <select
-                value={curSessionId ?? ""}
-                onChange={(e) => { if (e.target.value) handleSwitchSession(e.target.value); }}
-                disabled={isStreaming}
-                className="flex-1 min-w-0 text-[11.5px] px-2 py-1 rounded border border-border bg-background text-foreground outline-none"
-                title="切换本画布的历史对话"
-              >
-                <option value="">{canvasSessions.length > 0 ? "当前为新对话" : "暂无历史对话"}</option>
-                {canvasSessions.map((s) => (
-                  <option key={s.id} value={s.id}>{s.title || "未命名对话"}</option>
-                ))}
-              </select>
+              <span className="flex-1 min-w-0 text-[11.5px] px-2 py-1 rounded bg-muted/60 text-muted-foreground truncate">
+                {curSessionId ? "本画布唯一对话 · 新对话将清空重来" : "暂无对话 · 发送消息后自动创建"}
+              </span>
             </div>
           )}
 
@@ -483,9 +469,9 @@ export default memo(function AIAssistant({
                       已完成分析并更新画布，请查看工作台执行记录与画布内容。
                     </span>
                   )}
-                  {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示 */}
+                  {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示（收敛卡片自带边框分区） */}
                   {isLastAssistant && steps.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-border-light/60">
+                    <div className="mt-2">
                       <ActivityFeed steps={steps} meta={meta ?? undefined} />
                     </div>
                   )}

@@ -79,7 +79,14 @@ class LLMClient:
         response_format: dict | None = None,
         enable_thinking: bool | None = None,
         model: str | None = None,
-    ) -> str:
+        return_usage: bool = False,
+    ) -> str | tuple[str, dict]:
+        """非流式补全。
+
+        `return_usage=True` 时返回 `(content, meta)`，meta 含 `model / input /
+        output`（token 数），供观测层上报 token 与成本；默认仍只返回 content
+        字符串，保持向后兼容。
+        """
         self._check_configured()
         url = f"{self._base_url}/chat/completions"
         body = self._payload(
@@ -102,7 +109,15 @@ class LLMClient:
             raise AIUpstreamError("LLM empty choices")
         message = choices[0].get("message") or {}
         content = message.get("content")
-        return content if isinstance(content, str) else ""
+        content = content if isinstance(content, str) else ""
+        if not return_usage:
+            return content
+        usage = data.get("usage") or {}
+        return content, {
+            "model": data.get("model") or body.get("model") or self._settings.openai_model,
+            "input": int(usage.get("prompt_tokens") or 0),
+            "output": int(usage.get("completion_tokens") or 0),
+        }
 
     async def stream_chat(
         self,

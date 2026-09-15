@@ -26,6 +26,30 @@ from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig
 logger = logging.getLogger("lvco.metric_service")
 
 
+# ==================== 语义层覆盖率统计（进程内轻量计数器） ====================
+# 每轮分析中「指标引用查询 / 总查询」的比例，可直接写成简历指标：
+# 「指标语义层覆盖率从 0 提升至 xx%，指标类问题口径不再由 LLM 自由生成」。
+_QUERY_COUNTERS: dict[str, int] = {"total": 0, "metric": 0}
+
+
+def record_query_usage(uses_metric: bool) -> None:
+    """分析链路每执行一次查询调用一次：total+1，指标引用则 metric+1。"""
+    _QUERY_COUNTERS["total"] += 1
+    if uses_metric:
+        _QUERY_COUNTERS["metric"] += 1
+
+
+def get_semantic_coverage() -> dict:
+    """返回语义层覆盖率快照 {total_queries, metric_queries, coverage}。"""
+    total = _QUERY_COUNTERS["total"]
+    metric = _QUERY_COUNTERS["metric"]
+    return {
+        "total_queries": total,
+        "metric_queries": metric,
+        "coverage": round(metric / total, 4) if total else 0.0,
+    }
+
+
 # 内置通用模板指标（user_id=None 表示全局公开模板，可绑定到同结构数据源）
 DEFAULT_TEMPLATE_METRICS: list[dict] = [
     {
@@ -333,6 +357,16 @@ def measure_to_metric_ref(measure: dict) -> str | None:
     return measure.get("metric_id") or measure.get("metricKey") or measure.get("metric_key")
 
 
+def _fill_template_placeholders(metric) -> list[str]:
+    """模板指标（formula 含 {{field}}）固化用占位符列名填充，保证不落空。
+
+    模板作者笔下的占位符（amount / order_id / customer_id …）即真实业务列名，
+    用占位符本身作为解析字段即可得到受治理口径。
+    """
+    placeholders = extract_metric_fields(metric.formula or "")
+    return placeholders or []
+
+
 async def resolve_measures(
     db: AsyncSession,
     user_id: UUID | None,
@@ -341,7 +375,8 @@ async def resolve_measures(
 ) -> tuple[list[MeasureConfig], list[dict]]:
     """把画布块的原始 measures 解析为可执行度量 + 前端展示度量。
 
-    - 普通度量：{field, agg} 直接透传。
+    - 普通度量：{field, agg} 直接透传；若字段名恰好命中受治理指标（key/名称），
+      自动升级为指标引用（口径统一，避免"指标名当字段用"导致查询失败）。
     - 指标度量：{metric_id 或 metric_key} + 可选 dimensions 覆盖 → 解析为表达式度量，
       同时返回带 metric 引用的展示形态（前端据此随口径刷新）。
 
@@ -351,6 +386,34 @@ async def resolve_measures(
     """
     executable: list[MeasureConfig] = []
     display: list[dict] = []
+    # 惰性构建「字段名/名称 → 指标」的大小写不敏感索引（仅当出现普通度量时）
+    _name_index: dict[str, object] | None = None
+    # 「锚字段 → 受治去重指标」索引：如 customer_id → customer_count(COUNT DISTINCT)
+    _distinct_index: dict[str, object] | None = None
+
+    async def _index_by_name():
+        nonlocal _name_index
+        if _name_index is None:
+            idx: dict[str, object] = {}
+            for m in await list_metrics_for_user(db, user_id):
+                idx[m.key.casefold()] = m
+                idx[(m.name or "").casefold()] = m
+            _name_index = idx
+        return _name_index
+
+    async def _index_by_distinct_field():
+        nonlocal _distinct_index
+        if _distinct_index is None:
+            idx: dict[str, object] = {}
+            for m in await list_metrics_for_user(db, user_id):
+                if (m.agg_kind or "").upper() != "COUNT_DISTINCT":
+                    continue
+                # 锚字段 = 公式里的模板占位字段（如 COUNT(DISTINCT {{customer_id}}) → customer_id）
+                for anchor in extract_metric_fields(m.formula or ""):
+                    idx.setdefault(str(anchor).casefold(), m)
+            _distinct_index = idx
+        return _distinct_index
+
     for m in raw_measures or []:
         if not isinstance(m, dict):
             continue
@@ -382,6 +445,40 @@ async def resolve_measures(
             field = m.get("field")
             if not field:
                 continue
+            # 字段名命中受治理指标（key/名称）→ 升级为指标引用，口径统一
+            idx = await _index_by_name()
+            named_metric = idx.get(str(field).casefold())
+            if named_metric is not None:
+                fill = _fill_template_placeholders(named_metric) or (
+                    [str(m["field"])] if m.get("field") else (dimensions or [])
+                )
+                cfg = resolve_metric(named_metric, dimensions=fill, chart_type=None)
+                executable.append(cfg.measures[0])
+                display.append({
+                    "metric_id": str(named_metric.id),
+                    "metric_key": named_metric.key,
+                    "metric_name": named_metric.name,
+                    "expression": cfg.measures[0].expression,
+                    "resolved_from_field": str(field),
+                })
+                continue
+            # 字段是某个受治"去重指标"的锚字段（如 customer_id → customer_count），
+            # 且 LLM 用了普通 COUNT（会把重复行都算虚高）→ 升级为 COUNT(DISTINCT) 权威口径。
+            if (m.get("agg") or "").upper() == "COUNT":
+                didx = await _index_by_distinct_field()
+                distinct_metric = didx.get(str(field).casefold())
+                if distinct_metric is not None:
+                    fill = _fill_template_placeholders(distinct_metric) or [str(field)]
+                    cfg = resolve_metric(distinct_metric, dimensions=fill, chart_type=None)
+                    executable.append(cfg.measures[0])
+                    display.append({
+                        "metric_id": str(distinct_metric.id),
+                        "metric_key": distinct_metric.key,
+                        "metric_name": distinct_metric.name,
+                        "expression": cfg.measures[0].expression,
+                        "resolved_from_field": str(field),
+                    })
+                    continue
             agg = (m.get("agg") or "SUM").upper()
             executable.append(MeasureConfig(field=str(field), agg=agg))
             display.append({"field": str(field), "agg": agg})
@@ -445,6 +542,51 @@ def extract_metric_ids_from_blocks(blocks: list) -> list[str]:
             for mid in extract_metric_ids_from_measures(qc.get("measures", [])):
                 seen.add(mid)
     return list(seen)
+
+
+async def check_metric_field_bindings(
+    db: AsyncSession,
+    user_id: UUID | None,
+    datasource_id: UUID,
+    schema_meta: dict | None,
+) -> list[dict]:
+    """校验绑定到该数据源的指标，其公式字段是否在当前 schema 内（防重传断链）。
+
+    数据源重新上传/同步后 schema 可能变化，若指标公式引用的 {{field}} 不在新 schema 中，
+    该指标将失效。返回断链指标列表：[{key, name, missing_fields}]。
+    """
+    if not schema_meta:
+        return []
+    new_field_names = {
+        str(f.get("name"))
+        for f in (schema_meta.get("fields") or [])
+        if isinstance(f, dict) and f.get("name")
+    }
+    if not new_field_names:
+        return []
+    try:
+        stmt = select(MetricDefinition).where(
+            MetricDefinition.active.is_(True),
+            MetricDefinition.datasource_id == datasource_id,
+        )
+        if user_id is not None:
+            stmt = stmt.where(
+                (MetricDefinition.user_id == user_id) | (MetricDefinition.user_id.is_(None))
+            )
+        result = await db.execute(stmt)
+        metrics = result.scalars().all()
+    except Exception:  # noqa: BLE001
+        logger.warning("check_metric_bindings_query_failed", exc_info=True)
+        return []
+    broken: list[dict] = []
+    for m in metrics:
+        missing = [
+            f for f in extract_metric_fields(m.formula)
+            if f not in new_field_names
+        ]
+        if missing:
+            broken.append({"key": m.key, "name": m.name, "missing_fields": missing})
+    return broken
 
 
 class MetricService:

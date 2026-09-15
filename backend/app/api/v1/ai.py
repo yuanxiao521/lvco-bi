@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -47,7 +47,7 @@ from app.services.canvas_tools import CANVAS_TOOL_NAMES
 # 画布助手允许的工具 = 画布专属落块工具 + 基础查数/出图工具（先查再落）。
 # 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
 _CANVAS_QUERY_TOOL_NAMES = frozenset({
-    "list_datasources", "list_fields", "query_sql", "query_engine",
+    "list_datasources", "list_fields", "list_metrics", "query_sql", "query_engine",
     "stats_analyzer", "recommend_charts",
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
@@ -611,6 +611,26 @@ async def data_chat_stream(
                             f"用户问题: {body.message}"
                         )
 
+            # 指标清单注入（所有分析入口共享）：让 Lead/ReAct/Orchestrator 优先引用受治理指标，
+            # 而非让 LLM 自由拼 SUM(field)。指标多时只给示例 + 提示调 list_metrics，避免上下文膨胀。
+            metrics_ctx_for_lead = ""
+            try:
+                from app.services.metric_service import format_metrics_context, list_metrics_for_user
+                _metrics = await list_metrics_for_user(db, current_user.id)
+                metrics_ctx_for_lead = format_metrics_context(_metrics)
+                if metrics_ctx_for_lead:
+                    if len(metrics_ctx_for_lead) <= 4000:
+                        agent_message += f"\n\n【系统注入：平台已定义的受治理业务指标】\n{metrics_ctx_for_lead}\n涉及这些指标的问题必须用 metric_key 引用（可用 list_metrics 查看），不要自行拼 SUM/AVG 口径"
+                    else:
+                        sample_keys = ", ".join(f'"{m.key}"' for m in _metrics[:5])
+                        agent_message += (
+                            f"\n\n【系统注入：平台已定义 {len(_metrics)} 个受治理业务指标，无法全量展示；"
+                            f"示例 key: {sample_keys}。查询涉及业务指标口径时先调 list_metrics 查看完整清单，"
+                            f"再用 metric_key 引用，不要自行拼 SUM/AVG 口径】"
+                        )
+            except Exception:
+                _log.info("metrics context injection skipped", exc_info=True)
+
             full_content = ""
             collected_charts: list[dict] = []
             seen_chart_keys: set[str] = set()
@@ -639,13 +659,41 @@ async def data_chat_stream(
                     content = stripped
                     if content.startswith('> '):
                         content = content[2:].strip()
-                    # 过滤 emoji 状态行（📂 正在浏览...、✅ 查询成功...等）
+                    # 过滤 emoji 状态行（ 正在浏览...、✅ 查询成功...等）
                     if _STATUS_EMOJI_RE.match(content) and _STATUS_KEYWORDS_RE.search(content):
                         continue
                     # 过滤元话语（"好的！让我先查看..."等）
                     if _META_START_RE.match(content) and _META_KEYWORDS_RE.search(content):
                         continue
                     if _META_SELF_RE.match(content) and _META_SELF_KEYWORDS_RE.search(content):
+                        continue
+                    filtered.append(line)
+                result = '\n'.join(filtered)
+                result = re.sub(r'\n{3,}', '\n\n', result)
+                return result
+
+            def _filter_canvas_tool_result_lines(text: str) -> str:
+                """过滤画布工具执行结果行（"已添加文本: ..."、"已添加图表: ..."等）。
+
+                这些行是工具调用返回的叙述，只应在 ActivityFeed 或 Lead 上下文中展示，
+                不应污染主对话气泡。
+                """
+                if not text:
+                    return text
+                lines = text.split('\n')
+                filtered: list[str] = []
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        filtered.append(line)
+                        continue
+                    # 过滤 "已添加文本: ..."、"已添加图表: ..." 等工具结果行
+                    if re.match(r'^已添加(?:文本|图表|块)[：:]\s*', stripped):
+                        continue
+                    # 过滤 "分析完成，已在画布上添加了 N 个内容块" 等纯模板总结行
+                    # （带要点的收尾如"分析完成，已生成 3 个内容块。要点：xxx（详见画布）"
+                    #  不属于模板，应保留在气泡里，所以只滤精确模板形态）
+                    if re.match(r'^分析完成[，,]\s*已在画布上添加了 \d+ 个内容块', stripped):
                         continue
                     filtered.append(line)
                 result = '\n'.join(filtered)
@@ -751,6 +799,7 @@ async def data_chat_stream(
                     entry="chat",
                     datasource_id=body.datasource_id,
                     history_summary=memory_summary or "",
+                    metrics_ctx=metrics_ctx_for_lead,
                 )
                 for h in history:
                     if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
@@ -769,7 +818,10 @@ async def data_chat_stream(
                 if event["type"] == "text":
                     raw_delta = event["content"]
                     visible_delta = _strip_and_normalize(raw_delta)
+                    # 过滤进度文本（"【x/y】..."）和工具执行结果行（"已添加文本/图表: ..."），
+                    # 这些只在 ActivityFeed / Lead 上下文中展示，不污染主气泡
                     visible_delta = _filter_status_text(visible_delta)
+                    visible_delta = _filter_canvas_tool_result_lines(visible_delta)
                     if visible_delta.strip():
                         yield f"data: {json.dumps({'type': 'message', 'delta': visible_delta}, ensure_ascii=False)}\n\n"
                 elif event["type"] == "tool_call":
@@ -1206,7 +1258,7 @@ async def ai_query(
                 if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
                     pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
                     table_ref = f'"{schema_name}".public."{pg_table}"'
-                    # 查询前先 DETACH + ATTACH，确保 PostgreSQL 连接有效
+                    # 查询前先 DETACH + ATTACH，确保外部数据库连接有效（按类型选对应连接器）
                     from app.utils.crypto import decrypt_value, get_encryption_key
                     try:
                         duckdb_client.execute(f'DETACH "{schema_name}"')
@@ -1216,10 +1268,14 @@ async def ai_query(
                     key = get_encryption_key()
                     if key and conn_info.get("password"):
                         conn_info["password"] = decrypt_value(conn_info["password"], key)
-                    conn_info["user"] = conn_info.get("username", "postgres")
+                    conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
                     conn_info["database"] = conn_info.get("db_name", "")
-                    from app.connectors.postgres_connector import postgres_connector as pg_conn
-                    attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+                    if datasource.source_type == SourceType.mysql:
+                        from app.connectors.mysql_connector import mysql_connector as mysql_conn
+                        attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
+                    else:
+                        from app.connectors.postgres_connector import postgres_connector as pg_conn
+                        attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
                     duckdb_client.execute(attach_sql)
                 else:
                     table_ref = f'"{schema_name}"."data"'
@@ -1384,7 +1440,7 @@ async def generate_insights(
     if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
         pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
         table_ref = f'"{schema_name}".public."{pg_table}"'
-        # 查询前先 DETACH + ATTACH
+        # 查询前先 DETACH + ATTACH（按类型选对应连接器）
         from app.utils.crypto import decrypt_value, get_encryption_key
         try:
             duckdb_client.execute(f'DETACH "{schema_name}"')
@@ -1394,10 +1450,14 @@ async def generate_insights(
         key = get_encryption_key()
         if key and conn_info.get("password"):
             conn_info["password"] = decrypt_value(conn_info["password"], key)
-        conn_info["user"] = conn_info.get("username", "postgres")
+        conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
         conn_info["database"] = conn_info.get("db_name", "")
-        from app.connectors.postgres_connector import postgres_connector as pg_conn
-        attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+        if datasource.source_type == SourceType.mysql:
+            from app.connectors.mysql_connector import mysql_connector as mysql_conn
+            attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
+        else:
+            from app.connectors.postgres_connector import postgres_connector as pg_conn
+            attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
         duckdb_client.execute(attach_sql)
     else:
         table_ref = f'"{schema_name}"."data"'
@@ -1597,7 +1657,7 @@ async def canvas_ai_chat(
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
             pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
             table_ref = f'"{schema_name}".public."{pg_table}"'
-            # Ensure fresh connection
+            # 确保外部数据库连接有效（按类型选对应连接器）
             from app.utils.crypto import decrypt_value, get_encryption_key
 
             try:
@@ -1608,11 +1668,16 @@ async def canvas_ai_chat(
             key = get_encryption_key()
             if key and conn_info.get("password"):
                 conn_info["password"] = decrypt_value(conn_info["password"], key)
-            conn_info["user"] = conn_info.get("username", "postgres")
+            conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
             conn_info["database"] = conn_info.get("db_name", "")
-            from app.connectors.postgres_connector import postgres_connector as pg_conn
+            if datasource.source_type == SourceType.mysql:
+                from app.connectors.mysql_connector import mysql_connector as mysql_conn
 
-            attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
+            else:
+                from app.connectors.postgres_connector import postgres_connector as pg_conn
+
+                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
             duckdb_client.execute(attach_sql)
         else:
             table_ref = f'"{schema_name}"."data"'
@@ -1637,6 +1702,21 @@ async def canvas_ai_chat(
                 if ct:
                     canvas_ctx += f"，当前选中图表类型={ct}（仅供参考，请根据数据特征自主选择最合适的图表类型）"
                 canvas_ctx += "\n"
+        # 布局感知（v2）：附加各块坐标，LLM 据此判断画布是否整齐、是否需要 arrange_layout
+        _coord_blocks = [b for b in (body.canvas_context.get("blocks") or []) if isinstance(b, dict) and b.get("type") == "chart" and b.get("x") is not None]
+        if len(_coord_blocks) >= 2:
+            canvas_ctx += (
+                f"\n画布当前有 {len(_coord_blocks)} 个图表块，布局坐标如下（x,y 为左上角，width×height 为尺寸）：\n"
+            )
+            for b in _coord_blocks:
+                canvas_ctx += (
+                    f"- id={b.get('id') or b.get('block_id') or '?'} "
+                    f"pos=({b.get('x')},{b.get('y')}) "
+                    f"size={b.get('width')}×{b.get('height')}\n"
+                )
+            canvas_ctx += (
+                "若发现块位置重叠或参差不齐，可在完成落块后调用 arrange_layout 工具自动整理为报告式布局。\n"
+            )
         # 即使没有选中图表块，也告知 AI 可以根据字段自由推荐图表
         if not canvas_ctx.strip():
             canvas_ctx = "当前画布为空，你可以根据数据源字段自由推荐图表配置。\n"
@@ -1710,14 +1790,16 @@ async def canvas_ai_chat(
             user_msg_parts = ["当前未连接数据源，你可以与用户就其需求自由对话。"]
 
     # 注入指标清单：让 Planner 优先引用命名指标（metric key）而非裸字段聚合，
-    # 从而统一口径、支持随指标定义联动刷新。
+    # 从而统一口径、支持随指标定义联动刷新。同时保留给 LeadContext.metrics_ctx
+    # （决策器 / answer 分支直接消费，避免简单问答把裸字段当指标名）。
+    metrics_ctx_for_lead = ""
     try:
         from app.services.metric_service import format_metrics_context, list_metrics_for_user
 
         metrics = await list_metrics_for_user(db, current_user.id)
-        metric_ctx = format_metrics_context(metrics)
-        if metric_ctx:
-            user_msg_parts.append(metric_ctx)
+        metrics_ctx_for_lead = format_metrics_context(metrics)
+        if metrics_ctx_for_lead:
+            user_msg_parts.append(metrics_ctx_for_lead)
     except Exception:
         _log.info("metrics context injection skipped", exc_info=True)
 
@@ -1786,9 +1868,11 @@ async def canvas_ai_chat(
                     if sess:
                         session_id = sess.id
 
-            # 无有效 session_id：优先复用该画布最近会话，未命中才新建（草稿无 canvas_id / new_session=true 时直接新建）
+            # 无有效 session_id：画布 1:1 —— 复用该画布「唯一（最近）会话」；
+            # new_session=true 时清空该会话历史重新开始，不新建第二条画布会话。
+            # 草稿（无 canvas_id）场景保持新建。
             if session_id is None and body.message.strip():
-                if canvas_owner_ok and canvas_uid is not None and not body.new_session:
+                if canvas_owner_ok and canvas_uid is not None:
                     latest = (
                         await db.execute(
                             select(AISession)
@@ -1803,8 +1887,34 @@ async def canvas_ai_chat(
                     ).scalar_one_or_none()
                     if latest is not None:
                         session_id = latest.id
-
-                if session_id is None:
+                        if body.new_session:
+                            # 清空重来：删除该会话全部消息，复用同一会话 id
+                            await db.execute(
+                                delete(AIMessage).where(AIMessage.session_id == session_id)
+                            )
+                            await db.flush()
+                            # 通知前端已重置（同一画布会话），避免前端残留旧引用
+                            yield _sse({
+                                "type": "session_created",
+                                "session_id": str(session_id),
+                                "reset": True,
+                            })
+                    else:
+                        sess = AISession(
+                            user_id=current_user.id,
+                            entry="canvas",
+                            canvas_id=canvas_uid,
+                            title="画布对话",
+                        )
+                        db.add(sess)
+                        await db.flush()
+                        await db.refresh(sess)
+                        session_id = sess.id
+                        yield _sse({
+                            "type": "session_created",
+                            "session_id": str(session_id),
+                        })
+                else:
                     sess = AISession(
                         user_id=current_user.id,
                         entry="canvas",
@@ -1919,6 +2029,7 @@ async def canvas_ai_chat(
                     canvas_id=body.canvas_id,
                     datasource_id=str(datasource.id) if datasource else body.datasource_id,
                     history_summary=memory_summary or "",
+                    metrics_ctx=metrics_ctx_for_lead,
                 )
                 for h in history:
                     if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
@@ -1929,7 +2040,7 @@ async def canvas_ai_chat(
                         llm=LLMClient(settings),
                         observer=get_observer(),
                         extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
-                    ).stream(body.message, ctx=lead_ctx, db_session=db),
+                    ).stream(user_msg, ctx=lead_ctx, db_session=db),
                     _legacy_stream,
                 )
             else:

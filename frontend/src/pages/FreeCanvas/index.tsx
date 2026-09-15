@@ -576,12 +576,22 @@ export default function FreeCanvas() {
   }, [canvasId, refreshingAll, clearCrossFilter, toast]);
 
   // 后端 autosave：canvasId 存在时，blocks 变化 debounce 1.5s → PUT /canvases/:id/blocks
+  // 关键点：切换画布 / 组件卸载时 effect cleanup 会 clearTimeout 取消 debounce，
+  // 若只清定时器不补发，待保存的 blocks（含 AI 刚落的新块）会永远丢失。
+  // 解决：用 pendingSaveRef 保存"最后一次待同步的完整快照 + 其 canvasId"，
+  // debounce 定时器 fire 时正常保存；cleanup 时若仍有未保存快照则立即补发。
+  const pendingSaveRef = useRef<{ cid: string; snap: string } | null>(null);
   useEffect(() => {
     if (!hydrated || !canvasId) return;
     const serialized = JSON.stringify(blocks);
     if (serialized === lastBackendSyncRef.current) return;
-    const timer = window.setTimeout(() => {
-      // 给每个图表块附加查询配置和结果数据，供后端 PDF 导出使用
+
+    // 记录当前待同步快照（cit 固定捕获本次 canvasId，避免依赖变化后串画布）
+    const cid = canvasId;
+    pendingSaveRef.current = { cid, snap: serialized };
+
+    const doSave = async (snap: string) => {
+      // 用快照时刻的 blocks 派生嵌入字段；快照已记录在 pending，这里用闭包取当前 blocks
       const blocksWithData = blocks.map((b) => {
         if (b.type !== "chart" || !("blockId" in b)) return b;
         const blockId = (b as { blockId: string }).blockId;
@@ -591,15 +601,47 @@ export default function FreeCanvas() {
           _chartResult: chartResults[blockId] ?? null,
         };
       });
-      updateCanvasBlocks(canvasId, blocksWithData)
-        .then(() => {
-          lastBackendSyncRef.current = serialized;
-        })
-        .catch((e) => {
-          console.warn("自动保存画布 blocks 失败:", e);
-        });
+      try {
+        await updateCanvasBlocks(cid, blocksWithData);
+        lastBackendSyncRef.current = snap;
+        // 仅当 pending 仍指向同一快照时才清空，避免覆盖更新的待保存内容
+        if (pendingSaveRef.current?.snap === snap) {
+          pendingSaveRef.current = null;
+        }
+      } catch (e) {
+        console.warn("自动保存画布 blocks 失败:", e);
+        // 保留 pending，下次依赖变化可重试
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      void doSave(serialized);
     }, 1500);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      // cleanup（切画布/依赖变化/卸载）：若 debounce 未 fire 且有未同步快照，立即补发
+      const pending = pendingSaveRef.current;
+      if (pending && pending.cid === cid) {
+        pendingSaveRef.current = null; // 先置空，避免 doSave 内部自我比较误判
+        const snap = pending.snap;
+        const blocksWithData = blocks.map((b) => {
+          if (b.type !== "chart" || !("blockId" in b)) return b;
+          const blockId = (b as { blockId: string }).blockId;
+          return {
+            ...b,
+            _chartConfig: chartConfigs[blockId] ?? null,
+            _chartResult: chartResults[blockId] ?? null,
+          };
+        });
+        updateCanvasBlocks(cid, blocksWithData)
+          .then(() => {
+            lastBackendSyncRef.current = snap;
+          })
+          .catch((e) => {
+            console.warn("切换画布前保存 blocks 失败:", e);
+          });
+      }
+    };
   }, [hydrated, canvasId, blocks]);
 
   // 点击图表块时，同步配置面板显示该块的维度/度量/图表类型
@@ -1045,9 +1087,10 @@ export default function FreeCanvas() {
       }
 
       // 全量重排：报告式布局（h1/h2/text 通栏 + 图表双列网格）
+      // 系统自动触发（auto:true，编排器落块后兜底）不弹 toast，避免批量落块时刷屏
       case "arrange_layout": {
         setBlocks((prev) => applyReportLayout(prev));
-        toast.success("已按报告式布局重排画布");
+        if (!action.auto) toast.success("已按报告式布局重排画布");
         break;
       }
 

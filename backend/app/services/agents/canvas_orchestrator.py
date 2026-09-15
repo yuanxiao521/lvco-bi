@@ -40,11 +40,14 @@ _MAX_TOOL_CALLS_PER_STEP = 4  # 单步内最多工具调用次数
 _STEP_TIMEOUT = 45  # 单步超时（秒）
 _MAX_STEP_FAILURES = 3  # 同一工具+参数连续失败跳过阈值
 
-# 执行器可见工具：仅纯落块工具。查询/取数由 add_chart_block 内部完成，
-# 不再让 LLM 在"建图"步骤里先 query_engine 再落块（会查而不建）。
+# 执行器可见工具：纯落块工具 + list_fields。
+# 查询/取数由 add_chart_block 内部完成，不再让 LLM 在"建图"步骤里先 query_engine
+# 再落块（会查而不建）。但 **list_fields 保留**：当注入的字段清单缺失或有字段不确定
+# 时，执行器可主动拉真实列名，避免凭空猜列名导致整块失败。
 _EXECUTOR_TOOL_NAMES = frozenset({
     "add_chart_block", "add_text_block",
     "update_chart_block", "remove_block", "arrange_layout",
+    "list_fields",
 })
 
 # goal 达成校验：连续"无工具调用直接收尾"的最大容忍次数。
@@ -69,6 +72,29 @@ def _has_canvas_action(result_str: str) -> bool:
     if parsed.get("error"):
         return False
     return isinstance(parsed.get("canvas_action"), dict)
+
+
+def _collect_landed_chart_types(results: dict) -> list[str]:
+    """从已成功落块的画布步骤结果里收集图表类型（chartType）。
+
+    results: {step_id: 结果JSON字符串}。只统计 canvas_action 成功且 block 带 chartType 的
+    （add_chart_block 成功落块 / update_chart_block 改类型后的最终类型都计入）。
+    """
+    types: list[str] = []
+    for r in results.values():
+        if not isinstance(r, str):
+            continue
+        try:
+            parsed = json.loads(r)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict) or parsed.get("error"):
+            continue
+        block = (parsed.get("canvas_action") or {}).get("block") or {}
+        ct = block.get("chartType")
+        if ct:
+            types.append(str(ct))
+    return types
 
 
 class CanvasOrchestrator:
@@ -120,15 +146,25 @@ class CanvasOrchestrator:
         async def run() -> None:
             state_sink: dict = {}
             try:
-                await self.graph.invoke(
-                    {"user_id": user_id},
-                    user_msg=user_msg,
-                    history=history or [],
-                    available_datasources=available_datasources or [],
-                    db_session=self.db_session,
-                    emit=emit,
-                    state_sink=state_sink,
-                )
+                from app.services.observability import get_observer
+
+                observer = get_observer()
+                with observer.trace(
+                    "canvas_execute",
+                    user_id=user_id,
+                    session_id=getattr(self.db_session, "session_id", None) if self.db_session else None,
+                    metadata={"user_msg_length": len(user_msg), "history_length": len(history or [])},
+                ) as trace:
+                    await self.graph.invoke(
+                        {"user_id": user_id},
+                        user_msg=user_msg,
+                        history=history or [],
+                        available_datasources=available_datasources or [],
+                        db_session=self.db_session,
+                        emit=emit,
+                        trace=trace,
+                        state_sink=state_sink,
+                    )
             except Exception as e:
                 logger.exception("[canvas_orchestrator] 图执行异常: %s", e)
                 await emit({"type": "error", "message": f"画布编排执行异常: {str(e)}"})
@@ -213,6 +249,25 @@ class CanvasOrchestrator:
             await asyncio.gather(
                 *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
             )
+
+        # 报告式多图引导：计划含 ≥2 个 add_chart_block 步骤，但实际只落出 <2 种图表类型时，
+        # 追加一个补图步骤（补一种缺失的推荐类型），从机制上保证报告图表多样性，
+        # 不再单纯依赖 LLM 自觉（避免"失败几次后收敛成单一图表类型/自暴自弃"）。
+        await self._fill_missing_chart_types(results, state, **shared)
+
+        # 落块完成自动整理布局：本次确实产出过可落块的 canvas_action 时，
+        # 确定性触发一次报告式重排（前端 applyReportLayout），
+        # 不依赖 LLM 主动调用 arrange_layout，避免每轮添加后块位置错乱。
+        any_block = any(
+            _has_canvas_action(str(r)) for r in results.values()
+        )
+        if any_block:
+            await emit({
+                "type": "canvas_action",
+                "action": {"action": "arrange_layout", "layout": "auto", "auto": True},
+            })
+            logger.info("[canvas_orchestrator] 落块完成，自动触发 report 布局重排")
+
         shared["state_sink"]["results"] = dict(results)
         return {"results": results}
 
@@ -233,6 +288,48 @@ class CanvasOrchestrator:
             logger.warning("[canvas_orchestrator] 步骤 %s 执行超时", sid)
         except asyncio.CancelledError:
             raise
+
+    # 报告式补图引导：推荐类型覆盖（缺失类型自动补一张图）
+    _REPORT_RECOMMEND = ("kpi_card", "line", "bar", "grouped_bar")
+
+    async def _fill_missing_chart_types(self, results: dict, state: dict, **shared) -> None:
+        """报告式多图引导：已落图表类型不足时，自动补一张缺失类型的图。
+
+        触发条件（全部满足）：
+        - 计划是报告式：add_chart_block 步骤 ≥2（单图/改图请求不触发）；
+        - 已成功落块的图表类型去重后 <2 种（多样性不够）。
+        补图选型：从推荐组合里挑第一种"尚未落出"的类型，避免报告全部收敛成单一图表。
+        """
+        plan = state.get("plan") or {}
+        steps = plan.get("steps") or []
+        chart_steps = [s for s in steps if (s.get("tool") or "") == "add_chart_block"]
+        if len(chart_steps) < 2:
+            return
+        landed = _collect_landed_chart_types(results)
+        landed_set = set(landed)
+        if len(landed_set) >= 2 or not landed_set:
+            # 已达多样性（≥2 种）或一张图都没落成（补图也无依据，交给下轮重派）
+            return
+        # 挑缺失推荐类型
+        missing_type = next((t for t in self._REPORT_RECOMMEND if t not in landed_set), None)
+        if missing_type is None:
+            return
+        sid = max((int(s.get("step_id") or 0) for s in steps), default=0) + 1
+        fill_step = {
+            "step_id": sid,
+            "goal": (
+                f"新增图表（{missing_type}）：补充一张不同类型的图表以丰富报告结构。"
+                f"当前报告已落图表类型：{landed}，请用 {missing_type} 类型，"
+                "维度/度量从【目标数据源字段清单】中选取。"
+            ),
+            "tool": "add_chart_block",
+            "depends_on": [],
+            "purpose": "报告图表多样性（系统补图）",
+        }
+        ordered = state.get("ordered_steps") or []
+        state["ordered_steps"] = [*ordered, fill_step]
+        await self._run_step_with_timeout(fill_step, results, state, **shared)
+        logger.info("[canvas_orchestrator] 报告式补图：已落 %s → 补 %s", sorted(landed_set), missing_type)
 
     async def _agentic_run_step(self, step: dict, results: dict, state: dict, **shared) -> None:
         """单步 mini-ReAct：LLM 决策落块工具 → ToolExecutor 执行 → 直到 goal 完成。"""
@@ -267,14 +364,32 @@ class CanvasOrchestrator:
             # 1. LLM 决策
             tool_calls: list[dict] = []
             text_parts: list[str] = []
+            # LLM 决策观测：同 Lead/ReAct 口径（Langfuse generation + 真实模型名）
+            _obs_cm = None
+            _trace = shared.get("trace")
+            if _trace is not None:
+                from app.services.observability import observe_llm_call
+
+                _obs_cm = observe_llm_call(
+                    _trace, f"canvas_exec_{sid}", messages=messages,
+                    model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+                )
+                _obs_cm.__enter__()
             try:
-                async for event in self.llm.stream_chat_with_tools(
-                    messages, all_tools, temperature=0.3, max_tokens=2000,
-                ):
-                    if event["type"] == "text":
-                        text_parts.append(event.get("content", ""))
-                    elif event["type"] == "tool_call":
-                        tool_calls.append(event)
+                try:
+                    async for event in self.llm.stream_chat_with_tools(
+                        messages, all_tools, temperature=0.3, max_tokens=2000,
+                    ):
+                        if event["type"] == "text":
+                            text_parts.append(event.get("content", ""))
+                        elif event["type"] == "tool_call":
+                            tool_calls.append(event)
+                finally:
+                    if _obs_cm is not None:
+                        try:
+                            _obs_cm.__exit__(None, None, None)
+                        except Exception:  # noqa: BLE001
+                            logger.debug("canvas exec span exit failed", exc_info=True)
             except Exception as e:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
@@ -441,18 +556,33 @@ class CanvasOrchestrator:
             parts.append("已完成的依赖步骤结果：\n" + "\n".join(prior))
         ds = shared.get("available_datasources") or []
         if ds:
+            # 权威字段段：只列出已注入字段的数据源（选中源 / 画布默认目标源），
+            # 其余源（fields 为空）以表级摘要带过，避免混淆且省上下文。
+            with_fields = [d for d in ds if d.get("fields")]
             ds_lines = []
-            for d in ds[:10]:
+            for d in with_fields[:5]:
                 fields = d.get("fields") or []
                 field_parts = [
                     f"{f.get('name', '?')}({f.get('data_type', '')})"
-                    for f in (fields[:15] if isinstance(fields, list) else [])
+                    for f in (fields[:40] if isinstance(fields, list) else [])
                 ]
                 ds_lines.append(
-                    f"- id={d.get('id')} name={d.get('name')} type={d.get('type')} "
-                    f"table_ref={d.get('table_ref', '')} 字段: {', '.join(field_parts)}"
+                    f"- id={d.get('id')} name={d.get('name')} table_ref={d.get('table_ref', '')} "
+                    f"字段: {', '.join(field_parts)}"
                 )
-            parts.append("可用数据源（add_chart_block 的 dimensions/measures 必须用这里的真实字段名）：\n" + "\n".join(ds_lines))
+            other_names = [
+                f"{d.get('name')}({d.get('id')})"
+                for d in ds if not d.get("fields")
+            ]
+            if with_fields:
+                parts.append(
+                    "【目标数据源字段清单】以下列名是本画布唯一可信来源，"
+                    "add_chart_block 的 dimensions/measures 必须一字不差抄这里的字段名"
+                    "（不要汉化、不要翻译、不要臆造）；可直接使用，无需再调 list_fields：\n"
+                    + "\n".join(ds_lines)
+                )
+            if other_names:
+                parts.append("其他数据源（仅表级，需字段时先 list_fields）：" + "、".join(other_names))
         return "\n\n".join(parts)
 
     @staticmethod

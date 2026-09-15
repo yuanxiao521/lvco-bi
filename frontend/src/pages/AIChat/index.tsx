@@ -636,9 +636,9 @@ export default function AIChat() {
                             </div>
                           );
                         })()}
-                        {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示 */}
+                        {/* Agent 工作台嵌入到最新 AI 回复气泡内，仅当有实际步骤时展示（收敛卡片自带边框分区） */}
                         {isLastAssistant && agentSteps.length > 0 && (
-                          <div className="mt-3 pt-3 border-t border-border-light/60">
+                          <div className="mt-3">
                             <ActivityFeed steps={agentSteps} meta={agentMeta ?? undefined} />
                           </div>
                         )}

@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import re
 from typing import Any, AsyncIterator
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -46,7 +47,7 @@ class PlanOutput(BaseModel):
 
 # 兜底白名单：优先从 ToolRegistry 动态获取，异常/空集合时使用此常量
 _ORCHESTRATOR_TOOLS_FALLBACK = frozenset({
-    "list_datasources", "query_sql", "query_engine", "data_quality",
+    "list_datasources", "list_metrics", "query_sql", "query_engine", "data_quality",
     "insight", "clean_suggest", "recommend_charts", "render_chart",
     "validate_chart", "polish_text",
 })
@@ -86,6 +87,31 @@ _INTENT_KEYWORDS = (
 _MIN_PLAN_STEPS = 5
 _MAX_PLAN_STEPS = 12
 
+# 中文维度枚举：如"按品类、品牌、季节三个维度"中的分隔符
+_DIM_SEPARATORS = "、，,和与及"
+
+
+def _count_named_dimensions(user_msg: str) -> int:
+    """统计用户显式点名的分析维度个数（如"按品类、品牌、季节三个维度"→3）。
+
+    用于给多维报告请求放宽步骤上限——用户点名了几个维度，planner 就要为每个
+    维度规划"1 图 + 1 叙事"，步骤数可能超出默认上限，硬截断会把后部维度章节
+    （P001 的"季节"）整段切掉。识别不到明确的"按…维度"枚举时返回 0（不加成）。
+    """
+    if not user_msg:
+        return 0
+    m = re.search(r"按([\u4e00-\u9fffA-Za-z0-9_" + re.escape(_DIM_SEPARATORS) + r"]+?)维度", user_msg)
+    if not m:
+        return 0
+    seg = m.group(1)
+    parts = [
+        p.strip() for p in re.split(r"[、，,和与及]", seg)
+        if p.strip() and not re.fullmatch(r"[两一二三四五六七八九十百千万0-9]+", p.strip())
+    ]
+    # 去掉量词性残余（"三个""多"），并排除单维度表达（无分隔符则为 1 个维度）
+    named = [p for p in parts if not re.fullmatch(r"[多个两一二三四五六七八九十百千万0-9]+", p)]
+    return len(set(named) or named)
+
 
 def _estimate_max_steps(user_msg, datasource_count=0) -> int:
     """根据任务复杂度与数据源数量估算最大步骤数，clamp 到 [_MIN_PLAN_STEPS, _MAX_PLAN_STEPS]。"""
@@ -94,7 +120,9 @@ def _estimate_max_steps(user_msg, datasource_count=0) -> int:
     intent_bonus = min(matched, 4)
     # 多数据源加成：1 个数据源无加成，2 个起加成，最多 +3
     datasource_bonus = 0 if datasource_count <= 1 else min(datasource_count, 3)
-    raw = _MIN_PLAN_STEPS + intent_bonus + datasource_bonus
+    # 多维度点名加成：每个点名维度补 2 步（1 图 + 1 叙事），封顶 +8，避免维度章节被截断
+    dimension_bonus = min(_count_named_dimensions(user_msg) * 2, 8)
+    raw = _MIN_PLAN_STEPS + intent_bonus + datasource_bonus + dimension_bonus
     return max(_MIN_PLAN_STEPS, min(_MAX_PLAN_STEPS, raw))
 
 
@@ -160,9 +188,12 @@ class PlannerAgent(BaseAgent):
             with observer.trace("planner_agent_execute") as trace:
                 try:
                     plan_prompt = self._build_plan_prompt(user_msg, history, available_datasources)
-                    with observe_llm_call(trace, "planner_llm_call", messages=plan_prompt, model="planner") as llm_span:
-                        response = await self.llm.complete(plan_prompt, temperature=0.2, max_tokens=3000)
-                        llm_span.update(output=response[:500])
+                    with observe_llm_call(trace, "planner_llm_call", messages=plan_prompt) as llm_span:
+                        result = await self.llm.complete(plan_prompt, temperature=0.2, max_tokens=3000,
+                                                         return_usage=True)
+                        response = result if isinstance(result, str) else result[0]
+                        usage_meta = result[1] if isinstance(result, tuple) else None
+                        llm_span.update(output=response[:500], usage=usage_meta)
 
                     # 空响应重试：thinking 模式偶尔返回空 content，重试一次
                     if not response.strip():

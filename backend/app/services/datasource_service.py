@@ -50,6 +50,27 @@ class DataSourceService:
                 str(datasource_id), e,
             )
 
+    async def _check_metric_bindings(
+        self, user_id: UUID, datasource_id, schema_meta
+    ) -> list[dict]:
+        """数据源 schema 变更后校验绑定指标是否断链（重传导致字段失效）。"""
+        try:
+            from app.services.metric_service import check_metric_field_bindings
+
+            return await check_metric_field_bindings(
+                self.db, user_id, datasource_id, schema_meta
+            )
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _attach_broken_metrics(self, ds: DataSource, broken: list[dict]) -> None:
+        """把断链指标清单挂到 schema_meta.broken_metrics，前端可据此提示用户。"""
+        if not broken:
+            return
+        meta = dict(ds.schema_meta or {})
+        meta["broken_metrics"] = broken
+        ds.schema_meta = meta
+
     async def list_datasources(
         self,
         user_id: UUID,
@@ -137,6 +158,11 @@ class DataSourceService:
                 status=DatasourceStatus.connected.value,
                 last_synced_at=datetime.now(timezone.utc),
             )
+            # 重传后 schema 可能变化：校验绑定指标是否断链并挂到 schema_meta
+            broken = await self._check_metric_bindings(user_id, ds.id, ds.schema_meta)
+            if broken:
+                self._attach_broken_metrics(ds, broken)
+                await self.db.flush()
         except Exception as e:
             ds = await self.datasource_repo.update(
                 ds,
@@ -322,6 +348,10 @@ class DataSourceService:
             ds.status = DatasourceStatus.disconnected
 
         ds.last_synced_at = datetime.now(timezone.utc)
+        # 同步后 schema 可能变化：校验绑定指标是否断链并挂到 schema_meta
+        broken = await self._check_metric_bindings(user_id, ds.id, ds.schema_meta)
+        if broken:
+            self._attach_broken_metrics(ds, broken)
         await self.db.flush()
         await self.db.refresh(ds)
         return ds

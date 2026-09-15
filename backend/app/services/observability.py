@@ -44,12 +44,14 @@ class SpanRecord:
     input: Any = None
     output: Any = None
     error: str | None = None
+    usage: dict[str, Any] | None = None  # {"model","input","output"}，LLM 调用 token 用量
 
     def update(
         self,
         output: Any = None,
         metadata: dict[str, Any] | None = None,
         error: str | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> None:
         if output is not None:
             self.output = output
@@ -57,6 +59,8 @@ class SpanRecord:
             self.metadata.update(metadata)
         if error:
             self.error = error
+        if usage:
+            self.usage = usage
 
     def finish(self) -> None:
         self.end_time = time.time()
@@ -293,10 +297,19 @@ def observe_llm_call(
         span.finish()
         if langfuse_generation is not None:
             try:
-                langfuse_generation.update(
-                    output=span.output,
-                    metadata={"latency_ms": span.latency_ms, **(span.metadata)},
-                )
+                update_kwargs: dict[str, Any] = {
+                    "output": span.output,
+                    "metadata": {"latency_ms": span.latency_ms, **(span.metadata)},
+                }
+                # 透传真实模型名与 token 用量（cost 由 Langfuse 按模型价格表核算）
+                if span.usage:
+                    update_kwargs["usage"] = {
+                        "input": span.usage.get("input") or 0,
+                        "output": span.usage.get("output") or 0,
+                    }
+                    if span.usage.get("model"):
+                        update_kwargs["model"] = span.usage["model"]
+                langfuse_generation.update(**update_kwargs)
                 langfuse_generation.end()
             except Exception:
                 logger.debug("langfuse generation end failed", exc_info=True)

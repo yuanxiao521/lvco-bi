@@ -509,10 +509,14 @@ def ast_full_check(sql: str) -> tuple[bool, str, str, dict | None]:
     # ---- 步骤 1: 解析 ----
     parsed = parse_sql(sql)
     if parsed is None:
-        # SQLGlot 对部分 DuckDB 专有函数/写法无法解析，解析失败≠SQL 非法。
-        # 降级放行，交由 L3 正则 + 归属白名单 + DuckDB 执行兜底，避免误拦正确查询。
-        logger.warning("[ast_full_check] SQL 解析失败，降级放行交由 L3 兜底: %s", sql[:200])
-        return True, "", sql, {"parse_error": str(sql[:200])}
+        # fail-closed：解析异常一律拒绝，绝不降级放行。
+        # SQLGlot 解析失败可能源于恶意/畸形语句，也可能源于 DuckDB 专有写法；
+        # 无论哪种，宁可拒绝也不让未经验证的 SQL 到达执行层。
+        logger.warning("[ast_full_check] SQL 解析失败，拒绝执行(fail-closed): %s", sql[:200])
+        return False, "SQL 解析失败（可能含非法或不支持的语法），已拒绝执行", sql, {
+            "parse_error": str(sql[:200]),
+            "fail_closed": True,
+        }
 
     # ---- 步骤 2: 多语句检查 ----
     # 过滤掉空语句（纯注释等）

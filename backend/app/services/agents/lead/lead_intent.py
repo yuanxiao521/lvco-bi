@@ -111,6 +111,55 @@ def _degraded_result(user_msg: str, history_summary: str, reason: str) -> Intent
     )
 
 
+def parse_intent_fields(
+    obj: dict,
+    user_msg: str,
+    history_summary: str = "",
+) -> tuple[IntentResult | None, str]:
+    """从（独立或合并）LLM 输出 dict 中解析意图字段。
+
+    返回：
+        (IntentResult, "")：解析成功；
+        (None, 原因码)：intent 非法 / confidence / slots 异常（调用方决定兜底方式）。
+    """
+    raw_intent = str(obj.get("intent", "")).strip().lower()
+    try:
+        intent = IntentType(raw_intent)
+    except ValueError:
+        return None, f"invalid_intent:{raw_intent}"
+
+    try:
+        confidence = float(obj.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    slots = obj.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+
+    needs_plan = bool(obj.get("needs_plan")) or intent == IntentType.ANALYSIS
+    reason = str(obj.get("reason") or "")
+
+    return IntentResult(
+        intent=intent,
+        confidence=confidence,
+        slots=slots,
+        needs_plan=needs_plan,
+        reason=reason,
+        degraded=False,
+    ), ""
+
+
+def fallback_intent(
+    user_msg: str,
+    history_summary: str = "",
+    reason: str = "degraded",
+) -> IntentResult:
+    """确定性规则意图兜底（LLM 不可用 / 非法输出时使用）。"""
+    return _degraded_result(user_msg, history_summary, reason)
+
+
 async def classify_intent(
     user_msg: str,
     *,
@@ -163,38 +212,15 @@ async def classify_intent(
             degradation.append("lead_intent_fallback")
         return _degraded_result(user_msg, history_summary, "unparsable")
 
-    raw_intent = str(obj.get("intent", "")).strip().lower()
-    try:
-        intent = IntentType(raw_intent)
-    except ValueError:
-        logger.warning(f"[lead_intent] invalid_intent value={raw_intent!r} fallback=rule")
+    result, reason = parse_intent_fields(obj, user_msg, history_summary)
+    if result is None:
+        logger.warning(f"[lead_intent] invalid_intent reason={reason} fallback=rule")
         if degradation is not None:
             degradation.append("lead_intent_fallback")
-        return _degraded_result(user_msg, history_summary, f"invalid_intent:{raw_intent}")
-
-    try:
-        confidence = float(obj.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, confidence))
-
-    slots = obj.get("slots")
-    if not isinstance(slots, dict):
-        slots = {}
-
-    needs_plan = bool(obj.get("needs_plan")) or intent == IntentType.ANALYSIS
-    reason = str(obj.get("reason") or "")
-
-    result = IntentResult(
-        intent=intent,
-        confidence=confidence,
-        slots=slots,
-        needs_plan=needs_plan,
-        reason=reason,
-        degraded=False,
-    )
+        return _degraded_result(user_msg, history_summary, reason)
+    result.degraded = False
     logger.info(
-        f"[lead_intent] intent={intent.value} confidence={confidence:.2f} "
-        f"needs_plan={needs_plan} slots={list(slots.keys())}"
+        f"[lead_intent] intent={result.intent.value} confidence={result.confidence:.2f} "
+        f"needs_plan={result.needs_plan} slots={list(result.slots.keys())}"
     )
     return result

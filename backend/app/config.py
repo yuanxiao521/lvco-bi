@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     DUCKDB_DATA_DIR: str = "./data/duckdb"
     DUCKDB_MEMORY_LIMIT: str = "2GB"
+    # SQL 查询执行超时（秒）：guard 通过后抛给执行层的最长耗时。
+    # 查询超时保护：DuckDB 查询在 to_thread 中异步执行，超过该值直接中断并返回错误。
+    QUERY_EXEC_TIMEOUT: int = 30
     openai_api_key: str | None = None
     openai_model: str = "deepseek-v4-flash"
     openai_base_url: str = "https://api.openai.com/v1"
@@ -96,7 +99,7 @@ class Settings(BaseSettings):
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
-    LEAD_MAX_SUPERVISOR_ROUNDS: int = 4
+    LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
 
     # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
     INSIGHT_ENABLED: bool = True
@@ -109,9 +112,12 @@ class Settings(BaseSettings):
     CONTEXT_KEEP_ROUNDS: int = 3
 
     # 单工具结果压缩（rows 数据行保留前 N 行；insights 等建议列表不按条数截断，
-    # 完整保留，仅受上方 RESULT_MAX_CHARS 总字符上限兜底）
-    RESULT_MAX_CHARS: int = 1500
-    RESULT_MAX_ROWS: int = 10
+    # 完整保留，仅受上方 RESULT_MAX_CHARS 总字符上限兜底）。
+    # 2000/20：1500 字符对 executed_sql+summary+明细偏紧；20 行覆盖常见分析报表。
+    # 仍保留"工具侧 sample 50 行 → 注入侧 20 行 → 字符 2000 兜底"三层防线，
+    # 全量数据按需走 executed_sql 续查（LIMIT/OFFSET），不放开上限。
+    RESULT_MAX_CHARS: int = 2000
+    RESULT_MAX_ROWS: int = 20
     # 元数据类结果（无 rows 键，如 list_datasources 的完整列名/描述）保底上限。
     # 这类结果必须完整进入上下文才能让 LLM 拿到全量列名，不能用 1500 一刀切，
     # 仅用一个较大的上限防 pathological 超大响应。

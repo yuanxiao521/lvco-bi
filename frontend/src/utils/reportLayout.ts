@@ -29,12 +29,41 @@ const LEFT_X = REPORT.marginX; // 20
 const RIGHT_X = REPORT.marginX + REPORT.chartW + REPORT.colGap; // 520
 const MID_X = RIGHT_X - REPORT.colGap / 2; // 列归属判定中线：510
 
+/** 文本块渲染参数（与 CanvasBlocks 中 className 一致） */
+const TEXT_FONT_PX = 14;        // 正文 14px
+const TEXT_LINE_HEIGHT = 22;    // leading-relaxed ≈ 14*1.5
+const TEXT_H_PADDING = 20;      // 块内左右 padding（p-5）
+const TEXT_V_PADDING = 40;      // 块内上下 padding + 标签条空间
+
+/** 估算文本内容渲染后的实际高度（每行可容纳字符数，中文字符约等于字号宽度） */
+export function estimateTextHeight(content: string, widthPx: number, fontSize = TEXT_FONT_PX): number {
+  const text = (content ?? "").replace(/\n/g, "\n");
+  const usableWidth = Math.max(80, (widthPx || REPORT.fullW) - TEXT_H_PADDING * 2);
+  const charsPerLine = Math.max(8, Math.floor(usableWidth / fontSize));
+  let lines = 0;
+  for (const seg of text.split("\n")) {
+    lines += Math.max(1, Math.ceil((seg.length || 1) / charsPerLine));
+  }
+  return lines * TEXT_LINE_HEIGHT + TEXT_V_PADDING;
+}
+
 /** 文本块的估算高度（渲染为 auto，这里仅用于游标推进） */
 export function estimateBlockHeight(block: CanvasBlock): number {
   const t = (block as { type?: string }).type;
-  if (t === "h1") return 56;
-  if (t === "h2") return 44;
-  if (t === "text") return 72;
+  if (t === "h1") {
+    const c = (block as { content?: string }).content || "";
+    // h1 通常一行（22px 字），内容超长时按字数折行
+    return c ? Math.ceil((c.length || 1) / 40) * 34 + 24 : 56;
+  }
+  if (t === "h2") {
+    const c = (block as { content?: string }).content || "";
+    return c ? Math.ceil((c.length || 1) / 50) * 30 + 20 : 44;
+  }
+  if (t === "text") {
+    const c = (block as { content?: string }).content || "";
+    const w = typeof block.width === "number" ? block.width : REPORT.fullW;
+    return estimateTextHeight(c, w);
+  }
   if (t === "chart") return typeof block.height === "number" ? block.height : REPORT.chartH;
   const h = (block as { height?: unknown }).height;
   return typeof h === "number" ? h : 300;

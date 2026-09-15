@@ -187,6 +187,30 @@ async def create_metric(
     )
 
 
+@router.get("/{metric_id}")
+async def get_metric_detail(
+    metric_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse:
+    """指标详情（详情页入口）。可见范围与列表一致：自有 + 全局模板。"""
+    result = await db.execute(
+        select(MetricDefinition).where(
+            MetricDefinition.id == metric_id,
+            _visible_scope(current_user.id),
+        )
+    )
+    metric = result.scalar_one_or_none()
+    if metric is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "指标不存在"},
+        )
+    return SuccessResponse(
+        data=MetricResponse.model_validate(metric).model_dump(mode="json", by_alias=True)
+    )
+
+
 @router.patch("/{metric_id}")
 async def update_metric(
     metric_id: UUID,

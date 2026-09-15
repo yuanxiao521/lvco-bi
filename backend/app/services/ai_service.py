@@ -1015,6 +1015,10 @@ class AIService:
                     datasources = [d for d in datasources if str(d.id) == selected_datasource_id]
                 from app.services.agent_tools import duckdb_client
                 from app.models.datasource import SourceType
+                # 画布入口未选数据源时：只给首个数据源注入字段（默认目标源），其余保持表级摘要
+                prime_field_id = None
+                if not selected_datasource_id and entry == "canvas" and datasources:
+                    prime_field_id = str(datasources[0].id)
                 for ds in datasources:
                     schema_meta = ds.schema_meta or {}
                     fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
@@ -1026,13 +1030,14 @@ class AIService:
                         table_ref = f'"{schema_name}".public."{table_name}"'
                     else:
                         table_ref = f'"{schema_name}"."data"'
+                    fields_injected = (str(ds.id) == selected_datasource_id) or (str(ds.id) == prime_field_id)
                     available_datasources.append({
                         "id": str(ds.id),
                         "name": ds.name,
                         "description": ds.description,
                         "type": ds.source_type.value if ds.source_type else "unknown",
-                        "fields": fields if selected_datasource_id else [],
-                        "fields_injected": bool(selected_datasource_id),
+                        "fields": fields if fields_injected else [],
+                        "fields_injected": fields_injected,
                         "table_ref": table_ref,
                     })
                 log.info(

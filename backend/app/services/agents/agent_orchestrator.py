@@ -569,17 +569,35 @@ class AgentOrchestrator:
                             "skipped_reason": f"全局 LLM 调用已达上限（{_budget}），步骤 {sid} 终止",
                         }, ensure_ascii=False)
                         return
-                async for event in self.llm.stream_chat_with_tools(
-                    messages, all_tools, temperature=0.3, max_tokens=2000,
-                ):
-                    if event["type"] == "text":
-                        text_parts.append(event.get("content", ""))
-                    elif event["type"] == "tool_call":
-                        # 保存本轮 LLM 返回的 reasoning_content（DeepSeek 需要回传）
-                        rc = event.get("reasoning_content", "")
-                        if rc:
-                            reasoning_content = rc
-                        tool_calls.append(event)
+                # LLM 决策观测：同 Lead/ReAct 口径（Langfuse generation + 真实模型名）
+                from app.services.observability import observe_llm_call
+
+                _obs_cm = None
+                _trace = shared.get("trace")
+                if _trace is not None:
+                    _obs_cm = observe_llm_call(
+                        _trace, f"exec_decision_{sid}", messages=messages,
+                        model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+                    )
+                    _obs_cm.__enter__()
+                try:
+                    async for event in self.llm.stream_chat_with_tools(
+                        messages, all_tools, temperature=0.3, max_tokens=2000,
+                    ):
+                        if event["type"] == "text":
+                            text_parts.append(event.get("content", ""))
+                        elif event["type"] == "tool_call":
+                            # 保存本轮 LLM 返回的 reasoning_content（DeepSeek 需要回传）
+                            rc = event.get("reasoning_content", "")
+                            if rc:
+                                reasoning_content = rc
+                            tool_calls.append(event)
+                finally:
+                    if _obs_cm is not None:
+                        try:
+                            _obs_cm.__exit__(None, None, None)
+                        except Exception:  # noqa: BLE001
+                            logger.debug("orchestrator exec span exit failed", exc_info=True)
             except Exception as e:
                 logger.warning(f"[orchestrator] 步骤 {sid} 流式调用异常: {e}")
                 consecutive_errors += 1
@@ -790,6 +808,7 @@ class AgentOrchestrator:
             state.get("plan") or {},
             state.get("results") or {},
             history=shared.get("history"),
+            trace=shared.get("trace"),
         )
         await emit({"type": "text", "content": report, "report_source": source})
         await emit({"type": "done"})
@@ -845,6 +864,7 @@ class AgentOrchestrator:
         plan: dict,
         results: dict[int, str],
         history: list[dict] | None = None,
+        trace=None,
     ) -> tuple[str, str]:
         """基于计划与各步骤执行结果，生成最终中文分析报告。
 
@@ -853,13 +873,25 @@ class AgentOrchestrator:
         """
         try:
             prompt = self._build_report_prompt(user_msg, plan, results, history=history)
-            response = await self.llm.complete(prompt, temperature=0.3, max_tokens=1500)
+            if trace is not None:
+                from app.services.observability import observe_llm_call
+
+                with observe_llm_call(trace, "orchestrator_report", messages=prompt,
+                                      model=getattr(getattr(self.llm, "_settings", None), "openai_model", None)) as span:
+                    result = await self.llm.complete(prompt, temperature=0.3, max_tokens=1500,
+                                                     return_usage=True)
+                    response = result if isinstance(result, str) else result[0]
+                    usage_meta = result[1] if isinstance(result, tuple) else None
+                    if usage_meta:
+                        span.update(usage=usage_meta)
+            else:
+                response = await self.llm.complete(prompt, temperature=0.3, max_tokens=1500)
             # 报告质量兜底：空文本或疑似"过场话/摘要级"报告 → 用 REPORT_SYSTEM 强化重写一次
             if not (response or "").strip():
                 raise ValueError("LLM 返回空报告，降级模板")
             if self._report_looks_like_stub(response):
                 logger.warning("[orchestrator] report_stub len=%d 重写报告", len(response or ""))
-                rewritten = await self._rewrite_report(user_msg, plan, results, history=history)
+                rewritten = await self._rewrite_report(user_msg, plan, results, history=history, trace=trace)
                 if rewritten:
                     return rewritten, "llm"
             return response, "llm"
@@ -882,13 +914,25 @@ class AgentOrchestrator:
             return True
         return False
 
-    async def _rewrite_report(self, user_msg, plan, results, history) -> str | None:
+    async def _rewrite_report(self, user_msg, plan, results, history, trace=None) -> str | None:
         """用 REPORT_SYSTEM 重写报告（一次），失败返回 None（调用方保留原报告）。"""
         try:
             from app.services.ai_prompts import REPORT_SYSTEM
             prompt = self._build_report_prompt(user_msg, plan, results, history=history)
             prompt[0] = {"role": "system", "content": REPORT_SYSTEM}
-            rewritten = await self.llm.complete(prompt, temperature=0.2, max_tokens=2000)
+            if trace is not None:
+                from app.services.observability import observe_llm_call
+
+                with observe_llm_call(trace, "orchestrator_report_rewrite", messages=prompt,
+                                      model=getattr(getattr(self.llm, "_settings", None), "openai_model", None)) as span:
+                    result = await self.llm.complete(prompt, temperature=0.2, max_tokens=2000,
+                                                     return_usage=True)
+                    rewritten = result if isinstance(result, str) else result[0]
+                    usage_meta = result[1] if isinstance(result, tuple) else None
+                    if usage_meta:
+                        span.update(usage=usage_meta)
+            else:
+                rewritten = await self.llm.complete(prompt, temperature=0.2, max_tokens=2000)
             if (rewritten or "").strip() and not self._report_looks_like_stub(rewritten):
                 return rewritten
             return None

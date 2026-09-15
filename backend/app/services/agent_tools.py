@@ -1,14 +1,48 @@
 """Agent 工具注册：list_datasources, query_sql, render_chart."""
+import asyncio
 import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from enum import Enum
 
+from app.config import settings
 from app.core.duckdb_client import duckdb_client
 from app.services.sql_guard import sql_guard, GuardResult
 
 log = logging.getLogger("lvco.agent_tools")
+
+
+def _flatten_measures(measures) -> list[dict]:
+    """把 LLM 产出的 measures 归一为扁平 dict 列表。
+
+    LLM 结构化输出偶发把每个度量都包成独立 list（如 ``[[{field,agg}],[{field,agg}]]``），
+    与 schema 声明的 `[{field, agg}]` 不一致。此处做防御性扁平化，避免下游
+    `isinstance(m, dict)` 过滤后度量为空、查询退化。
+    """
+    out: list[dict] = []
+    for m in (measures or []):
+        if isinstance(m, dict):
+            out.append(m)
+        elif isinstance(m, list):
+            for sub in m:
+                if isinstance(sub, dict):
+                    out.append(sub)
+                elif isinstance(sub, str):
+                    out.append({"field": sub, "agg": "SUM"})
+        elif isinstance(m, str):
+            out.append({"field": m, "agg": "SUM"})
+    return out
+
+
+def _resolve_time_filters(raw_filters) -> list:
+    """把过滤条件里的相对时间表达式（'now() - interval 3 month' 等）解析为具体日期边界。
+
+    让 query_engine/query_sql 对日期列的参数化比较一次成功，避免首次查询
+    Conversion Error 后被迫退化到裸 SQL。
+    """
+    from app.services.relative_time import apply_to_filters
+    return apply_to_filters(raw_filters)
 
 
 # ==================== 对话阶段状态机 ====================
@@ -34,10 +68,11 @@ class ConversationPhase(str, Enum):
 # GENERATING: 图表生成(render) + 图表自校验(validate) + 类型推荐(recommend)
 # REPORTING:  报告润色
 _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
-    ConversationPhase.SELECTING: {"list_datasources"},
+    ConversationPhase.SELECTING: {"list_datasources", "list_metrics"},
     ConversationPhase.ANALYZING: {
         "list_datasources",
         "list_fields",
+        "list_metrics",
         "query_sql",
         "query_engine",
         "data_quality",
@@ -639,10 +674,15 @@ class QueryDatasourceTool(BaseTool):
             key = get_encryption_key()
             if key and conn_info.get("password"):
                 conn_info["password"] = decrypt_value(conn_info["password"], key)
-            conn_info["user"] = conn_info.get("username", "postgres")
+            # 按连接器各自默认用户/库名填充，避免错连（pg 默认 postgres，mysql 默认 root）
+            conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
             conn_info["database"] = conn_info.get("db_name", "")
-            from app.connectors.postgres_connector import postgres_connector as pg_conn
-            attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+            if datasource.source_type == SourceType.mysql:
+                from app.connectors.mysql_connector import mysql_connector as mysql_conn
+                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
+            else:
+                from app.connectors.postgres_connector import postgres_connector as pg_conn
+                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
             duckdb_client.execute(attach_sql)
 
         # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
@@ -655,8 +695,13 @@ class QueryDatasourceTool(BaseTool):
             return self._build_query_error(datasource, schema_name, ownership_reason, attempted_sql=final_sql[:300])
 
         # 执行 SQL 查询并解析结果列名
+        # to_thread：DuckDB 为同步调用，放到线程池执行，避免阻塞事件循环；
+        # wait_for：查询超时保护，超过上限返回错误而不挂死请求。
         try:
-            rows_raw = duckdb_client.fetchall(final_sql)
+            rows_raw = await asyncio.wait_for(
+                asyncio.to_thread(duckdb_client.fetchall, final_sql),
+                timeout=settings.QUERY_EXEC_TIMEOUT,
+            )
             cols = []
             # 通过正则从 SELECT 子句中提取列名（支持 AS 别名和双引号包裹）
             select_match = re.match(
@@ -719,11 +764,21 @@ class QueryDatasourceTool(BaseTool):
                 "notice": notice,
             }
             return json.dumps({
+                # 执行结果附完整 SQL：审计追溯 + 供 LLM 精确续查（调大 LIMIT/加 OFFSET 翻页）。
+                # 放在最前，compact_result_json 截断时优先保留（rows 靠后被裁）。
+                "executed_sql": final_sql,
                 "columns": cols,
                 "row_count": len(data_rows),
                 "rows": data_rows,
                 "summary": summary,
             }, ensure_ascii=False, default=str)
+        except asyncio.TimeoutError:
+            log.warning("Query tool timeout after %ss: %s", settings.QUERY_EXEC_TIMEOUT, final_sql[:200])
+            return self._build_query_error(
+                datasource, schema_name,
+                f"查询执行超时（>{settings.QUERY_EXEC_TIMEOUT}s），已中断",
+                attempted_sql=final_sql[:300],
+            )
         except Exception as e:
             log.warning("Query tool error: %s", e)
             # 复用统一错误构造：table_ref + 可用列 hint 供 LLM 自纠错
@@ -1208,10 +1263,14 @@ class QueryEngineTool(BaseTool):
         "适合分组/对比/占比/排名/过滤等日常聚合统计。"
         "支持时间桶（dimension_buckets）：对时间维度按 day/week/month/quarter/year 分组，"
         "如 {\"order_date\": \"month\"} 会生成 date_trunc('month', \"order_date\")。"
+        "涉及已定义业务指标（销售额/订单量/客单价等，可用 list_metrics 查看）时必须用 metric_key 引用，"
+        "不要自己拼 SUM(field)。"
         "窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_sql。"
     )
 
     def schema(self) -> dict:
+        # 复用画布工具的 measures oneOf 双变体：指标引用 / 普通度量
+        from app.services.canvas_tools import _measure_schema
         return {
             "type": "function",
             "function": {
@@ -1224,12 +1283,8 @@ class QueryEngineTool(BaseTool):
                         "dimensions": {"type": "array", "items": {"type": "string"}, "description": "维度字段名列表"},
                         "measures": {
                             "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {"field": {"type": "string"}, "agg": {"type": "string", "enum": ["SUM", "AVG", "COUNT", "COUNT_DISTINCT", "MIN", "MAX"]}},
-                                "required": ["field", "agg"],
-                            },
-                            "description": "度量列表 [{field, agg}]",
+                            "items": _measure_schema(),
+                            "description": "度量列表：指标引用 {metric_key, field?} 或普通度量 {field, agg}；涉及已定义指标时用 metric_key",
                         },
                         "filters": {
                             "type": "array",
@@ -1252,15 +1307,43 @@ class QueryEngineTool(BaseTool):
                       sort=None, limit: int = 50, dimension_buckets=None, user_id: str | None = None,
                       db_session=None, **kwargs) -> str:
         try:
+            from uuid import UUID
             from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig, SortConfig
             from app.services.query_engine import execute_chart_query
 
+            # LLM 偶发产出嵌套 measures / 相对时间表达式 → 工具边界防御性归一，
+            # 让结构化查询一次成功（避免度量为空或日期 Conversion Error 退化到裸 SQL）。
+            measures = _flatten_measures(measures)
+            filters = _resolve_time_filters(filters)
+
+            # measures 先过指标语义层：含 metric_key/metric_id 的项解析为受治理口径，
+            # 普通 {field, agg} 直通。解析失败给明确错误并提示 list_metrics 自纠错。
             meas_objs = []
-            for m in (measures or []):
-                if isinstance(m, dict):
-                    meas_objs.append(MeasureConfig(field=str(m.get("field", "")), agg=str(m.get("agg", "SUM"))))
-                elif isinstance(m, str):
-                    meas_objs.append(MeasureConfig(field=m, agg="SUM"))
+            if db_session is not None:
+                from app.services.metric_service import MetricServiceError, measure_to_metric_ref, record_query_usage, resolve_measures_for_exec
+                # 覆盖率埋点：本次查询是否走指标引用
+                record_query_usage(any(measure_to_metric_ref(m) for m in (measures or []) if isinstance(m, dict)))
+                try:
+                    meas_objs = await resolve_measures_for_exec(
+                        db_session,
+                        UUID(user_id) if user_id else None,
+                        [m for m in (measures or []) if isinstance(m, dict)],
+                        dimensions=list(dimensions or []),
+                    )
+                except MetricServiceError as e:
+                    return json.dumps({
+                        "error": f"指标解析失败: {e}；请先调 list_metrics 核对指标 key，或改用 field+agg"
+                    }, ensure_ascii=False)
+            else:
+                # db_session 缺失：仍计入"未走指标"统计（保持覆盖率分母完整）
+                from app.services.metric_service import record_query_usage
+                record_query_usage(False)
+            if not meas_objs:  # db_session 缺失或无有效度量 → 回退直接构造
+                for m in (measures or []):
+                    if isinstance(m, dict) and m.get("field"):
+                        meas_objs.append(MeasureConfig(field=str(m["field"]), agg=str(m.get("agg", "SUM"))))
+                    elif isinstance(m, str):
+                        meas_objs.append(MeasureConfig(field=m, agg="SUM"))
             filt_objs = []
             for f in (filters or []):
                 if isinstance(f, dict):
@@ -1300,6 +1383,65 @@ class QueryEngineTool(BaseTool):
             }, ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": f"结构化查询失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 指标语义层工具 ====================
+
+class ListMetricsTool(BaseTool):
+    """列出当前用户可引用的受治理业务指标（key/名称/简介）。"""
+
+    name = "list_metrics"
+    orchestrator_safe = True
+    description = (
+        "列出当前用户可引用的受治理业务指标（key/名称/口径简介）。"
+        "查询涉及业务指标口径（销售额/订单量/客单价等）时必须优先引用这些指标；"
+        "只返回 key/名称/简介，不暴露底层公式以避免占用上下文。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "search": {"type": "string", "description": "可选：按名称/描述关键词过滤指标"},
+                    },
+                    "required": [],
+                },
+            },
+        }
+
+    async def execute(self, user_id: str = "", search: str | None = None,
+                      db_session=None, **kwargs) -> str:
+        if db_session is None:
+            return json.dumps({"error": "数据库会话不可用"}, ensure_ascii=False)
+        from app.services.metric_service import list_metrics_for_user
+        import uuid as _uuid
+        uid = None
+        try:
+            uid = _uuid.UUID(user_id) if user_id else None
+        except (ValueError, TypeError):
+            uid = None
+        try:
+            metrics = await list_metrics_for_user(db_session, uid)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"error": f"指标列表获取失败: {str(e)[:200]}"}, ensure_ascii=False)
+        if search:
+            kw = (search or "").strip().lower()
+            if kw:
+                metrics = [m for m in metrics if kw in (m.name or "").lower() or kw in (m.key or "").lower() or kw in (m.description or "").lower()]
+        items = [
+            {"key": m.key, "name": m.name, "description": (m.description or "")[:80]}
+            for m in metrics
+        ]
+        return json.dumps({
+            "total": len(items),
+            "metrics": items,
+            "notice": "查询涉及上述指标口径时必须用其 key 引用（如 metric_key=sales_amount），不要自行拼 SUM/AVG",
+        }, ensure_ascii=False)
 
 
 # ==================== 数据质量工具 ====================
@@ -1427,6 +1569,9 @@ class InsightTool(BaseTool):
             from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig
             from app.services.query_engine import execute_chart_query
             from app.services.ai_service import AIService
+
+            measures = _flatten_measures(measures)
+            filters = _resolve_time_filters(filters)
 
             dims = list(dimensions or [])
             meas_objs = []
@@ -1812,6 +1957,7 @@ ToolRegistry.register(clean_suggest_tool)
 ToolRegistry.register(recommend_charts_tool)
 ToolRegistry.register(polish_text_tool)
 ToolRegistry.register(stats_analyzer_tool)
+ToolRegistry.register(ListMetricsTool())
 # 画布操作工具在 app.services.canvas_tools 自身底部注册（避免反向 import 造成循环依赖）。
 # 由 app.services.ai_service 导入 canvas_tools 保证进程启动即注册。
 

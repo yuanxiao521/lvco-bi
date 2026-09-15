@@ -190,12 +190,13 @@ def test_compact_result_json_preserves_error():
 
 
 def test_compact_result_json_truncates_rows():
+    from app.config import settings
     from app.services.context_utils import compact_result_json
 
     big = json.dumps({"columns": ["c"], "rows": [[i] for i in range(100)]}, ensure_ascii=False)
     small = compact_result_json(big, 500)
     obj = json.loads(small)
-    assert len(obj["rows"]) <= 10
+    assert len(obj["rows"]) <= settings.RESULT_MAX_ROWS
     assert obj["rows_total"] == 100 and obj["rows_truncated"] is True
     assert len(small) < len(big)
 
@@ -433,7 +434,8 @@ async def test_react_graph_flow_with_trace(fake_registry):
         emit=emit,
     )
 
-    assert [e["type"] for e in events] == ["tool_call", "tool_result", "text"]
+    # React 路径现在为每次工具执行透传 progress（执行前/后各一条）
+    assert [e["type"] for e in events] == ["progress", "tool_call", "tool_result", "progress", "text"]
     assert ml.calls == 2
     assert trace.metadata.get("tool_success_count") == 1
     assert trace.metadata.get("iterations") == 2
@@ -509,6 +511,7 @@ class CallOnceLLM:
 @pytest.mark.asyncio
 async def test_react_tool_result_compacted_into_messages(monkeypatch):
     """防爆：大工具结果在 React 路径压缩成摘要进 messages，前端事件仍为全量。"""
+    from app.config import settings
     import app.services.agents.tool_executor as tool_exec_mod
     from app.services.agents.react_agent import ReactGraphAgent
 
@@ -532,7 +535,7 @@ async def test_react_tool_result_compacted_into_messages(monkeypatch):
     assert len(tool_msgs) == 1
     parsed = json.loads(tool_msgs[0]["content"])
     assert parsed["rows_truncated"] is True
-    assert len(parsed["rows"]) <= 10
+    assert len(parsed["rows"]) <= settings.RESULT_MAX_ROWS
 
     # 前端事件侧：保持全量（防爆只作用于 LLM 上下文）
     tr = next(e for e in events if e["type"] == "tool_result")
@@ -631,6 +634,7 @@ def test_tool_registry_includes_stats_analyzer():
     names = [t["function"]["name"] for t in ToolRegistry.schemas()]
     assert "stats_analyzer" in names
     assert "list_fields" in names  # 按需取列工具（表级/列级拆分）
+    assert "list_metrics" in names  # 指标语义层：指标清单发现工具
     for tool in (
         "add_chart_block",
         "add_text_block",
@@ -639,7 +643,7 @@ def test_tool_registry_includes_stats_analyzer():
         "arrange_layout",
     ):
         assert tool in names
-    assert len(names) == 17
+    assert len(names) == 19  # 12 分析 + list_metrics + 6 画布（含 get_canvas_layout）
 
 
 def test_list_datasources_returns_table_level_only():

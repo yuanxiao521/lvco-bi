@@ -22,6 +22,54 @@ class DuckDBClient:
                 cls._instance = super().__new__(cls)
         return cls._instance
 
+    def _init_conn(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """对新连接做统一初始化：内存上限 + 扩展加载。"""
+        conn.execute(f"SET memory_limit='{settings.DUCKDB_MEMORY_LIMIT}'")
+        # 装载 spatial 扩展（Excel 上传需要）
+        try:
+            conn.execute("INSTALL spatial;")
+            conn.execute("LOAD spatial;")
+        except duckdb.Error as e:
+            log.warning("spatial extension unavailable, Excel upload will fail: %s", e)
+        # 装载 postgres_scanner 扩展（PostgreSQL ATTACH、洞察扫描、定时执行需要）
+        try:
+            conn.execute("INSTALL postgres_scanner;")
+            conn.execute("LOAD postgres_scanner;")
+        except duckdb.Error as e:
+            log.error("postgres_scanner extension unavailable, PostgreSQL features will fail: %s", e)
+        # 装载 mysql 扩展（MySQL ATTACH 需要）
+        try:
+            conn.execute("INSTALL mysql;")
+            conn.execute("LOAD mysql;")
+        except duckdb.Error as e:
+            log.error("mysql extension unavailable, MySQL ATTACH will fail: %s", e)
+
+    def _connect(self, db_path: Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+        conn = duckdb.connect(str(db_path), read_only=read_only)
+        self._init_conn(conn)
+        return conn
+
+    def _connect_with_readonly_fallback(self, db_path: Path) -> duckdb.DuckDBPyConnection:
+        """连接数据库；若文件被其他进程独占（File is already open），给出清晰可读的占用提示。
+
+        DuckDB 多进程规则：只要有一个进程以读写打开文件，其他进程无论读写都打不开；
+        且 Windows 上被锁时连文件复制都不允许。因此这里不做静默降级（拷贝副本会因
+        WinError 32 失败），而是抛出一个中文可读错误，引导用户停止占用方（后端服务或
+        另一个评测进程）后再重试 —— 评测/分析应当串行使用同一个 DuckDB 数据文件。
+        """
+        try:
+            return self._connect(db_path)
+        except duckdb.Error as e:
+            if "already open" not in str(e).lower():
+                raise
+            raise duckdb.Error(
+                "lvco_bi.duckdb 正被其他进程独占（File is already open）。"
+                "DuckDB 数据库文件同一时刻只允许一个进程以读写方式打开，"
+                "且 Windows 上被锁期间连只读副本也无法复制。"
+                "请先停止占用方（如正在运行的后端服务，或另一个评测进程）后再重试。"
+                f" 原始错误: {e}"
+            ) from e
+
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
         if self._conn is None:
             with self._conn_lock:
@@ -29,20 +77,7 @@ class DuckDBClient:
                     data_dir = Path(settings.DUCKDB_DATA_DIR)
                     data_dir.mkdir(parents=True, exist_ok=True)
                     db_path = data_dir / "lvco_bi.duckdb"
-                    self._conn = duckdb.connect(str(db_path))
-                    self._conn.execute(f"SET memory_limit='{settings.DUCKDB_MEMORY_LIMIT}'")
-                    # 装载 spatial 扩展（Excel 上传需要）
-                    try:
-                        self._conn.execute("INSTALL spatial;")
-                        self._conn.execute("LOAD spatial;")
-                    except duckdb.Error as e:
-                        log.warning("spatial extension unavailable, Excel upload will fail: %s", e)
-                    # 装载 postgres_scanner 扩展（PostgreSQL ATTACH、洞察扫描、定时执行需要）
-                    try:
-                        self._conn.execute("INSTALL postgres_scanner;")
-                        self._conn.execute("LOAD postgres_scanner;")
-                    except duckdb.Error as e:
-                        log.error("postgres_scanner extension unavailable, PostgreSQL features will fail: %s", e)
+                    self._conn = self._connect_with_readonly_fallback(db_path)
         return self._conn
 
     @property

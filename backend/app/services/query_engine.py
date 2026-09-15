@@ -174,6 +174,50 @@ def _ensure_datasource_ready(schema_name: str, source_type: SourceType | None = 
     return {col[0] for col in columns}
 
 
+# 时间粒度意图词：这些词常在"日期分桶"场景被当成维度，但源里并无同名列。
+# 此时兜底映射到源里的日期列，避免"month 字段不存在"整块被拒。
+_TIME_ALIASES = {
+    "month", "months", "monthly", "月", "月份", "按月", "月度",
+    "week", "weekly", "周",
+    "year", "yearly", "年", "年度", "按年",
+    "day", "daily", "日期", "时间", "date", "time", "daytime",
+    "今天", "今日",
+}
+# 多日期列时的优先名（偏低频/更准的"主日期"）
+_PREFERRED_DATE_COLUMNS = ("order_date", "date", "created_at", "create_time", "time", "datetime")
+
+
+def _is_date_like(col: str) -> bool:
+    """按字段名启发式判断是否为日期/时间列（类型存储路径可能缺失，故用名称判断）。"""
+    c = (col or "").lower()
+    if c in ("date", "time", "datetime", "timestamp", "时间", "日期"):
+        return True
+    return any(tok in c for tok in ("date", "time", "_at", "_on", "日期", "时间"))
+
+
+def _resolve_dimension_alias(field: str, schema_fields: set[str]) -> str | None:
+    """把常见"时间粒度"意图词解析到数据源的日期列（仅维度路径·大小写不敏感）。
+
+    规则：
+    - field 必须是已知时间意图词之一（避免乱映射真实分类列）；
+    - 源里恰好只有一个日期列 → 直接用它；
+    - 多个日期列 → 优先命中 _PREFERRED_DATE_COLUMNS 的那个；
+    - 否则不兜底（返回 None，走原有"字段不存在"报错+hint）。
+    """
+    low = (field or "").strip().lower()
+    if low not in _TIME_ALIASES:
+        return None
+    date_cols = [c for c in schema_fields if _is_date_like(c)]
+    if len(date_cols) == 1:
+        return date_cols[0]
+    if date_cols:
+        lower_to_col = {c.lower(): c for c in date_cols}
+        for pref in _PREFERRED_DATE_COLUMNS:
+            if pref in lower_to_col:
+                return lower_to_col[pref]
+    return None
+
+
 def _validate_fields(fields: list[str], schema_fields: set[str], context: str) -> list[str]:
     """校验字段是否存在于数据源中，并自动修正大小写。
 
@@ -193,11 +237,19 @@ def _validate_fields(fields: list[str], schema_fields: set[str], context: str) -
     for f in fields:
         actual = schema_lower.get(f.lower())
         if actual is None:
+            # 维度别名兜底：仅对维度生效。常见"时间粒度"意图词（如 month/week/日/月）
+            # 在源里没有对应列时，映射到源里的日期列，避免"month 字段不存在"整块被拒。
+            resolved = None
+            if context == "维度":
+                resolved = _resolve_dimension_alias(f, schema_fields)
             sorted_fields = sorted(schema_fields)
             # 显示全部可用字段（上限50个），避免用户看不到完整列表
             field_list = sorted_fields if len(sorted_fields) <= 50 else sorted_fields[:50]
             total = len(sorted_fields)
             suffix = f" ...（共{total}个字段）" if total > 50 else f"（共{total}个字段）"
+            if resolved is not None:
+                corrected.append(resolved)
+                continue
             hint = f"，可用字段: {', '.join(field_list)}{suffix}" if schema_fields else ""
             raise QueryEngineError(
                 f"{context}字段 '{f}' 不存在于数据源中{hint}",
@@ -750,6 +802,14 @@ async def execute_chart_query(
     if "LIMIT" not in sql.upper():
         sql = sql.rstrip().rstrip(';').rstrip() + "\nLIMIT 500"
         logger.warning("auto_limit", datasource_id=str(datasource_id), reason="query missing LIMIT", capped_at=500)
+
+    # 收口式第二道网：引擎生成的 SQL 虽非模型自由编写，仍在下发前做一次 AST 只读校验。
+    # 防止未来拼接逻辑出 bug 时没有兜底（例如误拼出非 SELECT 语句 / 多语句）。
+    # 引擎 SQL 为参数化 SELECT，AST 校验的是语句结构（Panel 校验已确认 date_trunc/COUNT DISTINCT 等可正常通过）。
+    from app.services.sql_guard_ast import ast_full_check
+    ast_ok, ast_reason, _, _ = ast_full_check(sql)
+    if not ast_ok:
+        raise QueryEngineError(f"引擎 SQL 未通过只读校验: {ast_reason}", code="ENGINE_AST_BLOCKED")
 
     start_time = time.time()
 

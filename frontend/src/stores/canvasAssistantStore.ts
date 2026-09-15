@@ -75,11 +75,27 @@ function buildWelcome(
   };
 }
 
-/** 工具名 → 中文名 */
+/** 工具名 → 中文名（无步骤时自动建"执行 xxx"步骤标题用的兜底映射，对齐后端全部工具） */
 function TOOL_FALLBACK_NAME(name: string): string {
   const map: Record<string, string> = {
-    add_chart_block: "新增图表", add_text_block: "写文本", add_h1: "写标题",
-    add_h2: "写章节", update_chart_block: "改图表",
+    run_analysis: "分析执行",
+    list_datasources: "浏览数据源",
+    list_fields: "查看字段",
+    query_sql: "SQL 查询",
+    query_engine: "结构化查询",
+    insight: "自动洞察",
+    data_quality: "数据质量",
+    clean_suggest: "清洗建议",
+    stats_analyzer: "统计分析",
+    render_chart: "生成图表",
+    validate_chart: "校验图表",
+    recommend_charts: "推荐图表",
+    polish_text: "润色文本",
+    add_chart_block: "新增图表",
+    add_text_block: "写文本",
+    update_chart_block: "改图表",
+    remove_block: "删除块",
+    arrange_layout: "自动布局",
   };
   return map[name] ?? name;
 }
@@ -109,6 +125,8 @@ let streamingLock = false;          // 并发互斥：同步级，替代组件�
 let newSession = false;             // 下一次请求是否强制新建会话
 let runSeq = 0;                     // 步骤自增 id
 let activeCancel: (() => void) | null = null; // 当前流的 reader.cancel
+let canvasSessionsSeq = 0;          // 会话列表请求序号（防异步竞态：旧请求结果不得覆盖新画布）
+let activeCanvasId: string | null = null; // 当前激活画布 id（跨组件同步，供异步回调校验）
 
 interface CanvasAssistantStore {
   // 会话与对话状态
@@ -132,9 +150,7 @@ interface CanvasAssistantStore {
   onCanvasReady: (canvasId: string | null) => Promise<void>;
   /** 轻量切换当前会话引用 */
   applySession: (sid: string | null) => void;
-  /** 切换画布内历史会话 */
-  switchSession: (sid: string, ctx: CanvasAssistantCtx) => Promise<void>;
-  /** 新对话（另开一条画布内对话） */
+  /** 新对话（1:1 画布会话：清空界面，下一次发送后端复用唯一会话并清空历史） */
   newConversation: (ctx: CanvasAssistantCtx) => void;
   /** 发送消息：首步校验 + SSE 流式消费（核心逻辑迁移自 AIAssistant.handleSend） */
   send: (content: string, ctx: CanvasAssistantCtx) => Promise<void>;
@@ -176,20 +192,32 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
 
   refreshSessions: async (canvasId) => {
     if (!canvasId) {
+      activeCanvasId = null;
       set({ canvasSessions: [] });
       return;
     }
+    // 请求序号 +1：只有"发起时对应的画布仍是激活态"的序号才允许写入，
+    // 快速来回切换画布时旧请求返回不得覆盖新画布的会话列表。
+    const seq = ++canvasSessionsSeq;
+    activeCanvasId = canvasId;
     try {
       const list = await listCanvasSessions(canvasId);
-      set({ canvasSessions: list });
+      if (seq === canvasSessionsSeq && activeCanvasId === canvasId) {
+        set({ canvasSessions: list });
+      }
     } catch {
-      set({ canvasSessions: [] });
+      if (seq === canvasSessionsSeq && activeCanvasId === canvasId) {
+        set({ canvasSessions: [] });
+      }
     }
   },
 
   resetForCanvas: (ctx) => {
     const { messages, steps, meta } = get();
     void messages; void steps; void meta;
+    const cid = ctx.canvasId ?? null;
+    activeCanvasId = cid;
+    canvasSessionsSeq += 1; // 使在途的旧列表请求结果全部失效
     set({
       curSessionId: null,
       sessionsLoaded: false,
@@ -198,11 +226,15 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       messages: [buildWelcome(ctx.datasourceId, ctx.fieldMeta)],
     });
     newSession = false;
-    void get().refreshSessions(ctx.canvasId);
+    if (cid) {
+      void get().refreshSessions(cid);
+    }
   },
 
   onCanvasReady: async (canvasId) => {
     if (!canvasId || get().sessionsLoaded) return;
+    // 画布激活态校验：若期间用户已切走或重设为别的画布，本回调返回
+    if (activeCanvasId !== canvasId) return;
     const { canvasSessions } = get();
     if (canvasSessions.length > 0 && !get().curSessionId) {
       get().applySession(canvasSessions[0].id);
@@ -212,6 +244,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     set({ sessionsLoaded: true }); // 有会话 ID 后才标记已加载
     try {
       const msgs = await listMessages(sid);
+      if (activeCanvasId !== canvasId) return; // 加载期间切走了，丢弃
       if (msgs.length > 0) {
         set({
           messages: msgs
@@ -224,35 +257,13 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         });
       }
     } catch {
-      get().applySession(null);
+      if (activeCanvasId === canvasId) {
+        get().applySession(null);
+      }
     }
   },
 
   applySession: (sid) => set({ curSessionId: sid }),
-
-  switchSession: async (sid, ctx) => {
-    if (streamingLock || !sid || sid === get().curSessionId) return;
-    get().applySession(sid);
-    set({ steps: [], meta: null });
-    try {
-      const msgs = await listMessages(sid);
-      if (msgs.length > 0) {
-        set({
-          messages: msgs
-            .filter((m) => !(m.role === "assistant" && !m.content.trim()))
-            .map((m) => ({
-              id: m.id,
-              role: m.role as "user" | "assistant",
-              content: m.content,
-            })),
-        });
-      } else {
-        set({ messages: [buildWelcome(ctx.datasourceId, ctx.fieldMeta)] });
-      }
-    } catch {
-      get().applySession(null);
-    }
-  },
 
   newConversation: (ctx: CanvasAssistantCtx) => {
     if (streamingLock) return;
@@ -330,6 +341,8 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
           chartType: b.chartType,
           dimensions: b.queryConfig?.dimensions ?? b.dimensions ?? [],
           measures: b.queryConfig?.measures ?? b.measures ?? [],
+          // 布局感知：带上块坐标，LLM 据此判断画布是否整齐、是否需要整理布局
+          x: b.x, y: b.y, width: b.width, height: b.height,
         }));
     }
     set({ steps: [], meta: null }); // 每次新任务重置工作台步骤时间线 + 流程元信息
@@ -383,17 +396,21 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
           case "progress": {
             const pIdx = Number(event.index ?? 0);
             const pTotal = Number(event.total ?? 0);
+            // 带 round 前缀，避免多轮循环下第二轮 index 覆盖第一轮步骤
+            const pRound = Number(event.round ?? 0);
+            const stepId = `p${pRound}_${pIdx}`;
             set((s) => {
               const base = {
                 title: String(event.title ?? "执行中"),
-                seq: pTotal > 0 ? `${pIdx + 1}/${pTotal}` : undefined,
+                // 后端 index 为 1-based（lead_perception idx 从 1 起步），直接展示，不要 +1
+                seq: pTotal > 0 ? `${pIdx}/${pTotal}` : undefined,
                 emphasis: event.status === "start",
               };
-              const existing = s.steps.find((st) => st.id === `p${pIdx}`);
+              const existing = s.steps.find((st) => st.id === stepId);
               if (existing) {
-                return { steps: s.steps.map((st) => (st.id === `p${pIdx}` ? { ...st, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: st.tools } : st)) };
+                return { steps: s.steps.map((st) => (st.id === stepId ? { ...st, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: st.tools } : st)) };
               }
-              return { steps: [...s.steps, { id: `p${pIdx}`, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: [] }] };
+              return { steps: [...s.steps, { id: stepId, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: [] }] };
             });
             break;
           }
@@ -479,18 +496,17 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
             void get().refreshSessions(effCanvasId);
             break;
           case "done": {
+            // done 收敛：工作台所有 step 置为完成（run/wait → done），避免残留"执行中"或"2/x"
             set((s) => ({
-              steps: s.steps.map((st) => {
-                const hasRunTools = st.tools.some((t) => t.status === "run");
-                if (hasRunTools || st.status === "run") {
-                  return {
-                    ...st,
-                    status: "done",
-                    tools: st.tools.map((t) => (t.status === "run" ? { ...t, status: "ok" } : t)),
-                  };
-                }
-                return st;
-              }),
+              steps: s.steps.map((st) =>
+                st.status === "run" || st.status === "wait"
+                  ? {
+                      ...st,
+                      status: "done",
+                      tools: st.tools.map((t) => (t.status === "run" ? { ...t, status: "ok" } : t)),
+                    }
+                  : st,
+              ),
             }));
             streamingLock = false;
             set({ isStreaming: false });

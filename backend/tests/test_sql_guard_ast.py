@@ -1000,16 +1000,18 @@ class TestAstFullCheck:
         assert allowed is False
         assert "注释" in reason
 
-    def test_畸形_sql_解析失败_降级放行(self):
-        """SQLGlot 无法解析的 SQL 降级放行，交由 DuckDB 执行兜底。
+    def test_畸形_sql_解析失败_fail_closed拦截(self):
+        """SQLGlot 无法解析的 SQL 一律拒绝（fail-closed）。
 
-        解析失败 ≠ SQL 非法（可能是 SQLGlot 方言覆盖不全，如 DuckDB 专有函数）。
-        放行后由 L3 正则 + 归属白名单 + DuckDB 只读执行兜底，避免误拦正确查询。
+        解析失败可能源于恶意/畸形语句，也可能源于方言覆盖不全；
+        安全策略为「解析异常一律拒绝」，绝不降级放行到执行层。
         """
         sql = "SELECT FROM WHERE"
         allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is True
+        assert allowed is False
+        assert "解析失败" in reason
         assert details is not None and details.get("parse_error")
+        assert details.get("fail_closed") is True
 
     def test_多语句_sql_返回_false(self):
         """多条 SQL 语句应被拦截。"""

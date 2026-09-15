@@ -10,7 +10,13 @@
 学习手册：`.trae/documents/lead-agent-learning-guide.md`
 """
 from app.services.agents.lead.lead_intent import IntentType, IntentResult, classify_intent
-from app.services.agents.lead.lead_decider import ActionType, Decision, decide_action
+from app.services.agents.lead.lead_decider import (
+    ActionType,
+    Decision,
+    MergedOutcome,
+    decide_action,
+    decide_action_merged,
+)
 from app.services.agents.lead.lead_perception import (
     StepProgress,
     perceive_stream,
@@ -29,7 +35,9 @@ __all__ = [
     "classify_intent",
     "ActionType",
     "Decision",
+    "MergedOutcome",
     "decide_action",
+    "decide_action_merged",
     "StepProgress",
     "perceive_stream",
     "render_progress_text",

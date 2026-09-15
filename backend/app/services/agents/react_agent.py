@@ -43,10 +43,11 @@ _GENERATING_TRIGGERS = ("render_chart",)
 class ReactGraphAgent:
     """ReAct 图化 Agent：reason（LLM 推理）→ execute_tools（工具执行）循环，直至最终回复。"""
 
-    def __init__(self, llm: LLMClient, all_tools: list[dict], agent_trace=None):
+    def __init__(self, llm: LLMClient, all_tools: list[dict], agent_trace=None, is_canvas: bool = False):
         self.llm = llm
         self.all_tools = all_tools
         self.agent_trace = agent_trace  # 可观测 span 容器（可为 None）
+        self.is_canvas = is_canvas  # 画布入口：最终交付是在画布上落块，而非纯文本回复
         self.graph = self._build_graph()
 
     def _build_graph(self) -> Graph:
@@ -107,33 +108,54 @@ class ReactGraphAgent:
         iteration = state.get("iteration", 0)
         phase_tools = get_tools_for_phase(phase, self.all_tools)
 
-        llm_span = None
+        # 观测：agent_trace 存在时走 Langfuse generation（同 Lead/Planner 口径，
+        # 带真实模型与 token；无 trace 退化为纯本地 span）。
+        cm = None
         if self.agent_trace is not None:
-            llm_span = self.agent_trace.span(name=f"agent_iter_{iteration}", span_type="generation")
-            llm_span.input = {"iteration": iteration, "phase": getattr(phase, "value", phase), "messages_count": len(messages)}
+            from app.services.observability import observe_llm_call
+
+            cm = observe_llm_call(
+                self.agent_trace,
+                f"react_iter_{iteration}",
+                messages=messages,
+                model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+            )
+            llm_span = cm.__enter__()
+            llm_span.input = {
+                "iteration": iteration,
+                "phase": getattr(phase, "value", phase),
+                "messages_count": len(messages),
+            }
+        else:
+            llm_span = None
 
         tool_calls: list[dict] = []
         text_chunks: list[str] = []
         has_text_output = False
-        async for event in self.llm.stream_chat_with_tools(
-            messages, phase_tools, temperature=0.3, max_tokens=3000,
-        ):
-            if event["type"] == "text":
-                has_text_output = True
-                text_chunks.append(event.get("content", ""))
-                await emit(event)
-            elif event["type"] == "tool_call":
-                tool_calls.append(event)
-
-        if llm_span is not None:
-            llm_span.update(
-                output={
-                    "text_length": sum(len(c) for c in text_chunks),
-                    "tool_calls": [{"name": t.get("name")} for t in tool_calls],
-                    "has_text_output": has_text_output,
-                },
-            )
-            llm_span.finish()
+        try:
+            async for event in self.llm.stream_chat_with_tools(
+                messages, phase_tools, temperature=0.3, max_tokens=3000,
+            ):
+                if event["type"] == "text":
+                    has_text_output = True
+                    text_chunks.append(event.get("content", ""))
+                    await emit(event)
+                elif event["type"] == "tool_call":
+                    tool_calls.append(event)
+        finally:
+            if llm_span is not None:
+                llm_span.update(
+                    output={
+                        "text_length": sum(len(c) for c in text_chunks),
+                        "tool_calls": [{"name": t.get("name")} for t in tool_calls],
+                        "has_text_output": has_text_output,
+                    },
+                )
+            if cm is not None:
+                try:
+                    cm.__exit__(None, None, None)
+                except Exception:  # noqa: BLE001
+                    logger.debug("react llm span exit failed", exc_info=True)
 
         # 输出质量兜底：LLM 即将收尾（无工具调用）时，
         # 1) 完全无文本（静默） → 强制生成收尾报告；
@@ -413,6 +435,33 @@ class ReactGraphAgent:
     # 工具由当前阶段 tools 参数动态提供，硬编码工具名会让 LLM 在阶段收走工具后
     # 仍"凭记忆"编造调用（如 GENERATING 阶段伪造 query_sql）。
     def _build_follow_up(self, executed_tool_names: list[str], has_error: bool, consecutive_query_failures: int) -> str:
+        # 画布入口：最终交付是"在画布上落块"，不是纯文本回复。
+        # 明确引导落块、远离纯文本图（render_chart），并把"查→落块→叙事"变成显式一步。
+        if self.is_canvas:
+            if executed_tool_names and all(n == "list_datasources" for n in executed_tool_names):
+                return (
+                    "以上是当前可选的数据源。画布任务是【落块】交付："
+                    "选定一个数据源后，直接针对用户目标落块——先用 add_chart_block 建图表块，"
+                    "再用 add_text_block 写叙事文本块。字段名必须用字段清单里的真实列名（勿汉化/臆造）。"
+                )
+            if any(n in ("query_engine", "query_sql", "add_chart_block") for n in executed_tool_names):
+                if has_error:
+                    return (
+                        "上次操作出错。列名以错误提示或 list_fields 返回的真实列名为准，"
+                        "直接复制后用 add_chart_block 重新落块，不要臆造或汉化字段，也不要停下来。"
+                    )
+                return (
+                    "数据已到手。立即在画布上落块，不要把这个任务当纯文本问答：\n"
+                    "1) 用 add_chart_block 生成图表块（chart_type 选合适的可视化类型，"
+                    "字段用真实列名，datasource_id 用真实 id；它内部会自取数）；\n"
+                    "2) 用 add_text_block 写叙事文本块，引用图表里的具体数值/占比/排名。\n"
+                    "**不要用 render_chart（那是对话框文本图，画布不用）**，"
+                    "不要只输出文字而把图表漏掉。"
+                )
+            return (
+                "画布任务最终要落块：用 add_chart_block 建图表块、add_text_block 写叙事块。"
+                "字段名必须用真实列名。"
+            )
         if executed_tool_names and all(n == "list_datasources" for n in executed_tool_names):
             return (
                 "以上是当前可选的数据源。请结合用户的原始问题判断：\n"
