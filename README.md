@@ -99,7 +99,7 @@ docker compose up -d
 ## Testing
 
 ```bash
-# Run all tests (677+ SQL safety, 25+ e2e metric semantic, 21+ full-chain LLM)
+# Run all tests
 cd backend
 pytest
 
@@ -144,8 +144,8 @@ lvco-bi/
 |-------|-------|-----------|
 | LLM Full-Chain | 21/21 | 100% |
 | Metric Semantic Layer | 25/25 | 100% |
-| SQL Safety (AST guard) | 677+ | 100% |
-| SQL Generation Accuracy | 20 cases | 90.8% |
+| SQL Safety (AST guard) | 21/21 | 100% |
+| Agent E2E (Semantic Eval) | 20 cases | 90.8% |
 
 ---
 
