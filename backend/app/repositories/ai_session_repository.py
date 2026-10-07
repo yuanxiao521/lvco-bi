@@ -101,11 +101,13 @@ class SQLAlchemyAIMessageRepository:
         self.db = db
 
     async def list_for_session(self, session_id: uuid.UUID) -> list[AIMessage]:
-        """查询会话的所有消息，按时间正序。"""
+        """查询会话的所有消息，按时间正序（同轮内提问先于回答）。"""
         result = await self.db.execute(
             select(AIMessage)
             .where(AIMessage.session_id == session_id)
-            .order_by(AIMessage.created_at.asc())
+            # 次级键 role：同轮两行 created_at 相同（事务级 now()），缺它则问答对顺序
+            # 依赖不稳定排序。枚举序 user<assistant → asc 即"提问在前"。
+            .order_by(AIMessage.created_at.asc(), AIMessage.role.asc())
         )
         return list(result.scalars().all())
 

@@ -647,7 +647,11 @@ async def list_messages(
     result = await db.execute(
         select(AIMessage)
         .where(AIMessage.session_id == session_id)
-        .order_by(AIMessage.created_at.asc())
+        # 次级键 role 不可省：同一轮的 user 提问与 assistant 占位在同一事务提交，
+        # created_at 取自 now()（事务开始时间）→ 两行时间戳完全相同，而 id 是随机 uuid
+        # 做不了次级键。缺它则结果依赖不稳定排序，问答对会颠倒。
+        # 枚举标签序为 {user,assistant}，故 asc 即"提问在前、回答在后"。
+        .order_by(AIMessage.created_at.asc(), AIMessage.role.asc())
     )
     items = list(result.scalars().all())
     return SuccessResponse(
@@ -708,7 +712,11 @@ async def send_message(
     result = await db.execute(
         select(AIMessage)
         .where(AIMessage.session_id == session_id)
-        .order_by(AIMessage.created_at.asc())
+        # 次级键 role 不可省：同一轮的 user 提问与 assistant 占位在同一事务提交，
+        # created_at 取自 now()（事务开始时间）→ 两行时间戳完全相同，而 id 是随机 uuid
+        # 做不了次级键。缺它则结果依赖不稳定排序，问答对会颠倒。
+        # 枚举标签序为 {user,assistant}，故 asc 即"提问在前、回答在后"。
+        .order_by(AIMessage.created_at.asc(), AIMessage.role.asc())
     )
     messages = list(result.scalars().all())
     history_list: list[dict[str, str]] = [
@@ -963,7 +971,8 @@ async def data_chat_stream(
                     await db.execute(
                         select(AIMessage)
                         .where(AIMessage.session_id == session_id)
-                        .order_by(AIMessage.created_at.desc())
+                        # 次级键 role 与 created_at 同方向（见同文件画布入口的说明）
+                        .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
                         .limit(6)
                     )
                 ).scalars().all()
@@ -1129,6 +1138,16 @@ async def data_chat_stream(
                 yield f"data: {json.dumps({'type': 'error', 'message': _SESSION_BUSY_MSG}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                 return
+            # 新一轮已启动：清掉上一轮遗留的文本快照。
+            # 快照键按会话维度（TTL=redis_ttl，跨轮不清），新一轮此刻尚未产出任何文本，
+            # 若不清，下面 _yield_streamed_text_snapshot 会把上一轮全文当作本轮的
+            # 首个 message delta 补发 → 前端 append delta，本轮回答开头会粘上一轮答案。
+            # start 成功即注册表内无在跑任务，此处清键不会影响断线续收（续收走 resume 分支，
+            # 不经过这里，靠运行中任务持续写入的快照补发）。
+            try:
+                get_cache_repository().delete(_chat_text_key(task_sid))
+            except Exception:
+                _log.debug("chat streamed text cache clear failed", exc_info=True)
         finally:
             # 任务未启动（构建中途异常 / 连接断开取消 / start 竞态被拒）→ 清理本轮占位副作用：
             # 锁还由本请求持有（任务没接手），running 任务态也是本轮写的，一并清掉。

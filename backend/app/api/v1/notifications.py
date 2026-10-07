@@ -4,12 +4,14 @@ import math
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.core.database import get_db
+from app.core.security import decode_token
 from app.core.sse import sse_manager
 from app.models.user import User
 from app.repositories.notification_repository import SQLAlchemyNotificationRepository
@@ -137,25 +139,49 @@ async def push_notification(
 
 @router.get("/stream")
 async def notification_stream(
+    request: Request,
     token: str | None = Query(None),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """SSE 端点 - 实时推送通知事件
 
-    支持两种认证方式:
-    1. Authorization: Bearer <token>（标准方式）
-    2. ?token=<token>（EventSource 专用，因 EventSource 不支持自定义 header）
+    本端点**不能用 `get_current_user` 依赖**：它基于 HTTPBearer，只读
+    `Authorization` 头，而浏览器的 EventSource 无法自定义请求头 → 前端会恒定 401。
+    因此这里自行解析凭证，两种方式二选一：
+    1. `Authorization: Bearer <token>`（标准方式，非浏览器客户端用）
+    2. `?token=<token>`（EventSource 专用，前端 getNotificationStreamUrl 用这条）
 
     客户端用 EventSource 订阅:
     ```js
     const es = new EventSource('/api/v1/notifications/stream?token=...');
-    es.addEventListener('notification', (e) => {
-      const data = JSON.parse(e.data);
-      // 处理通知
-    });
+    es.addEventListener('notification', (e) => { /* JSON.parse(e.data) */ });
     ```
     """
-    user_id = current_user.id
+    raw = token
+    if not raw:
+        auth = request.headers.get("authorization") or ""
+        if auth.lower().startswith("bearer "):
+            raw = auth[7:].strip()
+    payload = decode_token(raw) if raw else None
+    if payload is None or payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "未认证或 Token 已过期，请重新登录"},
+        )
+    try:
+        uid = uuid.UUID(str(payload.get("sub")))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "无效的 Token"},
+        )
+    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "用户不存在"},
+        )
+    user_id = user.id
     queue = await sse_manager.subscribe(user_id)
 
     async def event_generator():
