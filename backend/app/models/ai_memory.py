@@ -29,6 +29,14 @@ class AIMemory(Base):
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     covered_rounds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 记忆合并水位：已并入长期记忆的最后一条消息 id。
+    # 刻意不加外键——canvas 的"新对话"会 delete 该会话全部消息而保留记忆行，
+    # 加了外键会连带删记忆；读取端对"水位查不到"做兜底（退回从头取最早未并入段）。
+    last_merged_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    merge_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    merge_fail_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -1193,6 +1193,10 @@ class AIService:
                 if digest:
                     yield {
                         "type": "compressed_history",
+                        # 来源标记：本路径的摘要是"按当前窗口重算"的结果、covered_rounds 是
+                        # "距上次压缩轮数"，与 Lead 的累积合并不是同一套语义。落库端据此
+                        # 在 Lead 启用时拒绝覆盖（避免一次降级把累积长期记忆冲掉）。
+                        "source": "legacy",
                         "summary": digest,
                         "covered_rounds": count_rounds_since_marker(messages),
                     }

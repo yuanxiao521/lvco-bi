@@ -124,17 +124,28 @@ class _FakeLLM:
 
 
 def _patch_merge_io(monkeypatch, total_rounds: int, messages: list[dict]):
-    """把 DB 侧两个 IO 替换成定值（合并编排逻辑与 DB 无关，便于纯内存验证）。"""
+    """把 DB 侧两个 IO 替换成定值（合并编排逻辑与 DB 无关，便于纯内存验证）。
+
+    模拟真实 `_load_unmerged_messages` 的语义：返回的消息列表跳过空内容行，但
+    "本段最后一条消息 id"取**原始窗口最后一行**（空行也要被水位跨越）。
+    """
     from app.services.agents.lead import lead_agent as mod
+
+    rows = [
+        {"id": m.get("id") or f"msg-{i}", "role": m["role"], "content": m["content"]}
+        for i, m in enumerate(messages, 1)
+    ]
+    kept = [r for r in rows if str(r["content"]).strip()]
 
     async def _count(db_session, session_id):
         return total_rounds
 
-    async def _load(db_session, session_id, new_rounds):
-        return messages
+    async def _load(db_session, session_id, after_id=None, max_messages=24):
+        return list(kept), (rows[-1]["id"] if rows else None)
 
     monkeypatch.setattr(mod, "_count_session_user_rounds", _count)
     monkeypatch.setattr(mod, "_load_unmerged_messages", _load)
+    return rows
 
 
 async def test_maybe_summarize_skips_below_threshold(monkeypatch):
@@ -148,24 +159,35 @@ async def test_maybe_summarize_skips_below_threshold(monkeypatch):
 
 
 async def test_maybe_summarize_merges_and_advances_progress(monkeypatch):
-    _patch_merge_io(monkeypatch, 4, [
+    rows = _patch_merge_io(monkeypatch, 4, [
         {"role": "user", "content": "华东销售额多少"},
         {"role": "assistant", "content": "8,640 万"},
+        {"role": "user", "content": "那华南呢"},
+        {"role": "assistant", "content": "3,120 万"},
+        {"role": "user", "content": "好"},
     ])
-    llm = _FakeLLM("口径：全公司含税；华东 8,640 万")
+    llm = _FakeLLM("<analysis>草稿</analysis><summary>口径：全公司含税；华东 8,640 万</summary>")
     agent = LeadAgent(llm=llm)
     ctx = LeadContext(user_id=1, session_id="s1", history_summary="旧：口径=含税",
                       memory_covered=0)
     ev = await agent._maybe_summarize(ctx, db_session=object())
     assert llm.calls == 1
-    # 最新一轮留待下次（本轮助手产出尚未落库），进度停在 total-1
-    assert ev == {"summary": "口径：全公司含税；华东 8,640 万", "covered_rounds": 3}
+    assert ev["source"] == "lead"
+    assert ev["summary"] == "口径：全公司含税；华东 8,640 万"      # <analysis> 草稿被剥掉
+    assert ev["covered_rounds"] == 3                              # 诚实计数：实际并入 3 个用户轮
+    assert ev["last_merged_message_id"] == rows[-1]["id"]         # 水位推进到本段最后一条
+    assert ctx.memory_watermark == rows[-1]["id"]
     assert ctx.memory_covered == 3
 
 
 async def test_maybe_summarize_prompt_keeps_old_memory(monkeypatch):
-    """保旧纳新：合并输入必须带上【已有长期记忆】，否则就是退化成窗口重算。"""
-    _patch_merge_io(monkeypatch, 4, [{"role": "user", "content": "新问题"}])
+    """保旧纳新：合并输入必须带上【已有长期记忆】，否则就退化成窗口重算。"""
+    _patch_merge_io(monkeypatch, 4, [
+        {"role": "user", "content": "新问题"},
+        {"role": "user", "content": "再问一句"},
+        {"role": "user", "content": "还有"},
+        {"role": "user", "content": "最后"},
+    ])
     llm = _FakeLLM()
     agent = LeadAgent(llm=llm)
     ctx = LeadContext(user_id=1, session_id="s1", history_summary="旧口径：全公司含税",
@@ -177,20 +199,58 @@ async def test_maybe_summarize_prompt_keeps_old_memory(monkeypatch):
 
 
 async def test_maybe_summarize_llm_failure_keeps_progress(monkeypatch):
-    """失败不脏数据：LLM 异常时不写记忆、不推进进度，下一轮自然重试。"""
+    """失败不脏数据：不写摘要、不推进水位，只上报失败（供熔断计数）。"""
     _patch_merge_io(monkeypatch, 4, [{"role": "user", "content": "a"}])
     llm = _FakeLLM(exc=RuntimeError("boom"))
     agent = LeadAgent(llm=llm)
     ctx = LeadContext(user_id=1, session_id="s1", history_summary="旧记忆",
                       memory_covered=0)
-    assert await agent._maybe_summarize(ctx, db_session=object()) is None
-    assert ctx.memory_covered == 0
+    ev = await agent._maybe_summarize(ctx, db_session=object())
+    assert ev == {"source": "lead", "failed": True}
+    assert ctx.memory_covered == 0 and ctx.memory_watermark is None
 
 
 async def test_maybe_summarize_empty_reply_keeps_progress(monkeypatch):
+    """空摘要同样按失败处理，避免把空内容写进长期记忆。"""
     _patch_merge_io(monkeypatch, 5, [{"role": "user", "content": "a"}])
     llm = _FakeLLM("   ")
     agent = LeadAgent(llm=llm)
     ctx = LeadContext(user_id=1, session_id="s1", memory_covered=1)
+    assert await agent._maybe_summarize(ctx, db_session=object()) == {
+        "source": "lead", "failed": True
+    }
+    assert ctx.memory_watermark is None
+
+
+async def test_maybe_summarize_circuit_breaker(monkeypatch):
+    """熔断：连续失败达阈值后不再重试（不再每轮白烧一次 LLM 调用）。"""
+    _patch_merge_io(monkeypatch, 8, [{"role": "user", "content": "a"}])
+    llm = _FakeLLM()
+    agent = LeadAgent(llm=llm)
+    ctx = LeadContext(user_id=1, session_id="s1", memory_fail_count=3)
     assert await agent._maybe_summarize(ctx, db_session=object()) is None
-    assert ctx.memory_covered == 1
+    assert llm.calls == 0
+
+
+async def test_maybe_summarize_empty_segment_only_advances_watermark(monkeypatch):
+    """本段全是空占位：不花 LLM，只把水位推过去（否则会永远卡在这一段上）。"""
+    rows = _patch_merge_io(monkeypatch, 5, [
+        {"role": "assistant", "content": "   "},
+        {"role": "user", "content": "   "},
+    ])
+    llm = _FakeLLM()
+    agent = LeadAgent(llm=llm)
+    ctx = LeadContext(user_id=1, session_id="s1", memory_covered=1)
+    ev = await agent._maybe_summarize(ctx, db_session=object())
+    assert llm.calls == 0
+    assert ev["summary"] is None
+    assert ev["last_merged_message_id"] == rows[-1]["id"]
+    assert ctx.memory_watermark == rows[-1]["id"]
+
+
+def test_extract_summary_strips_analysis_draft():
+    from app.services.agents.lead.lead_agent import _extract_summary
+
+    assert _extract_summary("<analysis>草稿</analysis><summary>正文</summary>") == "正文"
+    assert _extract_summary("没有标签的纯文本") == "没有标签的纯文本"
+    assert _extract_summary("") == ""

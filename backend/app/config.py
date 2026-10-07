@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     LEAD_MAX_TURNS_IN_CTX: int = 20
     # 记忆合并节流：未并入长期记忆的用户轮数达到该阈值才触发一次累积合并
     LEAD_MEMORY_MERGE_ROUNDS: int = 4
+    # 单次合并最多并入的消息条数：超出部分不会被丢弃，而是留到下一轮继续并（水位驱动）。
+    LEAD_MEMORY_MAX_MERGE_MESSAGES: int = 24
+    # 连续失败熔断阈值：达到后暂停合并，避免每轮白烧一次摘要 LLM 调用（借鉴 Claude Code
+    # 的 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES；其线上观测到 1279 个会话曾连续失败 50+ 次）。
+    LEAD_MEMORY_MAX_FAILURES: int = 3
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）

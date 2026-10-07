@@ -139,10 +139,20 @@ async def main() -> int:
         if row is None:
             print("  （无行 —— 记忆未落库）")
         else:
-            print(f"  covered_rounds = {row.covered_rounds}")
-            print(f"  summary        = {row.summary}")
+            print(f"  covered_rounds         = {row.covered_rounds}")
+            print(f"  last_merged_message_id = {row.last_merged_message_id}   ← 消息级水位")
+            print(f"  merge_count            = {row.merge_count} / merge_fail_count = {row.merge_fail_count}")
+            print(f"  summary                = {row.summary}")
             ok = "全公司含税" in (row.summary or "")
             print(f"  埋点口径在摘要中: {'是' if ok else '否'}")
+            # 校验水位指向的正是"最后一次合并并入的那条消息"
+            if row.last_merged_message_id:
+                from app.models.ai_message import AIMessage
+                wm_msg = (await db.execute(
+                    select(AIMessage).where(AIMessage.id == row.last_merged_message_id)
+                )).scalar_one_or_none()
+                print(f"  水位指向的消息: role={wm_msg.role.value if wm_msg else '?'} "
+                      f"content={(wm_msg.content or '')[:20] if wm_msg else '（已被删除）'}")
 
     print(f"[SESSION] {sid}")
     return 0

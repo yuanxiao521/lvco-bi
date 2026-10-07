@@ -184,7 +184,10 @@ def _summarize_history_safe(history: list[dict] | None, max_chars: int = 2000) -
                 parts.append(f"{role}: {content.strip()}")
         joined = "\n".join(parts)
         if len(joined) > max_chars:
-            joined = joined[:max_chars] + "..."
+            # 截尾不截头：拼接结果按时间正序，[:max_chars] 会保留最旧的几轮、把**最新**的
+            # 对话丢掉（实测 2945 字输入下最新一轮完全消失）。摘要要服务"接着聊"，
+            # 保留最近的上下文才有意义。
+            joined = "..." + joined[-max_chars:]
         if not joined:
             return ""
         return f"[对话历史摘要]\n{joined}"

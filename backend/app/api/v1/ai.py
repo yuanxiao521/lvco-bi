@@ -69,19 +69,31 @@ _SESSION_BUSY_MSG = "上一轮还在处理中，请等它结束后再发。"
 router = APIRouter(prefix="/ai", tags=["AI助手"])
 
 
-async def _load_session_memory(db: AsyncSession, session_id) -> tuple[str | None, int]:
-    """读取会话级记忆：长期摘要 + 已并入轮数进度（无会话/无记忆返回 (None, 0)）。"""
+async def _load_session_memory(
+    db: AsyncSession, session_id
+) -> tuple[str | None, int, str | None, int]:
+    """读取会话级记忆：(长期摘要, 已并入轮数, 合并水位, 连续失败次数)。
+
+    无会话 / 无记忆行 / 读取失败一律返回空值，调用方按"无长期记忆"处理。
+    空字符串摘要也归一成 None（首次合并即失败时会建一行空记忆承载熔断计数）。
+    """
     if not session_id:
-        return None, 0
+        return None, 0, None, 0
     try:
         from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
         memory = await SQLAlchemyAIMemoryRepository(db).get_by_session(session_id)
         if memory is None:
-            return None, 0
-        return memory.summary, int(memory.covered_rounds or 0)
+            return None, 0, None, 0
+        wm = getattr(memory, "last_merged_message_id", None)
+        return (
+            (memory.summary or "") or None,
+            int(memory.covered_rounds or 0),
+            str(wm) if wm else None,
+            int(getattr(memory, "merge_fail_count", 0) or 0),
+        )
     except Exception:
         _log.warning("load_ai_memory_failed", exc_info=True)
-        return None, 0
+        return None, 0, None, 0
 
 
 def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
@@ -98,16 +110,53 @@ def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
 
 
 async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
-    """持久化压缩记忆（消费 agent_stream 的 compressed_history 事件）。"""
+    """持久化记忆合并事件（消费 agent_stream 的 compressed_history 事件）。
+
+    **来源守卫**（修 legacy 覆盖累积记忆）：Lead 路径的事件带 `source="lead"`，按消息级
+    水位记账；legacy 路径（LEAD_AGENT_ENABLED=false 或 Lead 降级兜底）带 `source="legacy"`，
+    其摘要是"按当前窗口重算"的产物、covered_rounds 也是另一套语义（距上次压缩轮数）。
+    Lead 启用时不允许 legacy 覆盖累积记忆——否则一次降级就把长期记忆冲回旧逻辑的结果。
+
+    三类事件：
+    - 正常合并：写摘要 + 覆盖进度 + 推进水位 + 成功计数 +1、失败计数清零；
+    - 失败（`failed`）：只把连续失败计数 +1（供熔断），不动摘要与水位；
+    - 仅推进（无 summary 但有水位）：本段没有可并入内容，只把水位/进度向前推。
+    """
     if not session_id:
-        return
-    summary = (event.get("summary") or "").strip()
-    if not summary:
         return
     try:
         from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
+        repo = SQLAlchemyAIMemoryRepository(db)
+
+        if settings.LEAD_AGENT_ENABLED and event.get("source") != "lead":
+            _log.info("skip_non_lead_memory_write source=%s", event.get("source"))
+            return
+
+        if event.get("failed"):
+            await repo.bump_merge_failure(session_id)
+            await db.commit()
+            return
+
         covered = int(event.get("covered_rounds") or 0)
-        await SQLAlchemyAIMemoryRepository(db).upsert(session_id, summary, covered_rounds=covered)
+        watermark = None
+        raw_wm = event.get("last_merged_message_id")
+        if raw_wm:
+            try:
+                watermark = uuid.UUID(str(raw_wm))
+            except (ValueError, TypeError):
+                watermark = None
+
+        summary = (event.get("summary") or "").strip()
+        if not summary:
+            if watermark is not None:
+                await repo.set_progress(
+                    session_id, covered_rounds=covered, last_merged_message_id=watermark
+                )
+                await db.commit()
+            return
+        await repo.upsert(
+            session_id, summary, covered_rounds=covered, last_merged_message_id=watermark
+        )
         await db.commit()
     except Exception:
         _log.warning("save_ai_memory_failed", exc_info=True)
@@ -1065,7 +1114,12 @@ async def data_chat_stream(
             except Exception:
                 _log.info("metrics context injection skipped", exc_info=True)
 
-            memory_summary, memory_covered = await _load_session_memory(db, session_id)
+            (
+                memory_summary,
+                memory_covered,
+                memory_watermark,
+                memory_fail_count,
+            ) = await _load_session_memory(db, session_id)
 
             def _event_factory(db_session: AsyncSession):
                 """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。
@@ -1083,6 +1137,8 @@ async def data_chat_stream(
                         datasource_id=body.datasource_id,
                         history_summary=memory_summary or "",
                         memory_covered=memory_covered,
+                        memory_watermark=memory_watermark,
+                        memory_fail_count=memory_fail_count,
                         metrics_ctx=metrics_ctx_for_lead,
                     )
                     # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
@@ -2218,7 +2274,12 @@ async def canvas_ai_chat(
                 has_ds = datasource is not None
             canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
             # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
-            memory_summary, memory_covered = await _load_session_memory(db, session_id)
+            (
+                memory_summary,
+                memory_covered,
+                memory_watermark,
+                memory_fail_count,
+            ) = await _load_session_memory(db, session_id)
 
             def _legacy_stream():
                 return ai_service.agent_stream(
@@ -2246,6 +2307,8 @@ async def canvas_ai_chat(
                     datasource_id=str(datasource.id) if datasource else body.datasource_id,
                     history_summary=memory_summary or "",
                     memory_covered=memory_covered,
+                    memory_watermark=memory_watermark,
+                    memory_fail_count=memory_fail_count,
                     metrics_ctx=metrics_ctx_for_lead,
                 )
                 for h in history:

@@ -163,18 +163,67 @@ class SQLAlchemyAIMemoryRepository:
         session_id: uuid.UUID,
         summary: str,
         covered_rounds: int = 0,
+        last_merged_message_id: uuid.UUID | None = None,
     ) -> AIMemory:
-        """写入/更新会话压缩记忆（存在则覆盖 summary 与 covered_rounds）。"""
+        """写入/更新会话压缩记忆。
+
+        覆盖 summary / covered_rounds / 合并水位，并累加成功次数、清零连续失败计数。
+        水位为 None 表示"本次不更新水位"（兼容 legacy 路径不以消息级水位记账）。
+        """
         memory = await self.get_by_session(session_id)
         if memory is None:
             memory = AIMemory(
                 session_id=session_id,
                 summary=summary,
                 covered_rounds=covered_rounds,
+                last_merged_message_id=last_merged_message_id,
+                merge_count=1,
+                merge_fail_count=0,
             )
             self.db.add(memory)
         else:
             memory.summary = summary
             memory.covered_rounds = covered_rounds
+            if last_merged_message_id is not None:
+                memory.last_merged_message_id = last_merged_message_id
+            memory.merge_count = int(memory.merge_count or 0) + 1
+            memory.merge_fail_count = 0
+        await self.db.flush()
+        return memory
+
+    async def set_progress(
+        self,
+        session_id: uuid.UUID,
+        covered_rounds: int,
+        last_merged_message_id: uuid.UUID | None = None,
+    ) -> AIMemory | None:
+        """只推进进度与水位，不动摘要（本段没有可并入内容时用，避免卡在该段上）。"""
+        memory = await self.get_by_session(session_id)
+        if memory is None:
+            return None
+        memory.covered_rounds = covered_rounds
+        if last_merged_message_id is not None:
+            memory.last_merged_message_id = last_merged_message_id
+        await self.db.flush()
+        return memory
+
+    async def bump_merge_failure(self, session_id: uuid.UUID) -> AIMemory:
+        """记录一次记忆合并失败（连续失败计数 +1，供熔断判定）。
+
+        首次合并即失败时还没有记忆行，这里建一行空记忆（summary=""）承载计数——
+        读取端把空 summary 视为"无长期记忆"，因此不影响上下文注入。
+        """
+        memory = await self.get_by_session(session_id)
+        if memory is None:
+            memory = AIMemory(
+                session_id=session_id,
+                summary="",
+                covered_rounds=0,
+                merge_count=0,
+                merge_fail_count=1,
+            )
+            self.db.add(memory)
+        else:
+            memory.merge_fail_count = int(memory.merge_fail_count or 0) + 1
         await self.db.flush()
         return memory
