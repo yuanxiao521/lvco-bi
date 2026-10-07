@@ -17,6 +17,44 @@ _MAX_RESULT_CHARS = settings.RESULT_MAX_CHARS  # 单个工具结果注入上下�
 _MAX_ROWS = settings.RESULT_MAX_ROWS            # rows 保留前 N 行
 
 
+# ── 上下文装配通用工具 ──────────────────────────────────────────────────────
+
+def estimate_tokens(text: str) -> int:
+    """粗略 token 估算（中英混排），只用于预算判断与可观测，不用于计费。
+
+    规则：CJK/全角字符按 1 字 ≈ 1 token；其余按 4 字符 ≈ 1 token。整体偏保守（宁多不少）。
+    """
+    if not text:
+        return 0
+    cjk = 0
+    for ch in text:
+        code = ord(ch)
+        if (
+            0x4E00 <= code <= 0x9FFF      # CJK 统一汉字
+            or 0x3000 <= code <= 0x303F   # CJK 标点
+            or 0xFF00 <= code <= 0xFFEF   # 全角字符
+            or 0x3040 <= code <= 0x30FF   # 日文假名（混排时同样 1 字 1 token 量级）
+        ):
+            cjk += 1
+    other = len(text) - cjk
+    return cjk + (other + 3) // 4
+
+
+def align_history_pairs(history: list[dict]) -> list[dict]:
+    """把历史窗口对齐到"问答成对"：丢掉开头没有配对的 assistant。
+
+    为什么需要：窗口是按条数截取的，起点可能落在"某轮的回答"上，
+    于是模型看到的开场是"一个没有来由的答案"。这类孤立回答既占预算又容易误导，
+    直接丢掉；末尾的孤立 user（提问尚无回答，如被中断的那轮）保留——它本来就是待办。
+    """
+    if not history:
+        return []
+    idx = 0
+    while idx < len(history) and history[idx].get("role") != "user":
+        idx += 1
+    return history[idx:]
+
+
 def compact_result_json(result_str: str, max_chars: int = _MAX_RESULT_CHARS) -> str:
     """把工具返回的 JSON 结果压缩成摘要，用于注入 LLM 上下文。
 

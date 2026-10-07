@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 from app.config import settings
+from app.services.context_utils import estimate_tokens
 from app.services.agents.lead.lead_decider import (
     ActionType,
     Decision,
@@ -217,6 +218,7 @@ class LeadContext:
     memory_watermark: str | None = None       # 记忆合并水位：已并入的最后一条消息 id
     memory_fail_count: int = 0                # 连续合并失败次数（熔断依据）
     turns: list[dict] = field(default_factory=list)          # 会话活记忆
+    extra_context: str = ""                   # 额外上下文（如"上一轮已生成的图表"摘要），置于 digest 头部
     turn_summaries: list[str] = field(default_factory=list)  # 关键节点汇报累积
     metrics_ctx: str = ""                     # 受治理指标清单（入口注入，answer/决策复用）
 
@@ -229,26 +231,103 @@ class LeadContext:
         if len(self.turns) > cap:
             self.turns = self.turns[len(self.turns) - cap:]
 
-    def digest(self, max_chars: int = 4000) -> str:
-        """给决策注入的紧凑上下文（长期摘要 + 最近轮次）。
+    def recent_turns(self, max_turns: int = 8, max_chars: int | None = None) -> list[dict]:
+        """取最近若干**整条**消息（成对对齐 + 预算封顶），供答案生成这类轻量调用使用。
 
-        超限时保留【长期记忆】头部、只截最近轮次的尾部——不能反过来，
-        否则长期记忆会先被截掉（旧记忆平白消失）。
+        与 digest 的分工：digest 把记忆与轮次拼成"一段文本"给子任务看；
+        这里返回结构化消息列表，但仍遵守同样三条规则——不切句子、丢掉孤立回答开场、
+        总字符预算，避免"最近 8 条"在长报告场景把 prompt 撑到上万字符。
         """
+        limit = int(
+            max_chars or getattr(settings, "LEAD_CTX_ANSWER_HISTORY_CHARS", 2000) or 2000
+        )
+        picked: list[dict] = []
+        used = 0
+        for t in reversed(self.turns[-max(1, max_turns):]):
+            role = t.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            content = str(t.get("content", ""))
+            if used + len(content) > limit:
+                if not picked and limit - used > 40:
+                    picked.append({
+                        "role": role,
+                        "content": content[: limit - used - 1] + "…",
+                    })
+                break
+            picked.append({"role": role, "content": content})
+            used += len(content)
+        picked.reverse()
+        # 丢掉开头的孤立回答；但若整个窗口只剩回答（提问都被预算裁掉），保留它——
+        # 至少给模型一点"刚才在聊什么"的线索，比空手强。
+        if any(t["role"] == "user" for t in picked):
+            while picked and picked[0]["role"] != "user":
+                picked.pop(0)
+        return picked
+
+    def digest(self, max_chars: int | None = None) -> str:
+        """给子任务/决策注入的紧凑上下文（额外上下文 + 长期摘要 + 最近轮次）。
+
+        装配规则（由"尾部硬切"改为"整条消息装配"）：
+        - **不切句子**：活记忆按"整条消息"从新到旧累加，装不下就停；只有单条自身就超预算时
+          才截断该条（旧实现是从整体尾部一刀切，会把一条消息切掉半个句子）；
+        - **长期记忆优先但有上限**：先给【长期记忆】，但为其设上限 `预算 − 活记忆预留`，
+          避免摘要变长时把"刚才这几轮"整个挤掉；反过来也不会让旧记忆把活记忆饿死；
+        - **成对对齐**：裁剪后若开头是孤立 assistant（没有提问的回答），丢掉它——
+          这种开场既占预算又容易误导（见 context_utils.align_history_pairs）。
+        """
+        limit = int(max_chars or getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000)
+        reserve = min(
+            max(0, int(getattr(settings, "LEAD_CTX_LIVE_RESERVE_CHARS", 800) or 0)),
+            limit // 2,
+        )
+
+        extra = (self.extra_context or "").strip()
+        if extra:
+            extra = extra[: max(0, limit // 4)]
+
         memory = ""
         if self.history_summary.strip():
             memory = f"【长期记忆】{self.history_summary.strip()}"
-        turns_text = "\n".join(
-            f"{'用户' if t.get('role') == 'user' else '助手'}: {str(t.get('content', ''))}"
+            max_memory = limit - reserve
+            if 0 < max_memory < len(memory):
+                memory = memory[:max_memory] + "…"
+
+        turns = [
+            {"role": t.get("role"), "content": str(t.get("content", ""))}
             for t in self.turns[-max(1, settings.LEAD_MAX_TURNS_IN_CTX):]
+        ]
+        used = len(memory) + len(extra)
+        picked: list[str] = []
+        for t in reversed(turns):
+            line = f"{'用户' if t.get('role') == 'user' else '助手'}: {t['content']}"
+            if used + len(line) + 1 > limit:
+                remain = limit - used - 1
+                if remain > 40 and not picked:
+                    # 最新的这一条自身就超预算：截这一条，至少保住"刚才聊到哪"
+                    picked.append(line[:remain] + "…")
+                break
+            picked.append(line)
+            used += len(line) + 1
+        picked.reverse()
+
+        # 成对对齐：丢掉因裁剪产生的"孤立回答"开场（若只剩回答则保留，避免整个活记忆变空）
+        if any(p.startswith("用户:") for p in picked):
+            head = 0
+            while head < len(picked) and picked[head].startswith("助手:"):
+                head += 1
+            picked = picked[head:]
+
+        parts = [p for p in (extra, memory, "\n".join(picked)) if p]
+        out = "\n".join(parts)
+        if len(out) > limit:
+            # 兜底硬上限：分隔符与省略标记也要计入预算，否则边界上会超出几字符
+            out = out[:limit]
+        logger.debug(
+            "[lead_agent] digest_assembled chars=%s tokens≈%s turns=%s",
+            len(out), estimate_tokens(out), len(picked),
         )
-        if not memory:
-            return turns_text if len(turns_text) <= max_chars else turns_text[-max_chars:]
-        budget = max_chars - len(memory) - 1
-        if budget <= 0:
-            return memory[:max_chars]
-        tail = turns_text if len(turns_text) <= budget else turns_text[-budget:]
-        return f"{memory}\n{tail}" if tail else memory
+        return out
 
 
 class LeadAgent:
@@ -691,12 +770,16 @@ class LeadAgent:
             return
         messages = [{"role": "system", "content": _ANSWER_SYSTEM}]
         if ctx.history_summary.strip():
-            messages.append({"role": "assistant", "content": f"【历史记忆】{ctx.history_summary}"})
+            # 长期记忆也要给上限：legacy 摘要可能上千字，原样注入会挤占追问所需的空间
+            mem = ctx.history_summary.strip()
+            mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000) // 3)
+            if len(mem) > mem_cap:
+                mem = mem[:mem_cap] + "…"
+            messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
         if ctx.metrics_ctx.strip():
             messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
-        for t in ctx.turns[-8:]:
-            if t.get("role") in ("user", "assistant"):
-                messages.append({"role": t["role"], "content": str(t.get("content", ""))})
+        for t in ctx.recent_turns(max_turns=8):
+            messages.append({"role": t["role"], "content": t["content"]})
         messages.append({"role": "user", "content": user_msg})
         collected: list[str] = []
         try:

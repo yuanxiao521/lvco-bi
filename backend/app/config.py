@@ -107,6 +107,14 @@ class Settings(BaseSettings):
     # 连续失败熔断阈值：达到后暂停合并，避免每轮白烧一次摘要 LLM 调用（借鉴 Claude Code
     # 的 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES；其线上观测到 1279 个会话曾连续失败 50+ 次）。
     LEAD_MEMORY_MAX_FAILURES: int = 3
+    # 上下文装配预算（digest 注入给子任务的总字符上限）
+    LEAD_CTX_MAX_CHARS: int = 4000
+    # 其中为"最近几轮活记忆"预留的字符数：长期记忆再长也不能把它挤没
+    LEAD_CTX_LIVE_RESERVE_CHARS: int = 800
+    # "上一轮已生成图表"摘要注入的总字符预算（按图逐条累加，超预算即停）
+    LEAD_CTX_CHART_SUMMARY_CHARS: int = 2000
+    # 答案生成时喂入的历史轮次总字符预算（取最近若干"整条"消息，超预算即停）
+    LEAD_CTX_ANSWER_HISTORY_CHARS: int = 2000
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）

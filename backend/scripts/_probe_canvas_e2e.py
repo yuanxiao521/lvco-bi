@@ -157,13 +157,21 @@ async def main() -> int:
         canon = [(r.role.value if hasattr(r.role, "value") else str(r.role))
                  for r in canon_rows if str(r.content or "").strip()]
 
-        merged = await _load_unmerged_messages(db, str(sid), 3)
+        merged, wm = await _load_unmerged_messages(db, str(sid), max_messages=24)
         actual = [str(m["role"]) for m in merged]
-        expected = canon[-len(actual):] if actual else []
-        print(f"\n[记忆合并输入] _load_unmerged_messages → {' '.join('U' if r=='user' else 'A' for r in actual)}")
-        print(f"               规范序（asc+role）尾部 {len(actual)} 条 → "
-              f"{' '.join('U' if r=='user' else 'A' for r in expected)}")
-        print(f"               等价比对: {'✓ 一致' if actual == expected else '✗ 顺序不符'}")
+        # 判据：水位驱动下返回的是"水位之后**最早**一段"，不一定是全量尾部，
+        # 所以正确的校验是"actual 必须是规范序（asc+role）的连续子序列"。
+        n_ = len(actual)
+        contained = (
+            any(canon[i:i + n_] == actual for i in range(len(canon) - n_ + 1))
+            if n_ else True
+        )
+        print(f"\n[记忆合并输入] _load_unmerged_messages → "
+              f"{' '.join('U' if r == 'user' else 'A' for r in actual)}")
+        print(f"               规范序（asc+role）全序列 → "
+              f"{' '.join('U' if r == 'user' else 'A' for r in canon)}")
+        print(f"               是否规范序的连续子序列: {'✓ 顺序正确' if contained else '✗ 顺序不符'}")
+        print(f"               本段水位 → {wm}")
 
         mem = (await db.execute(
             select(AIMemory).where(AIMemory.session_id == uuid.UUID(str(sid)))

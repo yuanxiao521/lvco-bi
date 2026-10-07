@@ -61,6 +61,7 @@ _CANVAS_QUERY_TOOL_NAMES = frozenset({
     "stats_analyzer", "recommend_charts",
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
+from app.services.context_utils import align_history_pairs as _align_history_pairs
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 
 # 会话级并发锁被占用时的 SSE error 文案（对话/画布两个入口共用）
@@ -98,7 +99,8 @@ async def _load_session_memory(
 
 def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
     """画布历史过滤：只跳过"空占位"的 assistant 行（保留有内容的助手消息，含反问/说明），
-    并按 id 排除本条用户消息（它由 Lead 统一 add_turn，避免窗口里重复）。"""
+    按 id 排除本条用户消息（它由 Lead 统一 add_turn，避免窗口里重复），
+    最后把窗口对齐到"问答成对"（丢掉裁剪产生的孤立回答开场）。"""
     history: list[dict] = []
     for pm in rows:
         if current_msg_id is not None and getattr(pm, "id", None) == current_msg_id:
@@ -106,7 +108,38 @@ def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
         if pm.role == AIMessageRole.assistant and not (pm.content or "").strip():
             continue
         history.append({"role": pm.role.value, "content": pm.content})
-    return history
+    return _align_history_pairs(history)
+
+
+def _build_chart_summary_note(prior_msgs, budget: int) -> str:
+    """把"最近几轮已生成的图表"渲染成一段注入文本，受总字符预算约束。
+
+    为什么需要预算：旧实现按"每图 600 字符 × 最多 6 条消息"累加且**无总量上限**，
+    一个多图答案就能灌进上万字符。这里是"免费可省的一层"——先裁状态载荷，再谈摘要。
+    """
+    parts: list[str] = []
+    used = 0
+    for pm in prior_msgs or []:
+        if getattr(pm, "role", None) != AIMessageRole.assistant:
+            continue
+        chart_data = getattr(pm, "chart_data", None)
+        charts = chart_data.get("charts") if isinstance(chart_data, dict) else None
+        if not charts:
+            continue
+        for c in charts:
+            line = (
+                f"- {c.get('chart_type', '?')} 图表："
+                f"{json.dumps(c.get('option', {}), ensure_ascii=False)[:600]}"
+            )
+            if used + len(line) > budget:
+                break
+            parts.append(line)
+            used += len(line) + 1
+        if used >= budget:
+            break
+    if not parts:
+        return ""
+    return "【上一轮已生成的图表，请勿重复生成同类型图表】\n" + "\n".join(parts)
 
 
 async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
@@ -1014,8 +1047,12 @@ async def data_chat_stream(
                     if isinstance(h, dict) and h.get("role") in ("user", "assistant")
                 ]
 
-            # 额外注入：把最近若干轮的真实查询结果摘要带进上下文，避免 LLM 重复查询
+            # 额外注入：把最近若干轮已生成的图表清单带进上下文，避免 LLM 重复生成同类型图表。
+            # 加总量预算：旧实现按"每图 600 字符 × 最多 6 条消息"累加且**无总量上限**，
+            # 一个多图答案就能灌进上万字符 —— 这是"免费可省的一层"：先裁状态载荷，再谈摘要。
+            chart_summary_note = ""
             if session_id:
+                chart_budget = int(getattr(settings, "LEAD_CTX_CHART_SUMMARY_CHARS", 2000) or 2000)
                 prior_msgs = (
                     await db.execute(
                         select(AIMessage)
@@ -1026,18 +1063,11 @@ async def data_chat_stream(
                     )
                 ).scalars().all()
                 prior_msgs.reverse()
-                for pm in prior_msgs:
-                    if pm.role == AIMessageRole.assistant and pm.chart_data:
-                        charts = pm.chart_data.get("charts") if isinstance(pm.chart_data, dict) else None
-                        if charts:
-                            summary_parts = [
-                                f"- {c.get('chart_type', '?')} 图表：{json.dumps(c.get('option', {}), ensure_ascii=False)[:600]}"
-                                for c in charts
-                            ]
-                            history.append({
-                                "role": "system",
-                                "content": "【上一轮已生成的图表，请勿重复生成同类型图表】\n" + "\n".join(summary_parts),
-                            })
+                chart_summary_note = _build_chart_summary_note(prior_msgs, chart_budget)
+                if chart_summary_note:
+                    # legacy 路径从 history 里取（role=system）；
+                    # Lead 路径通过 LeadContext.extra_context 注入（见下方 _event_factory）
+                    history.append({"role": "system", "content": chart_summary_note})
 
             # Build agent message: inject datasource context if datasource_id is provided
             agent_message = body.message
@@ -1139,6 +1169,7 @@ async def data_chat_stream(
                         memory_covered=memory_covered,
                         memory_watermark=memory_watermark,
                         memory_fail_count=memory_fail_count,
+                        extra_context=chart_summary_note,
                         metrics_ctx=metrics_ctx_for_lead,
                     )
                     # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
@@ -1150,9 +1181,14 @@ async def data_chat_stream(
                         and history_for_ctx[-1].get("content") == body.message
                     ):
                         history_for_ctx = history_for_ctx[:-1]
-                    for h in history_for_ctx:
-                        if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
-                            lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+                    # 成对对齐：前端按条数 slice 出来的窗口可能从"上一轮的回答"开始，
+                    # 这类孤立回答丢掉（否则模型开场就看到一个没有来由的答案）。
+                    for h in _align_history_pairs([
+                        {"role": h["role"], "content": str(h.get("content", ""))}
+                        for h in history_for_ctx
+                        if isinstance(h, dict) and h.get("role") in ("user", "assistant")
+                    ]):
+                        lead_ctx.turns.append(h)
                     return _lead_stream_guard(
                         LeadAgent(llm=llm_client, observer=get_observer()).stream(
                             agent_message, ctx=lead_ctx, db_session=db_session
@@ -2254,7 +2290,9 @@ async def canvas_ai_chat(
                         # reversed() 成全量正序，方向一致才能在反转后仍得到"提问在前"。
                         # 反向会得到"答在问前"——有 tie 时 DESC+LIMIT 再反转 ≠ ASC。
                         .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
-                        .limit(12)
+                        # 取 13 条而非 12：多留 1 条给"成对对齐"的余量，
+                        # 窗口起点若落在某轮回答上，对齐后仍能保留 12 条完整问答
+                        .limit(13)
                     )
                 ).scalars().all()
                 prior_msgs.reverse()
