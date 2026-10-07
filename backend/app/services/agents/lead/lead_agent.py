@@ -235,6 +235,7 @@ class LeadContext:
     memory_fail_count: int = 0                # 连续合并失败次数（熔断依据）
     turns: list[dict] = field(default_factory=list)          # 会话活记忆
     extra_context: str = ""                   # 额外上下文（如"上一轮已生成的图表"摘要），置于 digest 头部
+    canvas_state: object | None = None        # 请求级画布状态提供者（CanvasStateProvider，stream 开头构造）
     turn_summaries: list[str] = field(default_factory=list)  # 关键节点汇报累积
     metrics_ctx: str = ""                     # 受治理指标清单（入口注入，answer/决策复用）
 
@@ -367,6 +368,14 @@ class LeadAgent:
     ) -> AsyncIterator[dict]:
         """处理一轮用户输入，产出 SSE 事件流。"""
         degradation: list[str] = []
+        # 请求级画布状态感知：一次构造、全请求复用（内部缓存，落块后按需 force 重读）。
+        # 所有消费点（决策 / 回答 / Worker / 收尾摘要）统一从这里取，避免"逐点注入漏一处"。
+        if ctx.canvas_state is None:
+            from app.services.agents.lead.canvas_state import CanvasStateProvider
+
+            ctx.canvas_state = CanvasStateProvider(
+                db_session, ctx.user_id, ctx.canvas_id, entry=ctx.entry
+            )
         observer = self.observer
         if observer is None:
             try:
@@ -398,12 +407,8 @@ class LeadAgent:
             )
             # 画布感知（对 Supervisor）：读库中已落盘的画布布局，注入决策 prompt，
             # 让 Lead 知道"画布上现已落成什么图表/文本、布局如何"（完成的真实效果）。
-            canvas_layout = ""
-            if ctx.entry == "canvas" and ctx.canvas_id:
-                canvas_layout = await _load_canvas_snapshot(
-                    db_session, str(ctx.user_id), ctx.canvas_id
-                )
-            canvas_layout = canvas_layout or ""
+            # 走请求级 provider（带缓存）：同一轮多处消费不会重复读库。
+            canvas_layout = await ctx.canvas_state.layout() if ctx.canvas_state else ""
             merged = await decide_action_merged(
                 user_msg,
                 history_summary=ctx.digest(),
@@ -434,11 +439,10 @@ class LeadAgent:
                 if rnd == 0:
                     decision = merged.decision
                 else:
-                    # 每轮决策前刷新画布快照：上一轮子任务落块后，DB 里的画布已变化
-                    if ctx.entry == "canvas" and ctx.canvas_id:
-                        canvas_layout = await _load_canvas_snapshot(
-                            db_session, str(ctx.user_id), ctx.canvas_id
-                        ) or canvas_layout
+                    # 每轮决策前刷新画布快照：上一轮子任务落块后（前端已写库），DB 里的画布
+                    # 已变化 → force=True 跳过缓存重读
+                    if ctx.canvas_state is not None:
+                        canvas_layout = await ctx.canvas_state.layout(force=True) or canvas_layout
                     decision = await decide_action(
                         user_msg,
                         intent,
@@ -487,7 +491,9 @@ class LeadAgent:
                     # 子任务执行完毕 → 继续下一轮决策（靠 subtask_summaries 注入 + prompt 硬规则
                     # 决定 stop，避免重复执行同目标；run_analysis memo 幂等兜底）
                 else:
-                    async for ev in self._answer_branch(user_msg, decision, ctx, trace=trace):
+                    async for ev in self._answer_branch(
+                        user_msg, decision, ctx, canvas_layout=canvas_layout, trace=trace
+                    ):
                         yield ev
                     # 纯回答路径：答完即代码层收尾，不再开下一轮决策。
                     # 曾经靠 prompt 硬规则（"上一轮为 answer 必须 stop"）让 LLM 自觉收敛，
@@ -735,21 +741,18 @@ class LeadAgent:
         # 画布叙事要点（结论在文本块里，模板句不含要点）：提前取出，
         # 既用于收尾话术，也让记忆存储的是"FreshFoods 8,640万居首"这类要点而非空模板句。
         canvas_highlight = ""
-        if result.success and ctx.entry == "canvas" and ctx.canvas_id:
+        if result.success and ctx.canvas_state is not None:
             try:
-                canvas_highlight = await _load_canvas_narrative(
-                    db_session, str(ctx.user_id), ctx.canvas_id
-                ) or ""
+                canvas_highlight = await ctx.canvas_state.narrative() or ""
             except Exception:  # noqa: BLE001
                 canvas_highlight = ""
         if result.success:
             blocks = result.blocks_added
-            # 落块后前端已实时保存到 DB，刷新画布快照让 Supervisor 看到"落的到底是什么"
-            canvas_now = ""
-            if ctx.entry == "canvas" and ctx.canvas_id:
-                canvas_now = await _load_canvas_snapshot(
-                    db_session, str(ctx.user_id), ctx.canvas_id
-                ) or ""
+            # 落块后前端已实时保存到 DB → force=True 强制重读，让 Supervisor 看到"落的到底是什么"
+            # （provider 有请求级缓存，这里必须绕过缓存，否则拿到的是本轮开始前的旧布局）
+            canvas_now = (
+                await ctx.canvas_state.layout(force=True) if ctx.canvas_state is not None else ""
+            )
             ctx.turn_summaries.append(self._build_execution_summary(result, canvas_layout=canvas_now))
             if blocks > 0:
                 if canvas_highlight:
@@ -777,6 +780,7 @@ class LeadAgent:
         user_msg: str,
         decision: Decision,
         ctx: LeadContext,
+        canvas_layout: str = "",
         trace=None,
     ) -> AsyncIterator[dict]:
         text = (decision.direct_text or "").strip()
@@ -794,6 +798,14 @@ class LeadAgent:
             messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
         if ctx.metrics_ctx.strip():
             messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
+        if canvas_layout.strip():
+            # 画布感知也要覆盖"直接回答"分支：此前只有决策与 Worker 有画布快照，
+            # 于是"画布上有什么？""我刚让你画的是什么？"这类短问句若被路由成 answer
+            # 就会失去画布信息（能力层已有 provider，这里取用即可，不额外读库）。
+            messages.append({
+                "role": "assistant",
+                "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{canvas_layout}",
+            })
         for t in ctx.recent_turns(max_turns=8):
             messages.append({"role": t["role"], "content": t["content"]})
         messages.append({"role": "user", "content": user_msg})

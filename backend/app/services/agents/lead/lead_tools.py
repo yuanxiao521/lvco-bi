@@ -138,30 +138,45 @@ def _dimensions_covered(tool_chain: list[dict]) -> int:
     return len(covered)
 
 
-async def _load_canvas_snapshot(db_session, user_id, canvas_id) -> str:
-    """读数据库里已落盘的画布块，渲染成布局摘要文本（供 Lead 决策 / Worker 注入）。
+async def _load_canvas_blocks(db_session, user_id, canvas_id) -> list | None:
+    """读数据库里已落盘的画布块（`Canvas.blocks`）。
 
-    数据源是 Canvas.blocks（前端是唯一写者，落块后保存到 DB），因此这是"已完成
-    效果"的权威来源——比请求时刻上下文的快照更新。读取/解析任何异常都不抛出，
-    返回空串（调用方按"无画布状态"处理）。
+    返回 None 表示"画布不存在/读取失败"，[] 表示"画布存在但为空"——两者语义不同
+    （前者不该渲染出"画布为空"），调用方据此区分。
+    数据源是 Canvas.blocks，**前端是唯一写者**（落块后 PUT 保存），因此这是"已完成
+    效果"的权威来源，比请求时刻上下文的快照更新。
     """
     if not canvas_id or not user_id or db_session is None:
-        return ""
+        return None
     try:
         from uuid import UUID
 
         from app.repositories.canvas_repository import SQLAlchemyCanvasRepository
-        from app.services.canvas_tools import render_canvas_layout
 
         canvas = await SQLAlchemyCanvasRepository(db_session).get_by_id(
             UUID(str(canvas_id)), UUID(str(user_id))
         )
         if canvas is None:
-            return ""
-        return render_canvas_layout(canvas.blocks, canvas_id=str(canvas.id))
+            return None
+        return list(canvas.blocks or [])
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"[lead_tools] load_canvas_snapshot_failed error={e}")
+        logger.warning(f"[lead_tools] load_canvas_blocks_failed error={e}")
+        return None
+
+
+async def _load_canvas_snapshot(db_session, user_id, canvas_id) -> str:
+    """读已落盘的画布块并渲染成布局摘要文本（供 Lead 决策 / Worker 注入）。
+
+    薄封装，真正的读取在 `_load_canvas_blocks`。为兼容既有调用点保留；
+    新代码请用请求级 `CanvasStateProvider`（带缓存 + 结构化出口）。
+    读取/解析任何异常都不抛出，返回空串（调用方按"无画布状态"处理）。
+    """
+    blocks = await _load_canvas_blocks(db_session, user_id, canvas_id)
+    if blocks is None:
         return ""
+    from app.services.canvas_tools import render_canvas_layout
+
+    return render_canvas_layout(blocks, canvas_id=str(canvas_id))
 
 
 async def _load_canvas_narrative(db_session, user_id, canvas_id, max_chars: int = 96) -> str:
@@ -461,7 +476,12 @@ async def run_analysis(
     # 不拼进 goal（保持幂等键稳定），以一条 assistant 历史消息携带——Worker 据此
     # 知道画布现状，避免重复添加；也可在落块后调用 get_canvas_layout 刷新/查重叠。
     if args.canvas_id:
-        snapshot = await _load_canvas_snapshot(db_session, user_id, args.canvas_id)
+        # 优先复用请求级 provider（同一轮内决策已读过 → 命中缓存，不重复读库）
+        provider = getattr(lead_ctx, "canvas_state", None)
+        if provider is not None and getattr(provider, "enabled", False):
+            snapshot = await provider.layout()
+        else:
+            snapshot = await _load_canvas_snapshot(db_session, user_id, args.canvas_id)
         if snapshot:
             history = history + [{
                 "role": "assistant",

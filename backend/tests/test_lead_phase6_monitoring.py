@@ -427,15 +427,21 @@ async def test_canvas_entry_injects_snapshot_into_decision_prompt(monkeypatch):
             return await super().complete(messages, **kw)
 
     import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_tools as tools_mod
 
-    fake_snapshot = (
-        "画布 id：c1\n画布当前共有 3 个块：图表 2 个、文本 1 个。\n"
-        "图表清单：\n- 销售额柱状图（bar）\n- 城市分布饼图（pie）"
-    )
-    async def _fake_snapshot(*a, **kw):  # noqa: ANN002
-        return fake_snapshot
+    # 打桩新的接缝：画布状态由请求级 CanvasStateProvider 提供，Provider 的唯一读取入口是
+    # _load_canvas_blocks（返回块列表，渲染交给真实的 render_canvas_layout）。
+    # 这样测试覆盖"读取 → 渲染 → 注入"整条链路，而不是把渲染结果直接喂进去。
+    fake_blocks = [
+        {"id": "c1", "type": "chart", "title": "销售额柱状图", "chartType": "bar"},
+        {"id": "c2", "type": "chart", "title": "城市分布饼图", "chartType": "pie"},
+        {"id": "t1", "type": "text", "title": "总销售额 100 元"},
+    ]
 
-    monkeypatch.setattr(mod, "_load_canvas_snapshot", _fake_snapshot)
+    async def _fake_blocks(*a, **kw):  # noqa: ANN002
+        return fake_blocks
+
+    monkeypatch.setattr(tools_mod, "_load_canvas_blocks", _fake_blocks)
 
     async def _fake_run_analysis(args, *, emit, **kw):  # noqa: ANN001
         await emit({"type": "text", "content": "报告：总销售额 100 元。", "report_source": "orchestrator"})
@@ -458,7 +464,8 @@ async def test_canvas_entry_injects_snapshot_into_decision_prompt(monkeypatch):
     # 首轮合并调用 + 第 2 轮决策：都带【当前画布状态】与落盘快照
     for prompt in captured:
         assert "【当前画布状态】" in prompt
-        assert fake_snapshot.splitlines()[1] in prompt  # 块统计行
+        assert "画布当前共有 3 个块：图表 2 个、文本 1 个。" in prompt  # 块统计行（真实渲染）
+        assert "销售额柱状图" in prompt                                # 图表清单来自真实 blocks
 
 
 # ── 6. C 方案：规则评审（assess_subtask） + Lead 指导意见（guidance） ────────
