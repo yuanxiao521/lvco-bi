@@ -267,10 +267,12 @@ class _FakeLLM:
         self.exc = exc
         self.calls = 0
         self.seen: list[list[dict]] = []
+        self.kwargs: list[dict] = []
 
     async def complete(self, messages, **kwargs):
         self.calls += 1
         self.seen.append(messages)
+        self.kwargs.append(kwargs)
         if self.exc:
             raise self.exc
         return self.reply
@@ -399,6 +401,42 @@ async def test_maybe_summarize_empty_segment_only_advances_watermark(monkeypatch
     assert ev["summary"] is None
     assert ev["last_merged_message_id"] == rows[-1]["id"]
     assert ctx.memory_watermark == rows[-1]["id"]
+
+
+def test_memory_merge_prompt_is_structured_and_configurable(monkeypatch):
+    """摘要必须分区化：口径有固定位置（不会被新信息挤掉）、数字要求带语境（可溯源）。"""
+    from app.config import settings
+    from app.services.agents.lead.lead_agent import _memory_merge_system_prompt
+
+    prompt = _memory_merge_system_prompt()
+    for sec in ("【口径与规则】", "【关键数字与结论】", "【数据源与字段】", "【未决问题】"):
+        assert sec in prompt
+    assert "时间范围/口径/来源" in prompt      # 数字必须带语境
+    assert "逐条保留" in prompt               # 旧口径不得被新信息挤掉
+    monkeypatch.setattr(settings, "LEAD_MEMORY_SUMMARY_CHARS", 1234)
+    assert "1234" in _memory_merge_system_prompt()   # 字数上限可配
+
+
+async def test_maybe_summarize_keeps_structured_summary_intact(monkeypatch):
+    """分区化摘要（口径 / 数字+范围+来源 / 数据源 / 未决）必须原样落库，不被截断。"""
+    _patch_merge_io(monkeypatch, 5, [
+        {"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"},
+        {"role": "user", "content": "q3"},
+    ])
+    body = (
+        "【口径与规则】销售额按全公司含税口径计算\n"
+        "【关键数字与结论】华东销售额 8,640 万（含税口径，2026Q3，Ecommerce Orders）\n"
+        "【数据源与字段】Ecommerce Orders（region / total_amount）\n"
+        "【未决问题】（无）"
+    )
+    llm = _FakeLLM(f"<analysis>草稿</analysis><summary>{body}</summary>")
+    agent = LeadAgent(llm=llm)
+    ctx = LeadContext(user_id=1, session_id="s1", memory_covered=0)
+    ev = await agent._maybe_summarize(ctx, db_session=object())
+    assert ev["summary"] == body                                    # 四节完整保留
+    assert "8,640 万（含税口径，2026Q3，Ecommerce Orders）" in ev["summary"]
+    assert llm.kwargs[0]["max_tokens"] >= 900                       # 给分区摘要留足输出空间
 
 
 def test_extract_summary_strips_analysis_draft():

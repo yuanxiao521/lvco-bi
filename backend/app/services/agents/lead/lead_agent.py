@@ -46,14 +46,30 @@ _ANSWER_SYSTEM = (
     "时必须引用清单里的指标 key 与名称，不要把数据源裸字段（如 total_amount）当作指标名。"
 )
 
-_MEMORY_MERGE_SYSTEM = (
-    "把【已有长期记忆】与【新增对话】合并为一段不超过 200 字的中文摘要。"
-    "先在 <analysis>...</analysis> 里列要点草稿（旧记忆中的关键事实 / 新增对话里值得长期保留的信息 / "
-    "重复项），再在 <summary>...</summary> 里写最终摘要。"
-    "摘要要求：保留已有记忆里的关键事实、口径与结论（不要丢）；剔除重复内容；"
-    "把新增对话中有长期价值的信息（结论、数字口径、数据源、未解决问题）并入。"
-    "除这两个标签外不要输出其他内容。"
+_MEMORY_MERGE_TEMPLATE = (
+    "把【已有长期记忆】与【新增对话】合并成一份**结构化长期记忆**，分四节输出，"
+    "总量不超过 {max_chars} 字：\n"
+    "【口径与规则】用户确立的统计口径、计算定义、筛选条件与偏好。**必须逐条保留、不得丢失**——"
+    "口径被丢掉会让后续所有分析算错。\n"
+    "【关键数字与结论】对话中出现的关键指标数值，**必须带时间范围/口径/来源**，"
+    "例如「华东销售额 8,640 万（含税口径，2026Q3，Ecommerce Orders）」；"
+    "只写「增长明显」这类没有数值也没有范围的表述没有价值，不要写。\n"
+    "【数据源与字段】涉及的数据源、表与关键字段。\n"
+    "【未决问题】尚未解决或待用户确认的事项。\n\n"
+    "要求：\n"
+    "1) 先在 <analysis>...</analysis> 里列草稿（逐条比对旧记忆与新增对话，标出重复与被推翻的条目），"
+    "再在 <summary>...</summary> 里输出最终记忆；\n"
+    "2) 旧记忆里的条目**逐条保留**，只删除「被新增对话明确推翻」或「完全重复」的——"
+    "宁多勿丢，但同一事实不要写两遍；\n"
+    "3) 某一节没有内容就写「（无）」；\n"
+    "4) 除 <analysis> 与 <summary> 两个标签外，不要输出其他内容。"
 )
+
+
+def _memory_merge_system_prompt() -> str:
+    """记忆合并的系统提示词（摘要字数上限来自配置）。"""
+    max_chars = max(200, int(getattr(settings, "LEAD_MEMORY_SUMMARY_CHARS", 600) or 600))
+    return _MEMORY_MERGE_TEMPLATE.format(max_chars=max_chars)
 
 # 先打草稿再给摘要可显著提升合并质量，草稿由这里剥掉（不会进长期记忆）
 _SUMMARY_TAG_RE = re.compile(r"<summary>(.*?)</summary>", re.S)
@@ -884,20 +900,22 @@ class LeadAgent:
         text = _build_memory_merge_input(ctx.history_summary, new_messages)
         if not text.strip():
             return None
+        system_prompt = _memory_merge_system_prompt()
+        max_out = max(300, int(getattr(settings, "LEAD_MEMORY_SUMMARY_MAX_TOKENS", 900) or 900))
         try:
             if trace is not None:
                 from app.services.observability import observe_llm_call
 
                 with observe_llm_call(trace, "lead_memory_summary",
-                                      messages=[{"role": "system", "content": _MEMORY_MERGE_SYSTEM},
+                                      messages=[{"role": "system", "content": system_prompt},
                                                 {"role": "user", "content": text}]) as span:
                     result = await self.llm.complete(
                         [
-                            {"role": "system", "content": _MEMORY_MERGE_SYSTEM},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": text},
                         ],
                         temperature=0.2,
-                        max_tokens=300,
+                        max_tokens=max_out,
                         enable_thinking=False,
                         return_usage=True,
                     )
@@ -907,11 +925,11 @@ class LeadAgent:
             else:
                 summary = await self.llm.complete(
                     [
-                        {"role": "system", "content": _MEMORY_MERGE_SYSTEM},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": text},
                     ],
                     temperature=0.2,
-                    max_tokens=300,
+                    max_tokens=max_out,
                     enable_thinking=False,
                 )
         except Exception as e:  # noqa: BLE001

@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     # 连续失败熔断阈值：达到后暂停合并，避免每轮白烧一次摘要 LLM 调用（借鉴 Claude Code
     # 的 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES；其线上观测到 1279 个会话曾连续失败 50+ 次）。
     LEAD_MEMORY_MAX_FAILURES: int = 3
+    # 长期记忆摘要的目标字数（分区化结构化记忆，四节：口径/数字与结论/数据源/未决问题）。
+    # 旧值 200 字实测会被"新信息挤旧信息"，口径容易丢；放宽到 600 且分节后口径有固定位置。
+    LEAD_MEMORY_SUMMARY_CHARS: int = 600
+    # 摘要输出的 max_tokens（须显著大于字数的 token 上限，留出 <analysis> 草稿的空间）
+    LEAD_MEMORY_SUMMARY_MAX_TOKENS: int = 900
     # 上下文装配预算（digest 注入给子任务的总字符上限）
     LEAD_CTX_MAX_CHARS: int = 4000
     # 其中为"最近几轮活记忆"预留的字符数：长期记忆再长也不能把它挤没

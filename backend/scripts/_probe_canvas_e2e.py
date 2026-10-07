@@ -28,6 +28,15 @@ ROUNDS = [
     "好，先这样。",
     "再说一句：这份数据最适合做哪类分析？",
 ]
+
+# --profile data：真取数的对话序列，用来验证"摘要在对话含数字时能否记下数字+口径+范围"
+DATA_ROUNDS = [
+    "各地区销售额分别是多少？请给出具体数字。",
+    "哪个地区最高？差多少？",
+    "客单价是多少？",
+    "好，先这样。",
+    "把刚才的关键数字汇总成一句结论。",
+]
 KEY_TYPES = {"session_created", "message", "compressed_history", "memory_saved",
              "error", "done", "canvas_action", "intent", "decision", "status"}
 
@@ -78,7 +87,10 @@ async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--email", default="test@lvco.bi")
     ap.add_argument("--base-url", default="http://127.0.0.1:8000")
+    ap.add_argument("--profile", choices=["concept", "data"], default="concept",
+                    help="concept=概念问答（不产生数字）；data=真取数对话（验证摘要能否记下数字）")
     args = ap.parse_args()
+    rounds = DATA_ROUNDS if args.profile == "data" else ROUNDS
     base = f"{args.base_url}/api/v1"
 
     from sqlalchemy import select
@@ -107,7 +119,7 @@ async def main() -> int:
         print(f"[INFO] 新建隔离画布 canvas_id={canvas_id}（跑完可删）")
 
         sid = None
-        for i, msg in enumerate(ROUNDS, 1):
+        for i, msg in enumerate(rounds, 1):
             try:
                 out = await call_canvas(client, base, token, canvas_id, msg, sid)
             except Exception as e:  # noqa: BLE001
