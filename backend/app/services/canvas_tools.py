@@ -46,7 +46,7 @@ def _is_chart_block(b: dict) -> bool:
 def _is_text_block(b: dict) -> bool:
     """判定一个块是否为文本块（h1/h2/text）。"""
     return isinstance(b, dict) and (
-        b.get("type") == "text"
+        b.get("type") in ("text", "h1", "h2")
         or isinstance(b.get("blockType"), str)
     ) and not _is_chart_block(b)
 
@@ -68,6 +68,122 @@ def _block_id(b: dict) -> str:
     return ""
 
 
+def _norm_text(s: str) -> str:
+    """文本归一化（去空白），用于"同一内容是否重复"的比较。"""
+    return "".join(str(s or "").split())
+
+
+class CanvasActionLedger:
+    """本轮运行内 Agent 对画布所做动作的台账（内存，随一次运行生灭）。
+
+    为什么必须存在：这些画布工具**不写数据库**，画布由前端落块后再自动保存
+    （有防抖延迟），所以 `get_canvas_layout` 读到的是"上一轮"的库内快照——
+    模型看不到自己刚删掉/刚加上的东西，就会：
+      ① 反复删除同一批块（每次都"成功"，前端还回执"已删除"）；
+      ② 重复添加同样内容的标题/段落；
+      ③ 反问用户"要删哪些块"，而它其实刚删完。
+    台账把本轮动作叠加在库内快照之上，并给删除/修改提供存在性校验。
+    """
+
+    def __init__(self) -> None:
+        self.added: list[dict] = []       # 本轮新增（前端落块后才有真实 id）
+        self.removed: set[str] = set()    # 本轮已删除的 block_id
+        self.updated: set[str] = set()    # 本轮已修改的 block_id
+
+    def record_add(self, action: dict) -> None:
+        block = action.get("block") or {}
+        item = {
+            "action": action.get("action"),
+            "title": str(block.get("title") or ""),
+            "content": str(block.get("content") or ""),
+            "blockType": str(block.get("blockType") or ""),
+            "chartType": str(block.get("chartType") or ""),
+        }
+        self.added.append(item)
+
+    def record_remove(self, block_id: str) -> None:
+        self.removed.add(str(block_id))
+
+    def record_update(self, block_id: str) -> None:
+        self.updated.add(str(block_id))
+
+    def has_added_text(self, block_type: str, content: str) -> bool:
+        """本轮是否已经加过同样内容的文本块。"""
+        want = _norm_text(content)
+        return any(
+            a.get("content") and _norm_text(a["content"]) == want
+            and (not a.get("blockType") or a.get("blockType") == block_type)
+            for a in self.added
+        )
+
+    def overlay(self, blocks: list[dict]) -> list[dict]:
+        """把本轮动作叠加到库内块列表：已删的不再出现，新增的追加在末尾。"""
+        kept = [b for b in blocks if _block_id(b) not in self.removed]
+        for a in self.added:
+            if a.get("action") == "add_text_block":
+                kept.append({"type": a.get("blockType") or "text",
+                             "content": a.get("content") or ""})
+            elif a.get("action") == "add_chart_block":
+                kept.append({"type": "chart", "title": a.get("title") or "未命名图表",
+                             "chartType": a.get("chartType") or "?"})
+        return kept
+
+    def describe(self) -> str:
+        """本轮动作摘要（注入布局快照，让模型知道自己已经做了什么）。"""
+        parts: list[str] = []
+        if self.removed:
+            parts.append(f"已删除 {len(self.removed)} 个块（{'、'.join(sorted(self.removed))}）")
+        if self.updated:
+            parts.append(f"已修改 {len(self.updated)} 个块（{'、'.join(sorted(self.updated))}）")
+        add_texts = [a for a in self.added if a.get("action") == "add_text_block"]
+        add_charts = [a for a in self.added if a.get("action") == "add_chart_block"]
+        if add_texts:
+            names = "、".join(f"「{(a.get('content') or '')[:16]}」" for a in add_texts[:5])
+            parts.append(f"已新增 {len(add_texts)} 个文本块（{names}）")
+        if add_charts:
+            names = "、".join(f"「{a.get('title') or '未命名'}」" for a in add_charts[:5])
+            parts.append(f"已新增 {len(add_charts)} 个图表块（{names}）")
+        if not parts:
+            return ""
+        return ("本轮已执行的动作（画布由前端落块，数据库写入有秒级延迟，"
+                "以下动作均已生效，**不要重复执行**）：" + "；".join(parts) + "。")
+
+    def blocked_reason(self, block_id: str, known_ids: set[str]) -> str:
+        """删除/修改前的校验：返回空串表示可以执行，否则返回拦截原因。"""
+        bid = str(block_id or "").strip()
+        if not bid:
+            return "block_id 为空"
+        if bid in self.removed:
+            return f"块 {bid} 在本轮已经被删除过了，无需重复删除"
+        if bid not in known_ids:
+            return (f"块 {bid} 不在当前画布上（可能已被删除，或 id 有误）。"
+                    f"请调用 get_canvas_layout 查看真实 id，不要凭记忆编造或反复重试")
+        return ""
+
+
+async def _load_canvas_blocks(canvas_id: str, user_id: str, db_session) -> list[dict] | None:
+    """读取画布已落盘的块列表；画布不存在/参数缺失返回 None（不抛异常）。"""
+    from uuid import UUID
+
+    try:
+        uid = UUID(str(user_id)) if user_id else None
+        cid = UUID(str(canvas_id)) if canvas_id else None
+    except (ValueError, TypeError):
+        return None
+    if uid is None or cid is None or db_session is None:
+        return None
+    try:
+        from app.repositories.canvas_repository import SQLAlchemyCanvasRepository
+
+        canvas = await SQLAlchemyCanvasRepository(db_session).get_by_id(cid, uid)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[canvas_tools] load_blocks_failed error=%s", e)
+        return None
+    if canvas is None:
+        return None
+    return list(canvas.blocks or [])
+
+
 def _rect_hit(b1: dict, b2: dict) -> bool:
     """两个带坐标块的矩形是否重叠（x,y 左上角 + width×height）。"""
     try:
@@ -79,12 +195,14 @@ def _rect_hit(b1: dict, b2: dict) -> bool:
 
 
 def _assign_block_labels(chart_blocks: list[dict]) -> dict[str, str]:
-    """给图表块分配稳定可见编号（如 [A1]/[A2]/[B1]），供用户与 LLM 指代同一块。
+    """给画布块分配稳定可见编号（如 [A1]/[A2]/[B1]），供用户与 LLM 指代同一块。
 
     规则：按坐标排序——先按 y（行），再按 x（列）。同一行（y 容差内）归为一行，
     行字母 A→Z 递增，行内按 x 升序编号 1→n；无坐标的块按原顺序排在最后，
-    序号继续累加（如 [C3]）。前端渲染角标必须采用同一规则，保证用户看到的
-    编号与 LLM 上下文里的编号一致。
+    序号继续累加（如 [C3]）。
+
+    编号覆盖**所有块**（图表 + 标题 + 文本 + 图片），前端 `assignBlockLabels`
+    必须采用同一规则渲染角标，保证用户看到的编号与 LLM 上下文里的编号一致。
     """
     labels: dict[str, str] = {}
     if not chart_blocks:
@@ -127,7 +245,8 @@ def _assign_block_labels(chart_blocks: list[dict]) -> dict[str, str]:
     return labels
 
 
-def render_canvas_layout(blocks=None, *, canvas_id=None, max_chars: int = 900) -> str:
+def render_canvas_layout(blocks=None, *, canvas_id=None, max_chars: int = 900,
+                         extra_note: str = "") -> str:
     """把画布块列表渲染成紧凑布局摘要文本（供 Agent / 主管感知画布现状）。
 
     输入是前端保存的 Canvas.blocks（本工具是只读感知，不改画布）。输出：
@@ -149,9 +268,13 @@ def render_canvas_layout(blocks=None, *, canvas_id=None, max_chars: int = 900) -
     )
     if not blocks:
         lines.append("画布为空，尚未有任何内容块。")
+        if extra_note:
+            lines.append(extra_note)
         return "\n".join(lines)
+    # 编号覆盖所有块（图表 + 文本 + 图片）：前端角标按同一规则渲染，
+    # 用户说"A1"才能和 LLM 上下文里的编号对上
+    labels = _assign_block_labels(blocks)
     if chart_blocks:
-        labels = _assign_block_labels(chart_blocks)
         lines.append("图表清单：")
         for b in chart_blocks:
             title = str(b.get("title") or b.get("name") or "未命名图表")
@@ -171,7 +294,8 @@ def render_canvas_layout(blocks=None, *, canvas_id=None, max_chars: int = 900) -
             snippet = content[:28].replace("\n", " ")
             bid = _block_id(b)
             id_part = f" id={bid}" if bid else ""
-            lines.append(f"- {snippet}{'…' if len(content) > 28 else ''}{id_part}")
+            label_part = f"[{labels.get(bid)}] " if bid and labels.get(bid) else ""
+            lines.append(f"- {label_part}{snippet}{'…' if len(content) > 28 else ''}{id_part}")
         if len(text_blocks) > 6:
             lines.append(f"- ……共 {len(text_blocks)} 个文本块")
     # 重叠检测（仅统计带坐标的图表块，最多报 3 对）
@@ -186,6 +310,8 @@ def render_canvas_layout(blocks=None, *, canvas_id=None, max_chars: int = 900) -
             break
     if overlaps:
         lines.append(f"⚠️ 检测到 {len(overlaps)} 处块重叠：{'；'.join(overlaps)}，建议调用 arrange_layout 整理。")
+    if extra_note:
+        lines.append(extra_note)
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[:max_chars].rsplit("\n", 1)[0]
 
@@ -341,6 +467,9 @@ class AddChartBlockTool(BaseTool):
             },
         }
         logger.info("[add_chart_block] ok title=%s chart_type=%s rows=%d", title, chart_type, len(rows))
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        if ledger is not None:
+            ledger.record_add(action)
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False, default=str)
 
 
@@ -371,12 +500,40 @@ class AddTextBlockTool(BaseTool):
 
     async def execute(self, block_type: str, content: str, user_id: str = "",
                       db_session=None, **kwargs) -> str:
-        """返回 canvas_action，前端据此插入文本块。"""
+        """返回 canvas_action，前端据此插入文本块。
+
+        防重复：同一内容（去空白比较）已在画布上、或本轮已加过 → 直接返回 skipped，
+        不再产出 canvas_action。否则模型"看不到自己的新增"会反复加同样的标题/段落。
+        """
         if block_type not in ("h1", "h2", "text"):
             return json.dumps({"error": "block_type 必须是 h1/h2/text"}, ensure_ascii=False)
         if not content or not content.strip():
             return json.dumps({"error": "文本内容不能为空"}, ensure_ascii=False)
-        action = {"action": "add_text_block", "block": {"blockType": block_type, "content": content.strip()}}
+        content = content.strip()
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        canvas_id = str(kwargs.get("canvas_id") or "")
+        if ledger is not None and ledger.has_added_text(block_type, content):
+            return json.dumps(
+                {"ok": True, "skipped": True, "reason": "本轮已添加过同样内容的块，未重复添加"},
+                ensure_ascii=False,
+            )
+        blocks = await _load_canvas_blocks(canvas_id, user_id, db_session)
+        if blocks is not None:
+            want = _norm_text(content)
+            dup = next(
+                (b for b in blocks
+                 if _is_text_block(b) and _norm_text(str(b.get("content") or "")) == want),
+                None,
+            )
+            if dup is not None:
+                return json.dumps(
+                    {"ok": True, "skipped": True,
+                     "reason": f"画布上已存在相同内容的块（id={_block_id(dup)}），未重复添加"},
+                    ensure_ascii=False,
+                )
+        action = {"action": "add_text_block", "block": {"blockType": block_type, "content": content}}
+        if ledger is not None:
+            ledger.record_add(action)
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -436,7 +593,26 @@ class UpdateChartBlockTool(BaseTool):
                     patch["measures"].append({"field": m["field"], "agg": m.get("agg", "SUM")})
         if not patch:
             return json.dumps({"error": "没有提供任何要修改的字段"}, ensure_ascii=False)
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        canvas_id = str(kwargs.get("canvas_id") or "")
+        blocks = await _load_canvas_blocks(canvas_id, user_id, db_session)
+        if blocks is not None:
+            known = {_block_id(b) for b in blocks if _block_id(b)}
+            reason = ledger.blocked_reason(block_id, known) if ledger else (
+                "" if str(block_id or "").strip() in known else
+                f"块 {block_id} 不在当前画布上（可能已被删除，或 id 有误），请先调用 get_canvas_layout 确认真实 id"
+            )
+            # 允许修改本轮刚新增的图表：它们在前端已有真实 id，但库内还没有
+            if reason and ledger is not None and any(
+                a.get("action") == "add_chart_block" for a in ledger.added
+            ):
+                reason = ""
+            if reason:
+                logger.info("[update_chart_block] blocked block_id=%s reason=%s", block_id, reason)
+                return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)
         action = {"action": "update_chart_block", "blockId": block_id, "patch": patch}
+        if ledger is not None:
+            ledger.record_update(block_id)
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -466,8 +642,27 @@ class RemoveBlockTool(BaseTool):
         }
 
     async def execute(self, block_id: str, user_id: str = "", db_session=None, **kwargs) -> str:
-        """返回 canvas_action，前端据此删除块。"""
+        """返回 canvas_action，前端据此删除块。
+
+        先校验目标块确实存在：否则模型会对同一批（其实已删除的）块反复发出删除动作，
+        每次都"成功"，前端还回执"已删除块"，用户看到的是一串重复回执 + 模型回头反问。
+        """
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        canvas_id = str(kwargs.get("canvas_id") or "")
+        blocks = await _load_canvas_blocks(canvas_id, user_id, db_session)
+        if blocks is not None:
+            known = {_block_id(b) for b in blocks if _block_id(b)}
+            known |= {_block_id(b) for b in (ledger.overlay(blocks) if ledger else blocks) if _block_id(b)}
+            reason = ledger.blocked_reason(block_id, known) if ledger else (
+                "" if str(block_id or "").strip() in known else
+                f"块 {block_id} 不在当前画布上（可能已被删除，或 id 有误），请先调用 get_canvas_layout 确认真实 id"
+            )
+            if reason:
+                logger.info("[remove_block] blocked block_id=%s reason=%s", block_id, reason)
+                return json.dumps({"ok": False, "error": reason}, ensure_ascii=False)
         action = {"action": "remove_block", "blockId": block_id}
+        if ledger is not None:
+            ledger.record_remove(block_id)
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -516,9 +711,12 @@ class GetCanvasLayoutTool(BaseTool):
     description = (
         "读取当前画布的整体布局快照（只读，不会修改画布）：块总数、图表块清单"
         "（标题/图表类型/坐标）、文本块数量、块重叠检测结果。"
+        "已包含**本轮已执行的动作**（已删除的块不会出现在清单里，已新增的追加在末尾）——"
+        "若末尾写明「已删除/已新增」，说明那些动作已经生效，绝对不要重复执行、也不要反问用户。"
         "用法：落块前先查一次，避免重复添加相同内容的图表；落完一批块后再查一次，"
         "确认布局是否整齐/有重叠，必要时再调 arrange_layout。"
-        "canvas_id 可选，从上下文注入的『画布 id』获取；缺省时按当前会话匹配。"
+        "canvas_id 由系统自动注入，直接空参调用即可，不要自行编造；"
+        "仅当确实要读取另一张画布时才显式传入。"
     )
 
     def schema(self) -> dict:
@@ -538,31 +736,25 @@ class GetCanvasLayoutTool(BaseTool):
         }
 
     async def execute(self, user_id: str = "", db_session=None, **kwargs) -> str:
-        """读 Canvas.blocks 并以结构化文本返回布局快照。异常不抛出，返回错误 JSON。"""
-        from uuid import UUID
+        """读 Canvas.blocks 并以结构化文本返回布局快照。异常不抛出，返回错误 JSON。
 
+        快照 = 库内块 **叠加本轮动作台账**：本轮已删除的不再出现、已新增的追加在末尾，
+        末尾附一句"本轮已执行的动作"。否则库内状态落后于前端自动保存，模型会以为
+        自己的删除/新增没生效而重复执行、甚至反问用户。
+        """
         canvas_id = str(kwargs.get("canvas_id") or kwargs.get("canvasId") or "").strip()
-        try:
-            uid = UUID(user_id) if user_id else None
-            cid = UUID(canvas_id) if canvas_id else None
-        except (ValueError, TypeError):
-            return json.dumps({"error": "canvas_id 格式非法，请提供正确的画布 UUID"}, ensure_ascii=False)
-        if uid is None or cid is None or db_session is None:
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        blocks = await _load_canvas_blocks(canvas_id, user_id, db_session)
+        if blocks is None:
             return json.dumps(
-                {"error": "缺少画布上下文（canvas_id 或会话归属），无法读取画布"},
+                {"error": "缺少画布上下文（canvas_id 或会话归属）或画布不存在，无法读取画布"},
                 ensure_ascii=False,
             )
-        try:
-            from app.repositories.canvas_repository import SQLAlchemyCanvasRepository
-
-            canvas = await SQLAlchemyCanvasRepository(db_session).get_by_id(cid, uid)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("[get_canvas_layout] read_failed error=%s", e)
-            return json.dumps({"error": f"读取画布布局失败: {e}"}, ensure_ascii=False)
-        if canvas is None:
-            return json.dumps({"error": f"画布不存在或无权访问: {canvas_id}"}, ensure_ascii=False)
-        summary = render_canvas_layout(canvas.blocks, canvas_id=str(canvas.id))
-        logger.info("[get_canvas_layout] ok canvas_id=%s", canvas_id)
+        overlay = ledger.overlay(blocks) if ledger else blocks
+        summary = render_canvas_layout(
+            overlay, canvas_id=canvas_id, extra_note=ledger.describe() if ledger else ""
+        )
+        logger.info("[get_canvas_layout] ok canvas_id=%s blocks=%d", canvas_id, len(overlay))
         return json.dumps({"ok": True, "layout": summary}, ensure_ascii=False)
 
 

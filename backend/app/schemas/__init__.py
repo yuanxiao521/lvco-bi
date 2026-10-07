@@ -134,6 +134,8 @@ class CanvasCreate(CamelModel):
 class CanvasUpdate(CamelModel):
     title: str | None = Field(None, max_length=200)
     table_name: str | None = None
+    # 换数据源：画布级单一数据源，改动后旧图表的字段引用失效，由前端标记为"待重配"
+    datasource_id: UUID | None = None
 
 
 class CanvasBlocksUpdate(CamelModel):
@@ -320,6 +322,7 @@ class DataChatRequest(CamelModel):
     session_id: str | None = None  # 会话 ID，用于保存消息
     message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
     history: list[dict] | None = None
+    resume: bool = False  # 续收标记：刷新/断线后重连现有后台任务（纯订阅，不落新消息）
 
 
 AggKind = Literal["SUM", "AVG", "COUNT", "MAX", "MIN", "COUNT_DISTINCT", "MEDIAN", "STDDEV"]

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -16,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import get_cache_repository, get_current_user
 from app.config import settings
-from app.core.database import get_db
+from app.core.database import async_session_factory, get_db
 from app.core.duckdb_client import duckdb_client
 from app.core.limiter import limiter
 from app.models.ai_message import AIMessage, AIMessageRole
@@ -43,6 +44,15 @@ from app.schemas import (
 from app.services.ai_service import AIService, VALID_CHART_TYPES
 from app.services.ai_prompts import CANVAS_AGENT_SYSTEM, CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
+from app.services.session_lock import acquire_session_lock, release_session_lock
+from app.services.chat_stream_registry import ChatStreamRegistry
+
+# 对话入口后台续跑注册表（进程内单例）+ Redis 文本快照 key 前缀。
+# Agent 任务与 SSE 连接解耦：断开只退订、不杀任务，刷新后带同一 session_id 重连续收。
+chat_registry = ChatStreamRegistry()
+CHAT_STREAM_TEXT_PREFIX = "ai:chat:stream:"
+# 任务每收到一次可见文本 delta 就把全量文本节流刷进 Redis（0.5s），供重连兜底补发
+STREAM_TEXT_SNAPSHOT_INTERVAL = 0.5
 
 # 画布助手允许的工具 = 画布专属落块工具 + 基础查数/出图工具（先查再落）。
 # 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
@@ -52,6 +62,9 @@ _CANVAS_QUERY_TOOL_NAMES = frozenset({
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
+
+# 会话级并发锁被占用时的 SSE error 文案（对话/画布两个入口共用）
+_SESSION_BUSY_MSG = "上一轮还在处理中，请等它结束后再发。"
 
 router = APIRouter(prefix="/ai", tags=["AI助手"])
 
@@ -110,6 +123,365 @@ async def _lead_stream_guard(lead_stream, legacy_factory):
             yield ev
 
 
+# 事件流空闲看门狗阈值（秒）：超过这么久没有任何事件，判定 Agent 内部停住
+# （典型：上游 LLM 一直发心跳但不出 token，httpx 的 read timeout 只兜"字节间隔"兜不住它）
+STREAM_IDLE_TIMEOUT = 90.0
+
+
+async def _idle_guard(source, *, timeout: float = STREAM_IDLE_TIMEOUT, label: str = "stream"):
+    """给事件流套空闲看门狗：超时无事件则补 error + done 强制收尾。
+
+    没有它时，Agent 内部一旦停在某个 await（队列哨兵丢失 / 上游流不关），
+    SSE 会永久挂着：前端一直"思考中"，后端一条错误日志都没有（因为确实没报错）。
+    命中时打 warning（含 label 便于定位是哪一段），并保证客户端总能收到终止事件。
+    """
+    aiter = source.__aiter__()
+    last_type = "<start>"
+    last_at = time.monotonic()
+    while True:
+        try:
+            ev = await asyncio.wait_for(aiter.__anext__(), timeout=timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            # 关键诊断信息：卡住前最后收到的事件（定位到具体阶段）+ 静默时长
+            _log.warning(
+                "stream idle timeout label=%s timeout=%ss last_event=%s silent=%.1fs "
+                "→ force close (agent parked)",
+                label, int(timeout), last_type, time.monotonic() - last_at,
+            )
+            yield {"type": "error", "message": f"响应超时（{int(timeout)} 秒无输出），已中断本轮，请重试。"}
+            yield {"type": "done", "degraded": True}
+            return
+        if isinstance(ev, dict) and ev.get("type"):
+            last_type = str(ev.get("type"))
+        last_at = time.monotonic()
+        yield ev
+
+
+# ── 对话后台续跑：Redis 文本快照 ──────────────────────────────────
+def _chat_text_key(session_id: object) -> str:
+    return f"{CHAT_STREAM_TEXT_PREFIX}{session_id}"
+
+
+def _read_streamed_text(session_id: object) -> str:
+    """读取后台任务已产出的文本快照（Redis 兜底；正常应命中注册表内存 full_text）。"""
+    try:
+        return str(get_cache_repository().get(_chat_text_key(session_id)) or "")
+    except Exception:
+        return ""
+
+
+def _write_streamed_text(session_id: object, content: str) -> None:
+    """写入文本快照：刷新/断线重连时补发已产出内容（进程重启也能兜底捞回）。"""
+    try:
+        get_cache_repository().set(_chat_text_key(session_id), content, ttl=settings.redis_ttl)
+    except Exception:
+        _log.debug("chat streamed text cache set failed", exc_info=True)
+
+
+async def _yield_streamed_text_snapshot(session_id: object):
+    """（订阅侧）先补发一段 message delta 携带当前已产出全量文本，再开始收增量。"""
+    text = ""
+    rt = chat_registry.get(str(session_id)) if session_id else None
+    if rt is not None and rt.full_text:
+        text = rt.full_text
+    else:
+        text = _read_streamed_text(session_id)
+    if text and text.strip():
+        yield f"data: {json.dumps({'type': 'message', 'delta': text}, ensure_ascii=False)}\n\n"
+
+
+async def _yield_subscription_events(session_id: object):
+    """（订阅侧）把注册表广播的事件转成 SSE 行；任务结束（哨兵）自然退出。"""
+    async for ev in chat_registry.subscribe(str(session_id)):
+        if isinstance(ev, dict):
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+
+
+# ── 对话后台续跑：任务主体 ───────────────────────────────────────
+async def _run_chat_task(
+    *,
+    session_id: str | None,
+    lock_token: str | None,
+    assistant_msg_id: Any | None,
+    task_key: str | None,
+    event_factory: Any,
+) -> None:
+    """后台任务主体（以独立 asyncio.Task 运行，连接断开不影响它）。
+
+    不能复用请求的 db session：客户端断开后 FastAPI 的 get_db 会把它关掉。
+    这里用 async_session_factory() 自建会话，负责：消费 Agent 事件 → 广播给订阅者 →
+    更新 Redis 文本快照 → 落库占位行 → 清任务态 → 释放会话锁。
+
+    事件的文本处理（代码块剥离、状态行过滤、全量累积）从"每个连接"上移到任务级，
+    保证多个订阅者看到完全一致的结果，且刷新后能拿到完整文本。
+    """
+    full_content = ""
+    collected_charts: list[dict] = []
+    seen_chart_keys: set[str] = set()
+    _fence_state = "closed"
+    _fence_buffer = ""
+    last_redis_write = 0.0
+    completed = False
+
+    # === AI 状态文字过滤器（原 event_generator 内实现，原样搬移） ===
+    _STATUS_EMOJI_RE = re.compile(r'^[📂✅🔍📊📦⚠️]\s')
+    _STATUS_KEYWORDS_RE = re.compile(r'正在|已找到|查询成功|查询失败|图表生成|图表已|数据源|浏览|执行')
+    _META_START_RE = re.compile(r'^(?:好的|太好了)[！!]')
+    _META_KEYWORDS_RE = re.compile(r'查看|连接|分析|生成|拿到|拉取|查询|扫描|数据源|数据已经|数据结构|开始|报告|图表')
+    _META_SELF_RE = re.compile(r'^(?:我先|让我)')
+    _META_SELF_KEYWORDS_RE = re.compile(r'查询|看看|拉取|获取|扫描|分析一下|预览')
+
+    def _filter_status_text(text: str) -> str:
+        if not text:
+            return text
+        lines = text.split('\n')
+        filtered: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                filtered.append(line)
+                continue
+            content = stripped
+            if content.startswith('> '):
+                content = content[2:].strip()
+            if _STATUS_EMOJI_RE.match(content) and _STATUS_KEYWORDS_RE.search(content):
+                continue
+            if _META_START_RE.match(content) and _META_KEYWORDS_RE.search(content):
+                continue
+            if _META_SELF_RE.match(content) and _META_SELF_KEYWORDS_RE.search(content):
+                continue
+            filtered.append(line)
+        result = '\n'.join(filtered)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
+
+    def _filter_canvas_tool_result_lines(text: str) -> str:
+        if not text:
+            return text
+        lines = text.split('\n')
+        filtered: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                filtered.append(line)
+                continue
+            if re.match(r'^已添加(?:文本|图表|块)[：:]\s*', stripped):
+                continue
+            if re.match(r'^分析完成[，,]\s*已在画布上添加了 \d+ 个内容块', stripped):
+                continue
+            filtered.append(line)
+        result = '\n'.join(filtered)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result
+
+    def _chart_key(c: dict) -> str:
+        return f"{c.get('chart_type', '?')}::{json.dumps(c.get('option', {}), ensure_ascii=False, sort_keys=True)}"
+
+    def _strip_and_normalize(delta: str) -> str:
+        """剥离 ```...``` 代码块并升级单 \\n 为 \\n\\n；返回可显示 delta（累积进 full_content）。"""
+        nonlocal _fence_state, _fence_buffer, full_content
+        out_parts: list[str] = []
+        i = 0
+        n = len(delta)
+        while i < n:
+            ch = delta[i]
+            if _fence_state == "open":
+                _fence_buffer += ch
+                if len(_fence_buffer) >= 3 and _fence_buffer.endswith("```"):
+                    _fence_state = "closed"
+                    _fence_buffer = ""
+                    if out_parts and not out_parts[-1].endswith("\n\n"):
+                        if out_parts[-1].endswith("\n"):
+                            out_parts[-1] += "\n"
+                        else:
+                            out_parts.append("\n\n")
+                i += 1
+                continue
+            if ch == "`":
+                j = i
+                while j < n and j - i < 3 and delta[j] == "`":
+                    j += 1
+                run_len = j - i
+                if run_len == 3:
+                    _fence_state = "open"
+                    _fence_buffer = ""
+                    if out_parts and not out_parts[-1].endswith("\n\n") and not out_parts[-1].endswith("\n"):
+                        out_parts.append("\n\n")
+                    i = j
+                    continue
+                out_parts.append(delta[i:j])
+                i = j
+                continue
+            out_parts.append(ch)
+            i += 1
+        visible_delta = "".join(out_parts)
+        if "\n" in visible_delta:
+            parts = visible_delta.split("\n")
+            new_parts: list[str] = []
+            for idx, p in enumerate(parts):
+                new_parts.append(p)
+                if idx < len(parts) - 1 and p != "":
+                    new_parts.append("")
+            visible_delta = "\n".join(new_parts)
+        full_content += visible_delta
+        return visible_delta
+
+    def _publish(ev: dict) -> None:
+        if session_id:
+            # 注意：f"{session_id}" 转为注册表 key（str），否则 UUID 对象查不到任务
+            chat_registry.publish(str(session_id), ev)
+
+    def _update_text_snapshot() -> None:
+        """更新注册表内存快照 + 节流写 Redis（供断线重连补发）。"""
+        nonlocal last_redis_write
+        if session_id:
+            chat_registry.update_text(str(session_id), full_content)
+            now = time.monotonic()
+            if now - last_redis_write >= STREAM_TEXT_SNAPSHOT_INTERVAL:
+                last_redis_write = now
+                _write_streamed_text(session_id, full_content)
+
+    async with async_session_factory() as db:
+        try:
+            async for event in _idle_guard(event_factory(db), label="chat_task_stream"):
+                ev_type = event["type"]
+                if ev_type == "text":
+                    raw_delta = event["content"]
+                    visible_delta = _strip_and_normalize(raw_delta)
+                    visible_delta = _filter_status_text(visible_delta)
+                    visible_delta = _filter_canvas_tool_result_lines(visible_delta)
+                    if visible_delta.strip():
+                        _update_text_snapshot()
+                        _publish({"type": "message", "delta": visible_delta})
+                elif ev_type == "tool_call":
+                    _publish({"type": "tool_call", "name": event["name"], "args": event.get("args", {})})
+                elif ev_type == "tool_result":
+                    tname = event.get("name") or ""
+                    result_str = event.get("result", "")
+                    result_narration = ""
+                    try:
+                        parsed = json.loads(result_str) if isinstance(result_str, str) else {}
+                        if tname == "query_sql":
+                            if parsed.get("error"):
+                                err_msg = str(parsed.get("error"))[:80]
+                                result_narration = f"> 查询失败：{err_msg}\n"
+                        elif tname == "render_chart":
+                            if parsed.get("error"):
+                                result_narration = f"> 图表生成失败：{parsed.get('error')}\n"
+                    except Exception:
+                        pass
+                    if result_narration:
+                        narrated = _strip_and_normalize("\n\n" + result_narration)
+                        if narrated:
+                            _update_text_snapshot()
+                            _publish({"type": "message", "delta": narrated})
+                    _publish({"type": "tool_result", "name": event["name"], "result": event["result"]})
+                elif ev_type == "plan":
+                    steps = (event.get("plan") or {}).get("steps", [])
+                    _publish({
+                        "type": "plan", "mode": "orchestrator",
+                        "steps": [s.get("tool") for s in steps if isinstance(s, dict)],
+                    })
+                elif ev_type == "status":
+                    _publish({
+                        "type": "status",
+                        "message": event.get("message", ""),
+                        "phase": event.get("phase"),
+                        "degradation": event.get("degradation"),
+                    })
+                elif ev_type == "chart":
+                    chart_type = event.get("chart_type")
+                    chart_option = event.get("option")
+                    if chart_option is None:
+                        continue
+                    chart_obj = {"chart_type": chart_type, "option": chart_option}
+                    key = _chart_key(chart_obj)
+                    if key in seen_chart_keys:
+                        continue
+                    seen_chart_keys.add(key)
+                    collected_charts.append(chart_obj)
+                elif ev_type == "intent":
+                    _publish({
+                        "type": "intent",
+                        "intent": event.get("intent"), "confidence": event.get("confidence"),
+                        "needs_plan": event.get("needs_plan"), "degraded": event.get("degraded"),
+                    })
+                elif ev_type == "decision":
+                    _publish({
+                        "type": "decision",
+                        "round": event.get("round"), "action": event.get("action"),
+                        "tool": event.get("tool"), "reason": event.get("reason"),
+                        "degraded": event.get("degraded"),
+                    })
+                elif ev_type == "progress":
+                    _publish({
+                        "type": "progress",
+                        "round": event.get("round"), "index": event.get("index"),
+                        "total": event.get("total"), "title": event.get("title"),
+                        "status": event.get("status"), "note": event.get("note"),
+                        "tool": event.get("tool"),
+                    })
+                elif ev_type == "report":
+                    if not full_content.strip():
+                        visible = _filter_status_text(_strip_and_normalize(event.get("content", "")))
+                        if visible.strip():
+                            _update_text_snapshot()
+                            _publish({"type": "message", "delta": visible})
+                elif ev_type == "memory_saved":
+                    _publish({"type": "memory_saved", "chars": event.get("chars", 0)})
+                elif ev_type == "done":
+                    _publish({"type": "done", "charts": collected_charts, "degraded": event.get("degraded", False)})
+                elif ev_type == "error":
+                    _publish({"type": "error", "message": event["message"]})
+                elif ev_type == "compressed_history":
+                    await _save_memory(db, session_id, event)
+        except AINotConfiguredError:
+            _publish({"type": "error", "message": "AI 未配置"})
+        except AIUpstreamError as e:
+            _publish({"type": "error", "message": str(e)})
+        except Exception:
+            _log.exception("Agent chat task error")
+            _publish({"type": "error", "message": "服务异常，请查看日志"})
+        else:
+            # 只有正常跑完事件流（含 Agent 内部 error 事件）才算完成
+            completed = True
+        finally:
+            # 收尾（任何退出路径都执行）：落库占位行 → 文本快照最终写 → 任务态 → 释放锁
+            if assistant_msg_id is not None:
+                try:
+                    row = await db.get(AIMessage, assistant_msg_id)
+                    if row is not None:
+                        row.content = full_content
+                        row.chart_data = {"charts": collected_charts} if collected_charts else None
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
+                    _log.exception("chat_task_save_failed")
+            if session_id:
+                _write_streamed_text(session_id, full_content)
+            if task_key:
+                try:
+                    repo = get_cache_repository()
+                    if completed:
+                        repo.delete(task_key)  # 正常完成：清除 running 标记
+                    elif not repo.exists(task_key):
+                        repo.set(
+                            task_key,
+                            json.dumps({
+                                "status": "interrupted",
+                                "chars": len(full_content),
+                                "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                            }),
+                            ttl=settings.redis_ttl,
+                        )
+                except Exception:
+                    pass
+            # 会话锁：任务结束才释放（连接断开不释放，让任务继续独占到跑完）
+            release_session_lock(session_id, lock_token)
+
+
 @router.get("/sessions")
 async def list_sessions(
     entry: str | None = Query(None, description="会话入口：chat / canvas，不传返回全部"),
@@ -133,6 +505,11 @@ async def list_sessions(
     data = []
     for s in items:
         d = AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True)
+        # 进程内后台任务是否在跑：前端用它判断"刷新后自动续收"（只对对话入口有意义）
+        try:
+            d["running"] = bool(chat_registry.is_running(str(s.id))) if entry == "chat" else False
+        except Exception:
+            d["running"] = False
         # Redis 任务态标记：供前端提示「上次对话未完成」（正常完成时 key 已被删除）
         try:
             task_json = cache_repo.get(f"ai:chat:task:{s.id}")
@@ -476,11 +853,38 @@ async def data_chat_stream(
             await db.refresh(session)
 
         session_id = session.id if session else None
+        # 后台任务在注册表里的 key：无会话时用一次性 key（事件照常广播，只是无法续收）
+        task_sid = str(session_id) if session_id else f"anon-{uuid.uuid4().hex}"
 
-        # Save user message + 占位 assistant 行（立即落库：断流/切页也不丢）
-        assistant_msg: AIMessage | None = None
+        # ── 续收分支：刷新/断线后带同一 session_id 重连 → 命中运行中的任务则纯订阅 ──
+        # （不抢锁、不落新消息；任务结束在后端继续跑，本连接只负责补发快照 + 续收事件）
+        if body.resume:
+            if session_id and chat_registry.is_running(str(session_id)):
+                async for line in _yield_streamed_text_snapshot(task_sid):
+                    yield line
+                async for line in _yield_subscription_events(task_sid):
+                    yield line
+            else:
+                # 任务已结束/从未启动：空收尾，前端拉取会话消息即可看到最终落库结果
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            return
+
+        # ── 新消息分支：抢锁 → 落占位行 → 启动后台任务 → 本连接订阅 ──
+        # 会话级并发锁：同一会话同一时刻只允许一轮在跑（连点两次会让 Agent 双跑：
+        # 重复 LLM 花费 + 重复落块 + 历史里出现两条回复）。抢不到就直接拒，
+        # 此时还没落任何消息，不会留下"没人回答"的僵尸消息。
+        # 注意：锁的释放移交后台任务（任务结束才释放），连接断开不会释放锁。
+        lock_token: str | None = None
+        assistant_msg_id: Any | None = None
         task_key: str | None = None
         if session_id:
+            lock_token = acquire_session_lock(session_id)
+            if lock_token is None:
+                yield f"data: {json.dumps({'type': 'error', 'message': _SESSION_BUSY_MSG}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                return
+
+            # Save user message + 占位 assistant 行（立即落库：断流/切页也不丢）
             user_msg_model = AIMessage(
                 session_id=session_id,
                 role=AIMessageRole.user,
@@ -494,7 +898,7 @@ async def data_chat_stream(
                 session.title = title
                 db.add(session)
 
-            # 占位 assistant 行：先落库标记"生成中"，正常结束/中断时统一更新内容
+            # 占位 assistant 行：先落库标记"生成中"，后台任务结束后用真实内容更新
             assistant_msg = AIMessage(
                 session_id=session_id,
                 role=AIMessageRole.assistant,
@@ -504,6 +908,7 @@ async def data_chat_stream(
 
             # 会话 + 用户消息 + 占位行一次性提交，保证客户端断开后历史仍可读到
             await db.commit()
+            assistant_msg_id = assistant_msg.id
             task_key = f"ai:chat:task:{session_id}"
             try:
                 get_cache_repository().set(
@@ -520,6 +925,11 @@ async def data_chat_stream(
             # Notify frontend about the new session
             yield f"data: {json.dumps({'type': 'session_created', 'session': AISessionResponse.model_validate(session).model_dump(mode='json', by_alias=True)}, ensure_ascii=False)}\n\n"
 
+        # ── 构建 Agent 事件流生产闭包（执行委托给后台任务：文本处理/落库/释放锁都在任务内）──
+        # 整个构建+启动段用 try/finally 收口：连接断开（CancelledError/GeneratorExit）
+        # 可能发生在任务启动之前，此时会话锁还握在本请求手里，必须在这里释放，
+        # 否则锁要等 TTL（600s）才过期；任务一旦启动，锁所有权移交任务协程。
+        task_launched = False
         try:
             llm_client = LLMClient(settings)
             ai_service = AIService(llm_client)
@@ -631,326 +1041,87 @@ async def data_chat_stream(
             except Exception:
                 _log.info("metrics context injection skipped", exc_info=True)
 
-            full_content = ""
-            collected_charts: list[dict] = []
-            seen_chart_keys: set[str] = set()
-
-            # === AI 状态文字过滤器 ===
-            # 即使 prompt 禁止，LLM 仍可能输出"正在查询..."、"查询成功"等过程状态。
-            # 这里在后端直接过滤，确保不会传到前端。
-            _STATUS_EMOJI_RE = re.compile(r'^[📂✅🔍📊📦⚠️]\s')
-            _STATUS_KEYWORDS_RE = re.compile(r'正在|已找到|查询成功|查询失败|图表生成|图表已|数据源|浏览|执行')
-            _META_START_RE = re.compile(r'^(?:好的|太好了)[！!]')
-            _META_KEYWORDS_RE = re.compile(r'查看|连接|分析|生成|拿到|拉取|查询|扫描|数据源|数据已经|数据结构|开始|报告|图表')
-            _META_SELF_RE = re.compile(r'^(?:我先|让我)')
-            _META_SELF_KEYWORDS_RE = re.compile(r'查询|看看|拉取|获取|扫描|分析一下|预览')
-
-            def _filter_status_text(text: str) -> str:
-                """过滤 AI 输出的过程状态文字（"正在查询..."等）。"""
-                if not text:
-                    return text
-                lines = text.split('\n')
-                filtered: list[str] = []
-                for line in lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        filtered.append(line)
-                        continue
-                    content = stripped
-                    if content.startswith('> '):
-                        content = content[2:].strip()
-                    # 过滤 emoji 状态行（ 正在浏览...、✅ 查询成功...等）
-                    if _STATUS_EMOJI_RE.match(content) and _STATUS_KEYWORDS_RE.search(content):
-                        continue
-                    # 过滤元话语（"好的！让我先查看..."等）
-                    if _META_START_RE.match(content) and _META_KEYWORDS_RE.search(content):
-                        continue
-                    if _META_SELF_RE.match(content) and _META_SELF_KEYWORDS_RE.search(content):
-                        continue
-                    filtered.append(line)
-                result = '\n'.join(filtered)
-                result = re.sub(r'\n{3,}', '\n\n', result)
-                return result
-
-            def _filter_canvas_tool_result_lines(text: str) -> str:
-                """过滤画布工具执行结果行（"已添加文本: ..."、"已添加图表: ..."等）。
-
-                这些行是工具调用返回的叙述，只应在 ActivityFeed 或 Lead 上下文中展示，
-                不应污染主对话气泡。
-                """
-                if not text:
-                    return text
-                lines = text.split('\n')
-                filtered: list[str] = []
-                for line in lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        filtered.append(line)
-                        continue
-                    # 过滤 "已添加文本: ..."、"已添加图表: ..." 等工具结果行
-                    if re.match(r'^已添加(?:文本|图表|块)[：:]\s*', stripped):
-                        continue
-                    # 过滤 "分析完成，已在画布上添加了 N 个内容块" 等纯模板总结行
-                    # （带要点的收尾如"分析完成，已生成 3 个内容块。要点：xxx（详见画布）"
-                    #  不属于模板，应保留在气泡里，所以只滤精确模板形态）
-                    if re.match(r'^分析完成[，,]\s*已在画布上添加了 \d+ 个内容块', stripped):
-                        continue
-                    filtered.append(line)
-                result = '\n'.join(filtered)
-                result = re.sub(r'\n{3,}', '\n\n', result)
-                return result
-
-            def _chart_key(c: dict) -> str:
-                return f"{c.get('chart_type', '?')}::{json.dumps(c.get('option', {}), ensure_ascii=False, sort_keys=True)}"
-
-            # === 代码块过滤状态机 ===
-            # LLM 即使被告知不要输出 ```sql/```json，仍可能输出。我们在流式阶段
-            # 把这些代码块从可见文本中整块剥离，并保证前后段落分隔。
-            _fence_state: str = "closed"  # closed | open
-            _fence_buffer: str = ""
-
-            def _strip_and_normalize(delta: str) -> str:
-                """剥离 ```...``` 代码块（包括 ```sql 和 ```json），并升级单 \\n 为 \\n\\n。
-                返回已经去掉代码块的可显示 delta（不含代码块内任何字符）。"""
-                nonlocal _fence_state, _fence_buffer, full_content
-                out_parts: list[str] = []
-
-                i = 0
-                n = len(delta)
-                while i < n:
-                    ch = delta[i]
-
-                    if _fence_state == "open":
-                        # 进入代码块：累积直到遇到闭合 ```
-                        _fence_buffer += ch
-                        if ch == "\n":
-                            # 保留换行在 buffer，便于判断
-                            pass
-                        if len(_fence_buffer) >= 3 and _fence_buffer.endswith("```"):
-                            # 闭合：丢弃 buffer，强制加段落分隔
-                            _fence_state = "closed"
-                            _fence_buffer = ""
-                            if out_parts and not out_parts[-1].endswith("\n\n"):
-                                if out_parts[-1].endswith("\n"):
-                                    out_parts[-1] += "\n"
-                                else:
-                                    out_parts.append("\n\n")
-                        i += 1
-                        continue
-
-                    # closed：检测开 fence（连续 3 个反引号）
-                    if ch == "`":
-                        # 尝试往下看是否还有更多反引号（最多 3 个）
-                        j = i
-                        while j < n and j - i < 3 and delta[j] == "`":
-                            j += 1
-                        run_len = j - i
-                        # 只有正好 3 个反引号才算 fence
-                        if run_len == 3:
-                            _fence_state = "open"
-                            _fence_buffer = ""
-                            if out_parts and not out_parts[-1].endswith("\n\n") and not out_parts[-1].endswith("\n"):
-                                out_parts.append("\n\n")
-                            i = j
-                            continue
-                        # 不是 fence（单反引号或两个反引号）：作为普通字符输出
-                        out_parts.append(delta[i:j])
-                        i = j
-                        continue
-
-                    # 普通字符
-                    out_parts.append(ch)
-                    i += 1
-
-                visible_delta = "".join(out_parts)
-                # 段落规范化：单 \n 升级为 \n\n
-                if "\n" in visible_delta:
-                    parts = visible_delta.split("\n")
-                    new_parts: list[str] = []
-                    for idx, p in enumerate(parts):
-                        new_parts.append(p)
-                        if idx < len(parts) - 1 and p != "":
-                            new_parts.append("")
-                    visible_delta = "\n".join(new_parts)
-                full_content += visible_delta
-                return visible_delta
-
-            # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
             memory_summary = await _load_memory_summary(db, session_id)
 
-            def _legacy_stream():
+            def _event_factory(db_session: AsyncSession):
+                """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。
+
+                Lead/legacy 分流：主导 Agent 异常时自动回落旧路径（阶段 4 兜底）。
+                """
+                if settings.LEAD_AGENT_ENABLED:
+                    from app.services.agents.lead import LeadAgent, LeadContext
+                    from app.services.observability import get_observer
+
+                    lead_ctx = LeadContext(
+                        user_id=str(current_user.id),
+                        session_id=str(session_id) if session_id else "",
+                        entry="chat",
+                        datasource_id=body.datasource_id,
+                        history_summary=memory_summary or "",
+                        metrics_ctx=metrics_ctx_for_lead,
+                    )
+                    for h in history:
+                        if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+                            lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+                    return _lead_stream_guard(
+                        LeadAgent(llm=llm_client, observer=get_observer()).stream(
+                            agent_message, ctx=lead_ctx, db_session=db_session
+                        ),
+                        lambda: ai_service.agent_stream(
+                            user_id=str(current_user.id),
+                            user_msg=agent_message,
+                            history=history,
+                            db_session=db_session,
+                            initial_phase="analyzing" if body.datasource_id else "selecting",
+                            memory_summary=memory_summary,
+                            selected_datasource_id=body.datasource_id,
+                        ),
+                    )
                 return ai_service.agent_stream(
                     user_id=str(current_user.id),
                     user_msg=agent_message,
                     history=history,
-                    db_session=db,
+                    db_session=db_session,
                     initial_phase="analyzing" if body.datasource_id else "selecting",
                     memory_summary=memory_summary,
                     selected_datasource_id=body.datasource_id,
                 )
 
-            if settings.LEAD_AGENT_ENABLED:
-                from app.services.agents.lead import LeadAgent, LeadContext
-                from app.services.observability import get_observer
-
-                lead_ctx = LeadContext(
-                    user_id=str(current_user.id),
-                    session_id=str(session_id) if session_id else "",
-                    entry="chat",
-                    datasource_id=body.datasource_id,
-                    history_summary=memory_summary or "",
-                    metrics_ctx=metrics_ctx_for_lead,
-                )
-                for h in history:
-                    if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
-                        lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
-                # 阶段 4 兜底：主导 Agent 异常 → 自动回落旧路径
-                event_iter = _lead_stream_guard(
-                    LeadAgent(llm=llm_client, observer=get_observer()).stream(
-                        agent_message, ctx=lead_ctx, db_session=db
-                    ),
-                    _legacy_stream,
-                )
-            else:
-                event_iter = _legacy_stream()
-
-            async for event in event_iter:
-                if event["type"] == "text":
-                    raw_delta = event["content"]
-                    visible_delta = _strip_and_normalize(raw_delta)
-                    # 过滤进度文本（"【x/y】..."）和工具执行结果行（"已添加文本/图表: ..."），
-                    # 这些只在 ActivityFeed / Lead 上下文中展示，不污染主气泡
-                    visible_delta = _filter_status_text(visible_delta)
-                    visible_delta = _filter_canvas_tool_result_lines(visible_delta)
-                    if visible_delta.strip():
-                        yield f"data: {json.dumps({'type': 'message', 'delta': visible_delta}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "tool_call":
-                    # 不再注入冗长的"正在执行..."旁白，只传事件给前端
-                    yield f"data: {json.dumps({'type': 'tool_call', 'name': event['name'], 'args': event.get('args', {})}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "tool_result":
-                    tname = event.get("name") or ""
-                    result_str = event.get("result", "")
-                    # 只在查询失败时输出错误提示，成功时静默
-                    result_narration = ""
-                    try:
-                        parsed = json.loads(result_str) if isinstance(result_str, str) else {}
-                        if tname == "query_sql":
-                            if parsed.get("error"):
-                                err_msg = str(parsed.get("error"))[:80]
-                                result_narration = f"> 查询失败：{err_msg}\n"
-                        elif tname == "render_chart":
-                            if parsed.get("error"):
-                                result_narration = f"> 图表生成失败：{parsed.get('error')}\n"
-                    except Exception:
-                        pass
-
-                    if result_narration:
-                        narrated = _strip_and_normalize("\n\n" + result_narration)
-                        if narrated:
-                            yield f"data: {json.dumps({'type': 'message', 'delta': narrated}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'tool_result', 'name': event['name'], 'result': event['result']}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "plan":
-                    # 编排模式标记：透传 plan 骨架（步骤工具名），前端/观测可区分
-                    # orchestrator（复杂）与 react（简单）两条路径
-                    steps = (event.get("plan") or {}).get("steps", [])
-                    yield f"data: {json.dumps({
-                        'type': 'plan',
-                        'mode': 'orchestrator',
-                        'steps': [s.get('tool') for s in steps if isinstance(s, dict)],
-                    }, ensure_ascii=False)}\n\n"
-                elif event["type"] == "status":
-                    yield f"data: {json.dumps({
-                        'type': 'status',
-                        'message': event.get('message', ''),
-                        'phase': event.get('phase'),
-                        'degradation': event.get('degradation'),
-                    }, ensure_ascii=False)}\n\n"
-                elif event["type"] == "chart":
-                    chart_type = event.get("chart_type")
-                    chart_option = event.get("option")
-                    if chart_option is None:
-                        continue
-                    chart_obj = {"chart_type": chart_type, "option": chart_option}
-                    key = _chart_key(chart_obj)
-                    if key in seen_chart_keys:
-                        continue
-                    seen_chart_keys.add(key)
-                    collected_charts.append(chart_obj)
-                    # 不再逐个发送图表事件，done 时一次性批量发送
-                elif event["type"] == "intent":
-                    # 主导 Agent 增量事件：意图识别结果（前端可先忽略）
-                    yield f"data: {json.dumps({'type': 'intent', 'intent': event.get('intent'), 'confidence': event.get('confidence'), 'needs_plan': event.get('needs_plan'), 'degraded': event.get('degraded')}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "decision":
-                    # 主导 Agent 增量事件：Supervisor 决策结果（含 round，前端可按轮分组）
-                    yield f"data: {json.dumps({'type': 'decision', 'round': event.get('round'), 'action': event.get('action'), 'tool': event.get('tool'), 'reason': event.get('reason'), 'degraded': event.get('degraded')}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "progress":
-                    # 主导 Agent 增量事件：编排器步骤进度（含 round）
-                    yield f"data: {json.dumps({'type': 'progress', 'round': event.get('round'), 'index': event.get('index'), 'total': event.get('total'), 'title': event.get('title'), 'status': event.get('status'), 'note': event.get('note'), 'tool': event.get('tool')}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "report":
-                    # 最终报告：若流式文本已被过滤导致正文为空，用报告兜底补齐
-                    if not full_content.strip():
-                        visible = _filter_status_text(_strip_and_normalize(event.get("content", "")))
-                        if visible.strip():
-                            yield f"data: {json.dumps({'type': 'message', 'delta': visible}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "memory_saved":
-                    yield f"data: {json.dumps({'type': 'memory_saved', 'chars': event.get('chars', 0)}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "done":
-                    yield f"data: {json.dumps({'type': 'done', 'charts': collected_charts, 'degraded': event.get('degraded', False)}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "error":
-                    yield f"data: {json.dumps({'type': 'error', 'message': event['message']}, ensure_ascii=False)}\n\n"
-                elif event["type"] == "compressed_history":
-                    # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
-                    await _save_memory(db, session_id, event)
-
-            # Save assistant message：更新占位行为最终内容，并清除 Redis 任务态
-            if assistant_msg is not None:
-                assistant_msg.content = full_content
-                assistant_msg.chart_data = {"charts": collected_charts} if collected_charts else None
-                try:
-                    await db.commit()
-                except Exception:
-                    await db.rollback()
-                # 任务正常结束：清除 running 标记，避免误报"未完成"
-                try:
-                    get_cache_repository().delete(task_key)
-                except Exception:
-                    pass
-
-        except AINotConfiguredError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'AI 未配置'}, ensure_ascii=False)}\n\n"
-        except AIUpstreamError as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            _log.exception("Agent chat stream error")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'服务异常: {str(e)}'}, ensure_ascii=False)}\n\n"
+            # 启动后台任务（解耦连接：连接断开任务继续跑完并自行落库、释放锁）
+            started = chat_registry.start(
+                task_sid,
+                lambda: _run_chat_task(
+                    session_id=session_id,
+                    lock_token=lock_token,
+                    assistant_msg_id=assistant_msg_id,
+                    task_key=task_key,
+                    event_factory=_event_factory,
+                ),
+            )
+            task_launched = started
+            if not started:
+                # 极端竞态：start 时已存在同名运行任务（本轮回并发双发），按 busy 处理
+                yield f"data: {json.dumps({'type': 'error', 'message': _SESSION_BUSY_MSG}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                return
         finally:
-            # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
-            # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
-            if assistant_msg is not None:
-                try:
-                    if not assistant_msg.content and full_content.strip():
-                        assistant_msg.content = full_content
-                    await db.commit()
-                except Exception:
-                    try:
-                        await db.rollback()
-                    except Exception:
-                        pass
+            # 任务未启动（构建中途异常 / 连接断开取消 / start 竞态被拒）→ 清理本轮占位副作用：
+            # 锁还由本请求持有（任务没接手），running 任务态也是本轮写的，一并清掉。
+            # 任务已启动 → 锁与任务态归任务协程管，这里什么都不做。
+            if not task_launched:
+                if lock_token:
+                    release_session_lock(session_id, lock_token)
                 if task_key:
                     try:
-                        repo = get_cache_repository()
-                        if repo.exists(task_key):
-                            repo.set(
-                                task_key,
-                                json.dumps({
-                                    "status": "interrupted",
-                                    "chars": len(full_content),
-                                    "interrupted_at": datetime.now(timezone.utc).isoformat(),
-                                }),
-                                ttl=settings.redis_ttl,
-                            )
+                        get_cache_repository().delete(task_key)
                     except Exception:
                         pass
+
+        # 本连接作为首个订阅者：先补发一次文本快照（新任务通常为空），再实时转发任务事件
+        async for line in _yield_streamed_text_snapshot(task_sid):
+            yield line
+        async for line in _yield_subscription_events(task_sid):
+            yield line
 
     return StreamingResponse(
         event_generator(),
@@ -1258,12 +1429,8 @@ async def ai_query(
                 if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
                     pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
                     table_ref = f'"{schema_name}".public."{pg_table}"'
-                    # 查询前先 DETACH + ATTACH，确保外部数据库连接有效（按类型选对应连接器）
+                    # 首次 ATTACH 后复用连接，确保外部数据库可查（按类型选对应连接器）
                     from app.utils.crypto import decrypt_value, get_encryption_key
-                    try:
-                        duckdb_client.execute(f'DETACH "{schema_name}"')
-                    except Exception:
-                        pass
                     conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
                     key = get_encryption_key()
                     if key and conn_info.get("password"):
@@ -1276,7 +1443,7 @@ async def ai_query(
                     else:
                         from app.connectors.postgres_connector import postgres_connector as pg_conn
                         attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-                    duckdb_client.execute(attach_sql)
+                    duckdb_client.ensure_attached(schema_name, attach_sql)
                 else:
                     table_ref = f'"{schema_name}"."data"'
 
@@ -1440,12 +1607,8 @@ async def generate_insights(
     if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
         pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
         table_ref = f'"{schema_name}".public."{pg_table}"'
-        # 查询前先 DETACH + ATTACH（按类型选对应连接器）
+        # 首次 ATTACH 后复用连接（按类型选对应连接器）
         from app.utils.crypto import decrypt_value, get_encryption_key
-        try:
-            duckdb_client.execute(f'DETACH "{schema_name}"')
-        except Exception:
-            pass
         conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
         key = get_encryption_key()
         if key and conn_info.get("password"):
@@ -1458,7 +1621,7 @@ async def generate_insights(
         else:
             from app.connectors.postgres_connector import postgres_connector as pg_conn
             attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-        duckdb_client.execute(attach_sql)
+        duckdb_client.ensure_attached(schema_name, attach_sql)
     else:
         table_ref = f'"{schema_name}"."data"'
 
@@ -1657,13 +1820,9 @@ async def canvas_ai_chat(
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
             pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
             table_ref = f'"{schema_name}".public."{pg_table}"'
-            # 确保外部数据库连接有效（按类型选对应连接器）
+            # 首次 ATTACH 后复用连接（按类型选对应连接器）
             from app.utils.crypto import decrypt_value, get_encryption_key
 
-            try:
-                duckdb_client.execute(f'DETACH "{schema_name}"')
-            except Exception:
-                pass
             conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
             key = get_encryption_key()
             if key and conn_info.get("password"):
@@ -1678,7 +1837,7 @@ async def canvas_ai_chat(
                 from app.connectors.postgres_connector import postgres_connector as pg_conn
 
                 attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            duckdb_client.execute(attach_sql)
+            duckdb_client.ensure_attached(schema_name, attach_sql)
         else:
             table_ref = f'"{schema_name}"."data"'
 
@@ -1845,7 +2004,11 @@ async def canvas_ai_chat(
         # 画布动作计数器：工具型对话即使 LLM 不落纯文本，
         # 也能据此生成兜底 assistant 消息，保证会话链路完整。
         canvas_actions_count = 0
+        stream_degraded = False  # 事件流里出现过的降级标记，随流尾唯一的 done 下发
         session_id: uuid.UUID | None = None
+        lock_token: str | None = None
+        # 必须先于 try 初始化：抢锁失败会提前 return，此时 finally 里的 assistant_msg 还没被赋值
+        assistant_msg: AIMessage | None = None
         try:
             # ---- 1. 解析 / 创建会话（画布按 canvas_id 隔离 + 画布内多会话） ----
             if body.session_id:
@@ -1930,8 +2093,16 @@ async def canvas_ai_chat(
                         "session_id": str(session_id),
                     })
 
+            # ---- 1.5 会话级并发锁：同一会话同一时刻只允许一轮在跑 ----
+            # 抢不到直接拒；此时还没落消息，不会留下"没人回答"的僵尸消息。
+            if session_id:
+                lock_token = acquire_session_lock(session_id)
+                if lock_token is None:
+                    yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
+                    yield _sse({"type": "done"})
+                    return
+
             # ---- 2. 保存用户消息 + 占位 assistant 行（立即落库：断流/切页也不丢） ----
-            assistant_msg: AIMessage | None = None
             if session_id:
                 user_msg_model = AIMessage(
                     session_id=session_id,
@@ -2046,7 +2217,7 @@ async def canvas_ai_chat(
             else:
                 event_iter = _legacy_stream()
 
-            async for event in event_iter:
+            async for event in _idle_guard(event_iter, label="canvas_chat"):
                 ev_type = event.get("type")
                 if ev_type == "text":
                     delta = event.get("content", "")
@@ -2107,7 +2278,10 @@ async def canvas_ai_chat(
                 elif ev_type == "error":
                     yield _sse({"type": "error", "message": event.get("message", "服务异常")})
                 elif ev_type == "done":
-                    yield _sse({"type": "done", "degraded": event.get("degraded", False)})
+                    # 不下发：done 统一在流尾补发一次（见下方第 5 步之后）。
+                    # 原因：事件流里可能混入子执行器的内部 done，提前下发会让前端
+                    # 在子任务落块完就认为本轮结束（解锁输入、清 streaming），出现"一次请求两个 done"。
+                    stream_degraded = bool(event.get("degraded", stream_degraded))
                 elif ev_type == "compressed_history":
                     # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
                     await _save_memory(db, session_id, event)
@@ -2129,6 +2303,9 @@ async def canvas_ai_chat(
                     get_cache_repository().delete(f"ai:canvas:task:{session_id}")
                 except Exception:
                     pass
+
+            # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
+            yield _sse({"type": "done", "degraded": stream_degraded})
 
         except AINotConfiguredError:
             yield _sse({"type": "error", "message": "AI 未配置"})
@@ -2165,6 +2342,8 @@ async def canvas_ai_chat(
                         )
                 except Exception:
                     pass
+            # 会话锁：正常结束/异常/断线都走这里释放（TTL 仅作进程崩溃的兜底）
+            release_session_lock(session_id, lock_token)
 
     return StreamingResponse(
         event_generator(),

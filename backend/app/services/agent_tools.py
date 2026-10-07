@@ -84,6 +84,7 @@ _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
         "update_chart_block",
         "remove_block",
         "arrange_layout",
+        "get_canvas_layout",
     },
     ConversationPhase.GENERATING: {
         "render_chart",
@@ -94,8 +95,16 @@ _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
         "update_chart_block",
         "remove_block",
         "arrange_layout",
+        "get_canvas_layout",
     },
-    ConversationPhase.REPORTING: {"polish_text", "add_text_block", "add_chart_block", "update_chart_block", "remove_block"},
+    ConversationPhase.REPORTING: {
+        "polish_text",
+        "add_text_block",
+        "add_chart_block",
+        "update_chart_block",
+        "remove_block",
+        "get_canvas_layout",
+    },
 }
 
 
@@ -666,11 +675,6 @@ class QueryDatasourceTool(BaseTool):
         # 如果数据源是外部数据库（PostgreSQL/MySQL），先解密连接密码并 ATTACH 到 DuckDB
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
             from app.utils.crypto import decrypt_value, get_encryption_key
-            # 先尝试 DETACH 旧的同名 schema，避免 ATTACH 冲突
-            try:
-                duckdb_client.execute(f'DETACH "{schema_name}"')
-            except Exception:
-                pass
             key = get_encryption_key()
             if key and conn_info.get("password"):
                 conn_info["password"] = decrypt_value(conn_info["password"], key)
@@ -683,7 +687,8 @@ class QueryDatasourceTool(BaseTool):
             else:
                 from app.connectors.postgres_connector import postgres_connector as pg_conn
                 attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            duckdb_client.execute(attach_sql)
+            # 首次 ATTACH 后复用连接：同 schema 再次查询直接跳过 DETACH+ATTACH
+            duckdb_client.ensure_attached(schema_name, attach_sql)
 
         # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
         # 本地库 table_ref 为 "schema"."data"（归属在 db），外部库为 "schema".public."table"（归属在 catalog）。

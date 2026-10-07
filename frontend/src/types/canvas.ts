@@ -62,6 +62,8 @@ export interface BlockLayoutFields {
 
 export interface TextBlock extends BlockLayoutFields {
   type: "text" | "h1" | "h2";
+  /** 块稳定 ID（Agent 靠它精确指代/删除该块；加载老数据时补齐） */
+  blockId?: string;
   content: string;
 }
 
@@ -75,6 +77,8 @@ export interface ChartBlock extends BlockLayoutFields {
 
 export interface ImageBlock extends BlockLayoutFields {
   type: "image";
+  /** 块稳定 ID（Agent 靠它精确指代/删除该块；加载老数据时补齐） */
+  blockId?: string;
   src: string;
   alt?: string;
 }

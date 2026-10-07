@@ -323,12 +323,71 @@ def test_canvas_layout_renderer_stats_and_overlap():
     assert "画布为空" in render_canvas_layout(None)
 
 
+def test_canvas_layout_renderer_counts_frontend_heading_blocks():
+    """前端形状的 h1/h2 块（type 而非 blockType，带 blockId）也要计入文本块并暴露 id。
+
+    回归：此前 _is_text_block 只认 type=="text"，前端建的标题块既不算文本块、
+    快照里也没有 id → Agent 无法用 remove_block 删除它们。
+    """
+    blocks = [
+        {"type": "h1", "blockId": "h1_abc", "content": "2024年Q3销售分析报告"},
+        {"type": "h2", "blockId": "h2_def", "content": "一、各地区销售表现"},
+        {"type": "text", "blockId": "text_ghi", "content": "整体销售额同比增长 18%。"},
+    ]
+    text = render_canvas_layout(blocks)
+
+    assert "画布当前共有 3 个块：图表 0 个、文本 3 个" in text
+    assert "id=h1_abc" in text
+    assert "id=h2_def" in text
+    assert "id=text_ghi" in text
+
+
 def test_get_canvas_layout_registered_in_whitelist_and_registry():
     """get_canvas_layout 已进画布工具白名单，且 ToolRegistry 有 schema 供 LLM 感知。"""
     assert "get_canvas_layout" in CANVAS_TOOL_NAMES
     schemas = GetCanvasLayoutTool().schema()
     assert schemas["function"]["name"] == "get_canvas_layout"
     assert "canvas_id" in schemas["function"]["parameters"]["properties"]
+
+
+def test_canvas_tools_are_reachable_in_every_work_phase():
+    """画布落块/感知类工具必须至少在一个对话阶段可用。
+
+    回归：get_canvas_layout 曾不在 _PHASE_TOOLS 任何阶段里，画布入口走 react 内核时
+    必被"当前阶段不允许调用工具"拦下 → 连续两次无效调用触发强制收尾，白跑一轮（blocks_added=0）。
+    """
+    from app.services.agent_tools import _PHASE_TOOLS
+
+    phase_tool_union: set[str] = set()
+    for tools in _PHASE_TOOLS.values():
+        phase_tool_union |= tools
+    missing = sorted(CANVAS_TOOL_NAMES - phase_tool_union)
+    assert not missing, f"以下画布工具在任何阶段都不可用（会被 react 内核拦掉）: {missing}"
+
+
+def test_canvas_layout_labels_cover_all_blocks():
+    """编号覆盖所有块（不只图表）：前端角标与 LLM 上下文必须逐块对齐。
+
+    回归：此前 _assign_block_labels 只给图表块编号，前端的 A1 与 LLM 看到的 A1 会对不上；
+    现在文本块也要带 [编号]。
+    """
+    blocks = [
+        {"type": "h1", "blockId": "h1_a", "content": "订单分析", "x": 20, "y": 32, "width": 980, "height": 58},
+        {"type": "chart", "blockId": "chart_a", "title": "每日订单量", "chartType": "bar",
+         "x": 20, "y": 120, "width": 480, "height": 320},
+        {"type": "chart", "blockId": "chart_b", "title": "品类分布", "chartType": "pie",
+         "x": 520, "y": 120, "width": 480, "height": 320},
+        {"type": "text", "blockId": "text_a", "content": "整体呈上升趋势", "x": 20, "y": 500, "width": 980, "height": 62},
+    ]
+    text = render_canvas_layout(blocks)
+
+    assert "画布当前共有 4 个块：图表 2 个、文本 2 个" in text
+    assert "[A1]" in text and "订单分析" in text          # 标题 = A1
+    assert "[B1]" in text and "每日订单量" in text        # 左列图 = B1
+    assert "[B2]" in text and "品类分布" in text          # 右列图 = B2
+    assert "[C1]" in text and "整体呈上升趋势" in text    # 文本 = C1
+    # 编号与 id 同现，Agent 可"按编号取 id"
+    assert "id=chart_a" in text and "id=text_a" in text
 
 
 def test_execution_summary_includes_canvas_landscape():

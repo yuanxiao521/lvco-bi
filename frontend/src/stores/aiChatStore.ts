@@ -48,8 +48,8 @@ interface AIChatStore {
   refreshSessions: () => Promise<void>;
   /** 加载某个会话的消息（过滤"未完成"的空 assistant 占位行） */
   loadMessages: (sid: string) => Promise<void>;
-  /** agent 模式流式（POST /ai/chat/stream） */
-  streamChat: (sid: string | null, content: string, selectedDsId: string) => Promise<void>;
+  /** agent 模式流式（POST /ai/chat/stream）；resume=true 时不新增用户消息，纯订阅续收 */
+  streamChat: (sid: string | null, content: string, selectedDsId: string, resume?: boolean) => Promise<void>;
   /** fallback 普通 chat（POST /ai/sessions/{id}/messages，无数据源时） */
   sendFallback: (sid: string, content: string) => Promise<void>;
   /** 统一发送入口：无会话则先建会话，再按是否有数据源选择路径 */
@@ -85,25 +85,33 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
       set({
         messages: msgs.filter((m) => !(m.role === "assistant" && !m.content.trim())),
       });
+      // 后台续跑：刷新/断线后该会话后端任务仍在跑 → 自动续收（不新增用户消息）
+      const sess = get().sessions.find((s) => s.id === sid);
+      if (sess?.running) {
+        await get().streamChat(sid, "", "", true);
+      }
     } catch {
       // silently fail
     }
   },
 
-  streamChat: async (sid, content, selectedDsId) => {
+  streamChat: async (sid, content, selectedDsId, resume = false) => {
     if (agentStreamingLock) return;
     agentStreamingLock = true;
     set({ isStreaming: true });
+    const isResume = resume === true;
 
-    const userMsg: AIMessage = {
-      id: `temp-${Date.now()}`,
-      sessionId: sid || "",
-      role: "user",
-      content,
-      chartData: null,
-      createdAt: new Date().toISOString(),
-    };
-    set((s) => ({ messages: [...s.messages, userMsg] }));
+    if (!isResume) {
+      const userMsg: AIMessage = {
+        id: `temp-${Date.now()}`,
+        sessionId: sid || "",
+        role: "user",
+        content,
+        chartData: null,
+        createdAt: new Date().toISOString(),
+      };
+      set((s) => ({ messages: [...s.messages, userMsg] }));
+    }
 
     let assistantContent = "";
     let visibleContent = "";
@@ -126,7 +134,9 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
     const token = tokenStore.getAccess();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
     const historySnapshot = get().messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
-    const history = [...historySnapshot, { role: userMsg.role, content: userMsg.content }];
+    const history = isResume
+      ? historySnapshot
+      : [...historySnapshot, { role: "user", content }];
 
     const updateAssistant = (c: string) =>
       set((s) => ({ messages: s.messages.map((m) => (m.id === assistantId ? { ...m, content: c } : m)) }));
@@ -184,8 +194,9 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
         body: JSON.stringify({
           datasource_id: selectedDsId || null,
           session_id: sid,
-          message: content,
+          message: isResume ? "" : content,
           history,
+          resume: isResume,
         }),
       });
 
@@ -307,6 +318,12 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
                     : st,
                 ),
               }));
+              // 续收结束：本地占位行由后端落库的最终行替代，撤掉它并重新拉取
+              if (isResume) {
+                set((s) => ({ messages: s.messages.filter((m) => m.id !== assistantId) }));
+                // handleLine 非 async，这里 fire-and-forget（流结束收尾无需等待）
+                void get().loadMessages(sid || "").then(() => get().refreshSessions());
+              }
               agentStreamingLock = false;
               set({ isStreaming: false });
               break;

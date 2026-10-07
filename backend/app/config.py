@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     redis_ttl: int = 300
+    # 会话级并发锁 TTL（秒）：同一会话同时只允许一轮 Agent 在跑。
+    # 正常路径靠 finally 释放，TTL 只是"进程崩溃/断线"的自愈兜底，
+    # 因此必须明显大于单轮最长耗时（否则锁提前过期，互斥失效）。
+    ai_session_lock_ttl: int = 600
 
     # MinIO
     minio_endpoint: str = "localhost:9000"

@@ -125,6 +125,12 @@ let streamingLock = false;          // 并发互斥：同步级，替代组件�
 let newSession = false;             // 下一次请求是否强制新建会话
 let runSeq = 0;                     // 步骤自增 id
 let activeCancel: (() => void) | null = null; // 当前流的 reader.cancel
+// SSE 空闲超时（毫秒）：后端每步最多 45s（_STEP_TIMEOUT），90s 静默必属卡住
+const STREAM_IDLE_MS = 90_000;
+let abortRequested = false;         // 用户点了「停止」：收尾时标注"已停止"
+// 当前在跑的流属于哪个画布：切画布时据此判断是否需要中止旧流
+// （否则旧流的消息/进度/落块动作会写进新画布，历史与画布内容双双串台）
+let activeStreamCanvasId: string | null = null;
 let canvasSessionsSeq = 0;          // 会话列表请求序号（防异步竞态：旧请求结果不得覆盖新画布）
 let activeCanvasId: string | null = null; // 当前激活画布 id（跨组件同步，供异步回调校验）
 
@@ -213,17 +219,25 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
   },
 
   resetForCanvas: (ctx) => {
-    const { messages, steps, meta } = get();
-    void messages; void steps; void meta;
     const cid = ctx.canvasId ?? null;
+    // 进行中的流若属于别的画布：先中止，避免它继续往当前画布写消息/进度/落块
+    if (streamingLock && activeStreamCanvasId !== cid) {
+      try { activeCancel?.(); } catch { /* ignore */ }
+      activeCancel = null;
+      streamingLock = false;
+    }
     activeCanvasId = cid;
     canvasSessionsSeq += 1; // 使在途的旧列表请求结果全部失效
     set({
       curSessionId: null,
       sessionsLoaded: false,
+      // 必须清掉上一画布的会话列表：否则 onCanvasReady 会拿它当本画布的列表，
+      // 采纳上一个画布的会话 id 并加载它的历史 → 会话历史串到另一张画布
+      canvasSessions: [],
       steps: [],
       meta: null,
       messages: [buildWelcome(ctx.datasourceId, ctx.fieldMeta)],
+      isStreaming: false,
     });
     newSession = false;
     if (cid) {
@@ -297,6 +311,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         // 创建失败按草稿继续，后端以 canvas_id=null 兜底
       }
     }
+    activeStreamCanvasId = effCanvasId ?? null;  // 本流归属画布：切画布时据此中止
 
     const assistantId = makeMsgId("a");
     set((s) => ({
@@ -309,6 +324,9 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
 
     let assistantContent = "";
     let localCanvasActions = 0;
+    // 流空闲看门狗状态：写在 try 外，finally 才能读到（try 块内的 let 不跨块可见）
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    let stalled = false;
 
     const token = tokenStore.getAccess();
     const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
@@ -379,6 +397,16 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
 
       const decoder = new TextDecoder();
       let buffer = "";
+
+      // 空闲看门狗：SSE 超过 IDLE_MS 没有任何字节 → 判定后端卡住，主动断开并提示
+      // （后端 Agent 停在某个 await 时，流会一直挂着且不报错，界面就会永远"思考中"）
+      const armStall = () => {
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          stalled = true;
+          try { reader.cancel(); } catch { /* ignore */ }
+        }, STREAM_IDLE_MS);
+      };
 
       const consumeLine = (line: string) => {
         if (!line.startsWith("data: ")) return;
@@ -518,6 +546,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       };
 
       while (true) {
+        armStall();
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -554,14 +583,38 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         patchAssistant(assistantContent);
       }
       activeCancel = null;
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = null;
+      if (stalled) {
+        // 后端长时间静默：明确告知已中断，而不是让气泡永远停在"思考中"
+        patchAssistant(
+          (assistantContent ? assistantContent + "\n\n" : "") +
+            `> 响应超时：后端 ${Math.round(STREAM_IDLE_MS / 1000)} 秒无输出，已中断本轮。请重试或换个问法。`,
+        );
+      } else if (abortRequested && !assistantContent.trim()) {
+        patchAssistant("> 已停止本轮生成。");
+      }
+      abortRequested = false;
+      activeStreamCanvasId = null;
       streamingLock = false;
       set({ isStreaming: false });
     }
   },
 }));
 
-/** 主动中止当前流（组件卸载不再调用；供"停止"等 UI 使用） */
+/** 读取 store 当前状态归属的画布 id（供组件判断"是否需要重置会话状态"）。
+ *
+ * 为什么需要：AIAssistant 在路由切换/重新挂载时，组件内的 prev 引用会重置为 null，
+ * 单看 prev 无法区分「同一画布重新挂载」和「从另一个画布切过来」，
+ * 后者若不重置就会把上一个画布的历史显示到本画布上。
+ */
+export function getActiveCanvasId(): string | null {
+  return activeCanvasId;
+}
+
+/** 主动中止当前流（组件卸载不再调用；供"停止"按钮使用） */
 export function abortCanvasStream(): void {
+  abortRequested = true;
   try { activeCancel?.(); } catch { /* ignore */ }
   activeCancel = null;
   streamingLock = false;

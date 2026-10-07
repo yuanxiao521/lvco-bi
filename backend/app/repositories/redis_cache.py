@@ -56,6 +56,21 @@ class RedisCacheRepository:
         except Exception as e:
             logger.warning("redis_set_failed key=%s error=%s", key, e)
 
+    def set_nx(self, key: str, value: str, ttl: int | None = None) -> bool | None:
+        """SET NX EX：仅在 key 不存在时写入（并发锁的原子抢锁）。
+
+        Returns:
+            True 抢到 / False 已被占用 / None Redis 不可用（由调用方决定降级策略）
+        """
+        if not self._redis:
+            return None
+        expire = ttl if ttl is not None else settings.redis_ttl
+        try:
+            return bool(self._redis.set(self._full_key(key), value, nx=True, ex=expire))
+        except Exception as e:
+            logger.warning("redis_set_nx_failed key=%s error=%s", key, e)
+            return None
+
     def delete(self, key: str) -> None:
         if not self._redis:
             return

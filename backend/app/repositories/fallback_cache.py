@@ -29,6 +29,21 @@ class FallbackCacheRepository:
             self._redis.set(key, value, ttl)
         self._memory.set(key, value, ttl)
 
+    def set_nx(self, key: str, value: str, ttl: int | None = None) -> bool:
+        """抢锁：Redis 可用时以 Redis 为准（多 worker 也互斥），掉线时降级内存 NX。
+
+        与 get/set 的"两边都写"不同，NX 失败（别人持有）不能覆盖，因此只在抢到时才写内存副本。
+        """
+        if self._use_redis:
+            got = self._redis.set_nx(key, value, ttl)
+            if got is True:
+                self._memory.set(key, value, ttl)
+                return True
+            if got is False:
+                return False
+            # got is None：Redis 掉线，降级内存
+        return self._memory.set_nx(key, value, ttl)
+
     def delete(self, key: str) -> None:
         if self._use_redis:
             self._redis.delete(key)

@@ -109,7 +109,7 @@ class InsightRunner:
             if datasource.source_type != SourceType.postgresql:
                 raise InsightRunnerError("目前仅支持 PostgreSQL 数据源")
 
-            # ATTACH (复用 auto_discovery 逻辑)
+            # ATTACH (首次后复用：复用 auto_discovery 的连接，避免重复建连)
             schema_name = duckdb_client.get_schema_name(rule.user_id, rule.datasource_id)
             conn_info = dict(datasource.connection_config or {})
             key = get_encryption_key()
@@ -120,12 +120,8 @@ class InsightRunner:
             conn_info["port"] = conn_info.get("port", 5432)
             conn_info["user"] = conn_info.get("username", "postgres")
             conn_info["database"] = conn_info.get("db_name", "")
-            try:
-                duckdb_client.execute(f'DETACH "{schema_name}"')
-            except Exception:
-                pass
             attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-            duckdb_client.execute(attach_sql)
+            duckdb_client.ensure_attached(schema_name, attach_sql)
 
             # 2. 构造 SQL 并查询
             sql, params = self._build_query_sql(

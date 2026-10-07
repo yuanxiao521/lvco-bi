@@ -245,13 +245,9 @@ class DataSourceService:
             conn_info["user"] = conn_info.get("username", "postgres")
             conn_info["database"] = conn_info.get("db_name", "")
             try:
-                # 先 DETACH 再 ATTACH，保证同步时是全新连接（持久化文件中旧连接已失效）
-                try:
-                    duckdb_client.execute(f'DETACH "{schema_name}"')
-                except Exception:
-                    pass  # schema 不存在，忽略
+                # 同步需全新连接：force 跳过缓存，DETACH 后重建外部连接并重新拉 schema
                 attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-                duckdb_client.execute(attach_sql)
+                duckdb_client.ensure_attached(schema_name, attach_sql, force=True)
                 tables = postgres_connector.list_tables(duckdb_client, schema_name)
                 # Use specified table_name from connection_config, or fall back to first table
                 target_table = conn_info.get("table_name", "")
@@ -303,13 +299,9 @@ class DataSourceService:
             conn_info["user"] = conn_info.get("username", "root")
             conn_info["database"] = conn_info.get("db_name", "")
             try:
-                # 先 DETACH 再 ATTACH
-                try:
-                    duckdb_client.execute(f'DETACH "{schema_name}"')
-                except Exception:
-                    pass
+                # 同步需全新连接：force 跳过缓存，DETACH 后重建外部连接并重新拉 schema
                 attach_sql = mysql_connector.get_attach_sql(conn_info, schema_name)
-                duckdb_client.execute(attach_sql)
+                duckdb_client.ensure_attached(schema_name, attach_sql, force=True)
                 tables = mysql_connector.list_tables(duckdb_client, schema_name)
                 target_table = conn_info.get("table_name", "")
                 if target_table and target_table in tables:

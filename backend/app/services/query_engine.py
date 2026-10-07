@@ -663,11 +663,7 @@ async def execute_chart_query(
     # For MySQL/PostgreSQL datasources, ATTACH the external database via DuckDB.
     if db is not None and datasource:
         if source_type in (SourceType.mysql, SourceType.postgresql):
-            # 尝试 ATTACH；若 schema 已存在则先 DETACH 重建连接（持久化文件会残留旧 schema 记录但连接已失效）
-            try:
-                duckdb_client.execute(f'DETACH "{schema_name}"')
-            except Exception:
-                pass
+            # 首次 ATTACH 后复用连接（进程内缓存判定，命中即跳过 DETACH+ATTACH）
             conn_info = _decrypt_connection_info(source_type, datasource.connection_config)
             if source_type == SourceType.mysql:
                 from app.connectors.mysql_connector import mysql_connector as mysql_conn
@@ -675,7 +671,7 @@ async def execute_chart_query(
             else:
                 from app.connectors.postgres_connector import postgres_connector as pg_conn
                 attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            duckdb_client.execute(attach_sql)
+            duckdb_client.ensure_attached(schema_name, attach_sql)
             # 确定 PG/MySQL 数据源对应的实际表名
             if datasource.schema_meta and isinstance(datasource.schema_meta, dict):
                 pg_table_name = datasource.schema_meta.get("table_name", "data")

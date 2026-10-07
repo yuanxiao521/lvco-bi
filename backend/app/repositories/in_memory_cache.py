@@ -36,6 +36,13 @@ class InMemoryCacheRepository:
         expire_at = (time.time() + ttl) if ttl else None
         self._store[key] = _CacheEntry(value=value, expire_at=expire_at)
 
+    def set_nx(self, key: str, value: str, ttl: int | None = None) -> bool:
+        """SET NX 语义：key 已存在（且未过期）时不写入并返回 False。"""
+        if self.exists(key):
+            return False
+        self.set(key, value, ttl)
+        return True
+
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
 

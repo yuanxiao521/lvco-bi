@@ -116,6 +116,15 @@ class CanvasService:
             logger.info(f"画布标题更新成功 canvas_id={canvas_id}")
         return canvas
 
+    async def update_datasource(
+        self, canvas_id: UUID, user_id: UUID, datasource_id: UUID
+    ) -> Canvas | None:
+        """换绑画布数据源（画布级单一数据源）。"""
+        canvas = await self.canvas_repo.update_datasource(canvas_id, user_id, datasource_id)
+        if canvas is None:
+            logger.warning(f"换绑画布数据源失败：画布不存在 canvas_id={canvas_id}")
+        return canvas
+
     @staticmethod
     def calc_pages(total: int, page_size: int) -> int:
         """计算总页数。"""

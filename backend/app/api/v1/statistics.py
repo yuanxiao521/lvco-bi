@@ -55,23 +55,10 @@ def _resolve_table_ref(ds: DataSource, user_id: UUID) -> tuple[str, str]:
 def _ensure_external_attached(ds: DataSource, schema_name: str) -> None:
     """确保外部数据源(PostgreSQL/MySQL)已 ATTACH 到 DuckDB。
 
-    先尝试查询判断是否已连接，避免重复 ATTACH 耗时。
+    首次 ATTACH 后复用连接：同 schema 已附加时直接跳过，避免重复建连耗时。
     """
     from app.utils.crypto import decrypt_value, get_encryption_key
     from app.connectors.postgres_connector import postgres_connector
-
-    # 先检查是否已 ATTACH——快速查询 1 行即可判断
-    try:
-        duckdb_client.fetchall(f'SELECT 1 FROM "{schema_name}".information_schema.tables LIMIT 1')
-        return  # 已连接，直接返回
-    except Exception:
-        pass
-
-    # 未连接，DETACH 清理残留后重新 ATTACH
-    try:
-        duckdb_client.execute(f'DETACH "{schema_name}"')
-    except Exception:
-        pass
 
     conn_info = dict(ds.connection_config) if ds.connection_config else {}
     key = get_encryption_key()
@@ -91,7 +78,7 @@ def _ensure_external_attached(ds: DataSource, schema_name: str) -> None:
             attach_sql = mysql_connector.get_attach_sql(conn_info, schema_name)
         else:
             attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-        duckdb_client.execute(attach_sql)
+        duckdb_client.ensure_attached(schema_name, attach_sql)
     except Exception as e:
         raise HTTPException(
             status_code=500,

@@ -81,16 +81,6 @@ flowchart TB
 
 ---
 
-## Rich Architecture SVG
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/yuanxiao521/lvco-bi/main/docs/architecture.svg" alt="LvcoBI Architecture" width="720">
-</div>
-
-> **Note**: If the SVG isn't rendering yet, push this README first — the `docs/architecture.svg` will be generated on the next build.
-
----
-
 ## Project Flow (Canvas Conversation Example)
 
 ```

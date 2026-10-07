@@ -12,6 +12,9 @@ import {
   Image as ImageIcon,
   Upload,
   Link2,
+  ArrowUp,
+  ArrowDown,
+  Copy,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useInView } from "../../hooks/useInView";
@@ -25,7 +28,7 @@ import { generateInsights, polishText } from "../../api/ai";
 import { useToast } from "../ui/Toast";
 import { detectAlignment } from "../../hooks/useBlockAlignment";
 import type { AlignmentGuide, BlockBounds } from "../../hooks/useBlockAlignment";
-import { estimateBlockHeight } from "../../utils/reportLayout";
+import { estimateBlockHeight, blockBottom, assignBlockLabels } from "../../utils/reportLayout";
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
 
 
@@ -148,6 +151,47 @@ interface BlockWrapperProps {
   hideLabelWhenNotSelected?: boolean;
   /** 极简模式：无背景/阴影/内边距 */
   minimal?: boolean;
+  /** ⋯ 菜单：复制当前块（副本落在下方空位） */
+  onDuplicate?: () => void;
+  /** ⋯ 菜单：与上一块交换顺序（已是最前一块时不传） */
+  onMoveUp?: () => void;
+  /** ⋯ 菜单：与下一块交换顺序（已是最后一块时不传） */
+  onMoveDown?: () => void;
+  /** 块编号角标（A1/A2/B1…），与 Agent 上下文中的 [A1] 同规则同编号 */
+  badge?: string;
+}
+
+/** ⋯ 菜单项：图标 + 文案，支持禁用与危险态（删除） */
+function BlockMenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  danger = false,
+  disabled = false,
+}: {
+  icon: typeof ArrowUp;
+  label: string;
+  onClick?: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onClick?.()}
+      className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-left transition-colors ${
+        disabled
+          ? "opacity-40 cursor-not-allowed text-muted-foreground"
+          : danger
+            ? "text-danger hover:bg-danger-light"
+            : "text-card-foreground hover:bg-muted"
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+      {label}
+    </button>
+  );
 }
 
 {/* BlockWrapper：画布中每个 block 的容器，支持绝对定位、宽度/高度拖拽、自由移动、选中态样式
@@ -182,8 +226,32 @@ function BlockWrapper({
   dragDisabled = false,
   hideLabelWhenNotSelected = false,
   minimal = false,
+  onDuplicate,
+  onMoveUp,
+  onMoveDown,
+  badge,
 }: BlockWrapperProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // ⋯ 更多操作菜单：开合状态 + fixed 坐标（块本身可能是 overflow-auto，绝对定位会被裁掉）
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) close();
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    // 滚动/缩放时关闭，避免 fixed 菜单与块错位
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menuOpen]);
   {/* 三个 ref 分别记录三种拖拽操作的起始状态，仅在拖拽进行中非空 */}
   const widthDragState = useRef<{ startX: number; startW: number } | null>(null);
   const heightDragState = useRef<{ startY: number; startH: number } | null>(null);
@@ -366,23 +434,94 @@ function BlockWrapper({
             <Trash2 className="w-4 h-4" />
           </button>
         ) : null}
-        <button
-          onClick={(e) => e.stopPropagation()}
-          className="p-1 rounded-[6px] hover:bg-muted text-muted-foreground"
-        >
-          <MoreHorizontal className="w-4 h-4" />
-        </button>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (menuOpen) {
+                setMenuOpen(false);
+                return;
+              }
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setMenuPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+              setMenuOpen(true);
+            }}
+            className={`p-1 rounded-[6px] hover:bg-muted text-muted-foreground ${menuOpen ? "bg-muted text-card-foreground" : ""}`}
+            title="更多操作"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+          {menuOpen && menuPos ? (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+              className="z-50 w-[132px] bg-white border border-border rounded-[8px] shadow-lg py-1"
+            >
+              <BlockMenuItem
+                icon={ArrowUp}
+                label="上移"
+                disabled={!onMoveUp}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onMoveUp?.();
+                }}
+              />
+              <BlockMenuItem
+                icon={ArrowDown}
+                label="下移"
+                disabled={!onMoveDown}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onMoveDown?.();
+                }}
+              />
+              <BlockMenuItem
+                icon={Copy}
+                label="复制块"
+                disabled={!onDuplicate}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDuplicate?.();
+                }}
+              />
+              <div className="my-1 h-px bg-border-light" />
+              <BlockMenuItem
+                icon={Trash2}
+                label="删除块"
+                danger
+                disabled={!onDelete}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onDelete?.();
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
-      {(!hideLabelWhenNotSelected || selected) ? (
-        <span
-          onMouseDown={onPositionChange && !dragDisabled ? handleMoveMouseDown : undefined}
-          className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium mb-3 ${labelBg} ${labelText} ${
-            onPositionChange && !dragDisabled ? "cursor-move" : ""
-          }`}
-          title={onPositionChange && !dragDisabled ? "按住拖动以自由移动（按住 Alt 临时关闭吸附）" : undefined}
-        >
-          {label}
-        </span>
+      {(!hideLabelWhenNotSelected || selected) || badge ? (
+        <div className="flex items-center gap-1.5 mb-3 min-h-[18px]">
+          {/* 块编号角标：与 Agent 上下文的 [A1] 同规则，用户可用"把 A1 改成折线图"直接指代 */}
+          {badge ? (
+            <span
+              className="inline-block px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-semibold tracking-wide cursor-default"
+              title={`块编号 ${badge}：可在 AI 对话里用"${badge}"直接指代这个块`}
+            >
+              {badge}
+            </span>
+          ) : null}
+          {(!hideLabelWhenNotSelected || selected) ? (
+            <span
+              onMouseDown={onPositionChange && !dragDisabled ? handleMoveMouseDown : undefined}
+              className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${labelBg} ${labelText} ${
+                onPositionChange && !dragDisabled ? "cursor-move" : ""
+              }`}
+              title={onPositionChange && !dragDisabled ? "按住拖动以自由移动（按住 Alt 临时关闭吸附）" : undefined}
+            >
+              {label}
+            </span>
+          ) : null}
+        </div>
       ) : null}
       {children}
       {/* 右侧宽度拖拽手柄 */}
@@ -430,6 +569,10 @@ interface CanvasBlocksProps {
   highlightBlockId?: string | null;
   /** Agent 流式输出期间为 true：禁止拖动块，防止与落块位置冲突 */
   isStreaming?: boolean;
+  /** ⋯ 菜单：复制指定块（副本落在下方空位，图表块连配置/结果一起复制） */
+  onDuplicateBlock?: (index: number) => void;
+  /** ⋯ 菜单：上移/下移指定块（与相邻块换序后重排） */
+  onMoveBlock?: (index: number, dir: -1 | 1) => void;
 }
 
 {/* 类型守卫：判断 block 是否为 h1/h2/text 文本类型，并收窄类型以访问 content 属性 */}
@@ -760,7 +903,10 @@ export default function CanvasBlocks({
   onSelectBlock,
   highlightBlockId,
   isStreaming = false,
+  onDuplicateBlock,
+  onMoveBlock,
 }: CanvasBlocksProps) {
+  const toast = useToast();
   {/* AI 洞察弹窗状态：当前操作的 block 索引、加载中、错误信息和洞察列表 */}
   const [insightsModalBlockIdx, setInsightsModalBlockIdx] = useState<number | null>(null);
   {/* 对齐辅助线：拖动中由 BlockWrapper 实时上报，松手清空 */}
@@ -886,6 +1032,20 @@ export default function CanvasBlocks({
     [blocks],
   );
 
+  {/* 画布最小高度：按内容实际底部撑开 + 末尾呼吸空间
+      （原为固定 1600px，块少时下方会留一大片点阵空白） */}
+  const contentMinHeight = useMemo(() => {
+    const bottom = (blocks ?? []).reduce(
+      (max, b, i) => Math.max(max, blockBottom(b, i)),
+      0,
+    );
+    return Math.max(600, bottom + 120);
+  }, [blocks]);
+
+  {/* 块编号（A1/A2/B1…）：规则与后端 canvas_tools._assign_block_labels 一致，
+      保证用户看到的角标 == Agent 上下文里的 [A1]，可以用编号直接指代某一块 */}
+  const labels = useMemo(() => assignBlockLabels(blocks ?? []), [blocks]);
+
   if (!blocks || blocks.length === 0) {
     return (
       <div className="text-center py-16 text-muted-foreground text-[13px]">
@@ -898,10 +1058,24 @@ export default function CanvasBlocks({
     <>
     <div
       className="relative w-full"
-      style={{ minHeight: "1600px" }}
+      style={{ minHeight: `${contentMinHeight}px` }}
     >
       {blocks.map((block, idx) => {
-        const onDelete = onDeleteBlock ? () => onDeleteBlock(idx) : undefined;
+        // 删除前二次确认：手动点删除（工具栏垃圾桶或 ⋯ 菜单）不直接生效
+        const requestDelete = onDeleteBlock
+          ? async () => {
+              const ok = await toast.confirm("确定删除这个块吗？");
+              if (ok) onDeleteBlock(idx);
+            }
+          : undefined;
+        // 每块共用的渲染入参：⋯ 菜单动作（上移/下移/复制/删除）+ 编号角标
+        const sharedProps = {
+          badge: labels[idx],
+          onDelete: requestDelete,
+          onDuplicate: onDuplicateBlock ? () => onDuplicateBlock(idx) : undefined,
+          onMoveUp: onMoveBlock && idx > 0 ? () => onMoveBlock(idx, -1) : undefined,
+          onMoveDown: onMoveBlock && idx < blocks.length - 1 ? () => onMoveBlock(idx, 1) : undefined,
+        };
         const isSelected = selectedBlockIdx === idx;
         const blockData = block as Record<string, unknown>;
         // 自由画布：每个 block 有自己的 x/y 坐标；老数据没有则按索引自动铺位（左侧垂直流）
@@ -931,7 +1105,7 @@ export default function CanvasBlocks({
                 label="标题 · H1"
                 labelBg="bg-success-light"
                 labelText="text-success"
-                onDelete={onDelete}
+                {...sharedProps}
                 selected={isSelected}
                 onSelect={handleSelect}
                 blockWidth={blockW}
@@ -965,7 +1139,7 @@ export default function CanvasBlocks({
                 label="标题 · H2"
                 labelBg="bg-primary-light"
                 labelText="text-primary"
-                onDelete={onDelete}
+                {...sharedProps}
                 selected={isSelected}
                 onSelect={handleSelect}
                 blockWidth={blockW}
@@ -998,7 +1172,7 @@ export default function CanvasBlocks({
               label="文本"
               labelBg="bg-muted"
               labelText="text-muted-foreground"
-              onDelete={onDelete}
+              {...sharedProps}
               selected={isSelected}
               onSelect={handleSelect}
               blockWidth={blockW}
@@ -1040,7 +1214,7 @@ export default function CanvasBlocks({
               label="图片"
               labelBg="bg-muted"
               labelText="text-muted-foreground"
-              onDelete={onDelete}
+              {...sharedProps}
               selected={isSelected}
               onSelect={handleSelect}
               blockWidth={blockW}
@@ -1077,7 +1251,7 @@ export default function CanvasBlocks({
                 label="图表"
                 labelBg="bg-muted"
                 labelText="text-muted-foreground"
-                onDelete={onDelete}
+                {...sharedProps}
                 selected={isSelected}
                 onSelect={handleSelect}
                 blockWidth={blockW}

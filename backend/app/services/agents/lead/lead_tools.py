@@ -189,7 +189,7 @@ async def _load_canvas_narrative(db_session, user_id, canvas_id, max_chars: int 
         for b in blocks:
             if not _is_text_block(b):
                 continue
-            btype = str(b.get("blockType") or "")
+            btype = str(b.get("blockType") or b.get("type") or "")
             if btype in ("h1", "h2"):
                 continue  # 标题不算叙事要点
             content = str(b.get("content") or (b.get("blocks") or [{}])[0].get("text", ""))
@@ -587,6 +587,7 @@ async def run_analysis(
             error = str(ev.get("message") or "执行异常")
 
     async def _source() -> AsyncIterator[dict]:
+        canvas_id = str(args.canvas_id) if args.canvas_id else ""
         if mode == "canvas":
             from app.services.agents.canvas_orchestrator import CanvasOrchestrator
             orchestrator = CanvasOrchestrator(llm, db_session, extra_plannable_tools)
@@ -595,6 +596,7 @@ async def run_analysis(
                 history=history,
                 user_id=user_id,
                 available_datasources=available_datasources,
+                canvas_id=canvas_id,
             ):
                 yield ev
         elif mode == "react":
@@ -649,6 +651,7 @@ async def run_analysis(
                         db_session=db_session,
                         initial_phase=initial_phase,
                         emit=_emit,
+                        canvas_id=canvas_id,
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.exception(f"[lead_tools] react_failed: {e}")
@@ -668,6 +671,7 @@ async def run_analysis(
                 history=history,
                 user_id=user_id,
                 available_datasources=available_datasources,
+                canvas_id=canvas_id,
             ):
                 yield ev
 

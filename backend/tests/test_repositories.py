@@ -109,6 +109,22 @@ class TestInMemoryCacheRepository:
         deleted = self.cache.delete_by_prefix("foo:")
         assert deleted == 0
 
+    def test_set_nx_first_wins(self) -> None:
+        """SET NX：先到者写入，后到者失败且不覆盖已有值。"""
+        assert self.cache.set_nx("lock", "t1") is True
+        assert self.cache.set_nx("lock", "t2") is False
+        assert self.cache.get("lock") == "t1"
+
+    def test_set_nx_after_delete(self) -> None:
+        self.cache.set_nx("lock", "t1")
+        self.cache.delete("lock")
+        assert self.cache.set_nx("lock", "t2") is True
+
+    def test_set_nx_after_expiry(self) -> None:
+        self.cache.set_nx("lock", "t1", ttl=1)
+        time.sleep(1.1)
+        assert self.cache.set_nx("lock", "t2") is True
+
 
 # ── Protocol runtime_checkable ────────────────────────────────────────────────
 
@@ -179,3 +195,36 @@ class TestFallbackCacheRepository:
 
             repo = FallbackCacheRepository()
             assert isinstance(repo, CacheRepository)
+
+    def test_set_nx_uses_memory_when_redis_unavailable(self) -> None:
+        with patch("app.repositories.fallback_cache.RedisCacheRepository") as MockRedis:
+            mock_instance = MagicMock()
+            mock_instance._redis = None
+            MockRedis.return_value = mock_instance
+
+            repo = FallbackCacheRepository()
+            assert repo.set_nx("lock", "t1") is True
+            assert repo.set_nx("lock", "t2") is False
+
+    def test_set_nx_defers_to_redis_when_available(self) -> None:
+        """Redis 可用时以 Redis 为准：Redis 说已被占用就直接失败。"""
+        with patch("app.repositories.fallback_cache.RedisCacheRepository") as MockRedis:
+            mock_instance = MagicMock()
+            mock_instance._redis = MagicMock()
+            mock_instance.set_nx.return_value = False
+            MockRedis.return_value = mock_instance
+
+            repo = FallbackCacheRepository()
+            assert repo.set_nx("lock", "t1") is False
+            mock_instance.set_nx.assert_called_once()
+
+    def test_set_nx_falls_back_to_memory_when_redis_errors(self) -> None:
+        """Redis 掉线（set_nx 返回 None）时降级内存，仍能抢到锁。"""
+        with patch("app.repositories.fallback_cache.RedisCacheRepository") as MockRedis:
+            mock_instance = MagicMock()
+            mock_instance._redis = MagicMock()
+            mock_instance.set_nx.return_value = None
+            MockRedis.return_value = mock_instance
+
+            repo = FallbackCacheRepository()
+            assert repo.set_nx("lock", "t1") is True

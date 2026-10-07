@@ -29,6 +29,7 @@ from app.schemas import CamelModel, CanvasResponse, SuccessResponse
 from app.schemas.query import ChartQueryConfig, MeasureConfig
 from app.services.ai_service import AIService
 from app.services.canvas_service import CanvasService
+from app.services.chart_export import build_option, render_options_to_svg_uris
 from app.services.chart_renderer import render_chart
 from app.services.dashboard_service import DashboardService
 from app.services.llm_client import AINotConfiguredError, LLMClient
@@ -177,7 +178,10 @@ class CanvasBlocksBody(CamelModel):
 
 
 class CanvasUpdateBody(CamelModel):
-    title: str = Field(..., max_length=200)
+    # 标题与数据源都改成可选：PATCH 支持"只改标题"或"只换数据源"
+    title: str | None = Field(None, max_length=200)
+    # 换数据源（画布级单一数据源）：旧图表字段引用失效，前端会标记为"待重配"
+    datasource_id: UUID | None = None
 
 
 class CanvasChartConfigBody(CamelModel):
@@ -264,13 +268,44 @@ async def update_canvas(
     body: CanvasUpdateBody,
     service: CanvasService = Depends(get_canvas_service),
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> SuccessResponse:
-    canvas = await service.update_title(canvas_id, current_user.id, body.title)
+    canvas = None
+    if body.title is not None:
+        canvas = await service.update_title(canvas_id, current_user.id, body.title)
+        if canvas is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "画布不存在"},
+            )
+    # 换数据源：先校验归属，避免把画布挂到别人的数据源上
+    if body.datasource_id is not None:
+        owned = (
+            await db.execute(
+                select(DataSource.id).where(
+                    DataSource.id == body.datasource_id,
+                    DataSource.user_id == current_user.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "数据源不存在或无权访问"},
+            )
+        canvas = await service.update_datasource(canvas_id, current_user.id, body.datasource_id)
+        if canvas is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "画布不存在"},
+            )
     if canvas is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "NOT_FOUND", "message": "画布不存在"},
-        )
+        canvas = await service.get_by_id(canvas_id, current_user.id)
+        if canvas is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "画布不存在"},
+            )
     return SuccessResponse(data=CanvasResponse.model_validate(canvas).model_dump(mode="json", by_alias=True))
 
 
@@ -620,6 +655,8 @@ async def export_canvas_pdf(
 
     raw_blocks = list(canvas.blocks) if canvas.blocks else []
     processed_blocks = []
+    # 待批量渲染成 SVG 的图表块（与前端画布同一份 ECharts option），渲染完覆盖 matplotlib 结果
+    pending_svgs: list[tuple[dict, dict]] = []
     logger.info("export_pdf start canvas=%s title=%s blocks=%s",
                 canvas.id, canvas.title, len(raw_blocks))
 
@@ -645,6 +682,14 @@ async def export_canvas_pdf(
             elif renderer_field and chart_type == "bar" and renderer_field not in ("echarts", "recharts"):
                 chart_type = renderer_field
             chart_images = []
+
+            # 0. 首选：复用 render_chart 的 ECharts option 服务端渲染 SVG（与前端同一引擎/配色）
+            if isinstance(chart_result, dict) and chart_result.get("columns") and chart_result.get("rows"):
+                option = await build_option(
+                    chart_type, title, chart_result["columns"], chart_result["rows"]
+                )
+                if option:
+                    pending_svgs.append((block_copy, option))
 
             # 1. 优先取前端保存的真实查询结果
             if isinstance(chart_result, dict) and chart_result.get("rows"):
@@ -736,6 +781,14 @@ async def export_canvas_pdf(
                     block_copy["_image_data"] = data_uri
 
         processed_blocks.append(block_copy)
+
+    # 批量渲染 SVG（一次浏览器渲染全部图），成功则覆盖该块的 matplotlib PNG
+    if pending_svgs:
+        svg_uris = await render_options_to_svg_uris([opt for _, opt in pending_svgs])
+        for (blk, _), uri in zip(pending_svgs, svg_uris):
+            if uri:
+                blk["_chart_images"] = [uri]
+        logger.info("export_pdf svg rendered %d/%d", sum(1 for u in svg_uris if u), len(svg_uris))
 
     html_content = _CANVAS_PDF_HTML_TEMPLATE.render(
         canvas={"id": str(canvas.id), "title": canvas.title},

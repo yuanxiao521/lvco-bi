@@ -120,6 +120,25 @@ class SQLAlchemyCanvasRepository:
         logger.info(f"画布标题更新成功 canvas_id={canvas_id}")
         return canvas
 
+    async def update_datasource(
+        self, canvas_id: UUID, user_id: UUID, datasource_id: UUID
+    ) -> Canvas | None:
+        """换绑画布的数据源（画布级单一数据源）。
+
+        注意：调用方需先校验该数据源属于同一用户；旧图表块的字段引用会失效，
+        前端负责把受影响的图表标记为"待重配"。
+        """
+        logger.info(f"换绑画布数据源 canvas_id={canvas_id} datasource_id={datasource_id}")
+        canvas = await self.get_by_id(canvas_id, user_id)
+        if canvas is None:
+            logger.warning(f"换绑画布数据源失败：画布不存在 canvas_id={canvas_id}")
+            return None
+        canvas.datasource_id = datasource_id
+        await self.db.flush()
+        await self.db.refresh(canvas)
+        logger.info(f"画布数据源更新成功 canvas_id={canvas_id}")
+        return canvas
+
 
 class SQLAlchemyChartConfigRepository:
     """基于 SQLAlchemy 的图表配置仓库实现。"""

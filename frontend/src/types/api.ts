@@ -49,6 +49,8 @@ export interface AISession {
   createdAt: string;
   /** Redis 任务态标记：true 表示该会话上次任务中断未完成（画布会话列表返回） */
   interrupted?: boolean;
+  /** 进程内后台任务是否在跑：对话入口返回，前端据此自动续收（刷新后恢复进行中的回复） */
+  running?: boolean;
 }
 
 export interface AISessionDetail extends AISession {

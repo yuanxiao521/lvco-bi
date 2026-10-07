@@ -504,6 +504,10 @@ class AgentOrchestrator:
             idempotent_tools=_IDEMPOTENT_TOOLS,
             success_cached_tools=_SUCCESS_CACHED_TOOLS,
             allowed_tools=executor_allowed or None,
+            # 画布上下文由系统绑定：get_canvas_layout 等工具缺参时自动补 canvas_id；
+            # 台账随本轮运行共享，工具据此校验存在性并让快照反映本轮动作
+            context={"canvas_id": str(state.get("canvas_id") or ""),
+                     "canvas_ledger": shared.get("canvas_ledger")},
         )
 
         context = self._build_executor_context(state, step, results, **shared)
@@ -1073,10 +1077,13 @@ class AgentOrchestrator:
         history: list[dict],
         user_id: str,
         available_datasources: list[dict],
+        canvas_id: str = "",
         **kwargs,
     ) -> AsyncIterator[dict]:
         """执行用户任务：骨架规划 → ExecutorAgent 逐步执行 → 报告，流式产出事件。
- 
+
+        canvas_id：画布入口传入并写入 state，供执行器为画布工具自动注入上下文。
+
         事件类型：status / plan / tool_call / tool_result / chart / text / done / error
         """
         queue: asyncio.Queue = asyncio.Queue()
@@ -1086,9 +1093,13 @@ class AgentOrchestrator:
  
         async def run() -> None:
             state_sink: dict = {}
-            # P1-9 全局 LLM 调用计数器（planner + executor 各步骤 + report）
-            llm_call_counter = {"count": 0}
+            # 本轮画布动作台账：一次运行内共享（执行器按 LLM 轮次新建，台账必须挂在运行级）
+            from app.services.canvas_tools import CanvasActionLedger
+
+            ledger = CanvasActionLedger()
             try:
+                # P1-9 全局 LLM 调用计数器（planner + executor 各步骤 + report）
+                llm_call_counter = {"count": 0}
                 observer = get_observer()
                 with observer.trace(
                     "orchestrator_execute",
@@ -1099,7 +1110,7 @@ class AgentOrchestrator:
                     # Task 6 (P1-8)：整体执行包超时控制，超时后取消并输出已完成结果的模板报告。
                     await asyncio.wait_for(
                         self.graph.invoke(
-                            {"user_id": user_id},
+                            {"user_id": user_id, "canvas_id": canvas_id},
                             user_msg=user_msg,
                             history=history or [],
                             available_datasources=available_datasources,
@@ -1108,6 +1119,7 @@ class AgentOrchestrator:
                             trace=trace,
                             state_sink=state_sink,
                             llm_call_counter=llm_call_counter,
+                            canvas_ledger=ledger,
                         ),
                         timeout=settings.AGENT_ORCHESTRATOR_TIMEOUT,
                     )

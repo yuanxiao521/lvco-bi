@@ -47,7 +47,7 @@ export async function updateCanvasBlocks(
 
 export async function updateCanvas(
   id: string,
-  payload: { title: string }
+  payload: { title?: string; datasourceId?: string }
 ): Promise<Canvas> {
   const response = await apiClient.patch(`/canvases/${id}`, payload);
   return unwrapApi<Canvas>(response.data);

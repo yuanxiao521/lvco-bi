@@ -71,3 +71,84 @@ async def test_success_cached_tool_does_not_cache_errors():
     assert r1.is_error and r2.is_error
     assert FakeQueryTool.calls == 2, "error 不应命中 memo，重试应真执行"
     assert exc.memo == {}, "error 结果不应写入 memo"
+
+
+# ── 执行器级上下文注入：canvas_id 由系统绑定，不依赖 LLM 填写 ──────────────
+
+class FakeCanvasLayoutTool:
+    """假 get_canvas_layout：记录实际收到的 canvas_id。"""
+
+    seen: dict = {}
+
+    async def execute(self, user_id: str = "", db_session=None, canvas_id: str = "", **kwargs) -> str:
+        FakeCanvasLayoutTool.seen = {"canvas_id": canvas_id, "user_id": user_id}
+        return json.dumps({"ok": True, "layout": "..."})
+
+
+class FakeFixedSignatureTool:
+    """签名固定的假工具（无 **kwargs、无 canvas_id）：不应被塞进上下文参数。"""
+
+    seen: dict = {}
+
+    async def execute(self, user_id: str = "", db_session=None, title: str = "") -> str:
+        FakeFixedSignatureTool.seen = {"title": title}
+        return json.dumps({"ok": True})
+
+
+async def test_context_injects_canvas_id_when_llm_omits():
+    """LLM 空参调用 get_canvas_layout 时，执行器自动补 canvas_id（回归：此前必报缺少画布上下文）。"""
+    FakeCanvasLayoutTool.seen = {}
+    exc = ToolExecutor(user_id="u1", db_session=None, context={"canvas_id": "cv-123"})
+    tc = {"id": "call_1", "name": "get_canvas_layout", "arguments": "{}"}
+    with patch("app.services.agents.tool_executor.ToolRegistry.get", return_value=FakeCanvasLayoutTool()):
+        r = await exc.execute_tool_call(tc)
+    assert not r.is_error
+    assert FakeCanvasLayoutTool.seen["canvas_id"] == "cv-123"
+    assert FakeCanvasLayoutTool.seen["user_id"] == "u1"
+
+
+async def test_context_does_not_override_explicit_llm_arg():
+    """LLM 显式传入的 canvas_id 优先于上下文（支持读另一张画布）。"""
+    FakeCanvasLayoutTool.seen = {}
+    exc = ToolExecutor(user_id="u1", db_session=None, context={"canvas_id": "cv-123"})
+    tc = {"id": "call_1", "name": "get_canvas_layout", "arguments": json.dumps({"canvas_id": "cv-999"})}
+    with patch("app.services.agents.tool_executor.ToolRegistry.get", return_value=FakeCanvasLayoutTool()):
+        await exc.execute_tool_call(tc)
+    assert FakeCanvasLayoutTool.seen["canvas_id"] == "cv-999"
+
+
+async def test_context_skipped_for_fixed_signature_tool():
+    """签名不接受该参数的工具不被注入，避免 TypeError。"""
+    FakeFixedSignatureTool.seen = {}
+    exc = ToolExecutor(user_id="u1", db_session=None, context={"canvas_id": "cv-123"})
+    tc = {"id": "call_1", "name": "some_fixed_tool", "arguments": json.dumps({"title": "t"})}
+    with patch("app.services.agents.tool_executor.ToolRegistry.get", return_value=FakeFixedSignatureTool()):
+        r = await exc.execute_tool_call(tc)
+    assert not r.is_error, f"不应因注入而抛错: {r.result}"
+    assert FakeFixedSignatureTool.seen == {"title": "t"}
+
+
+class FakeLedgerAwareTool:
+    """假画布工具（**kwargs）：记录是否收到台账对象。"""
+
+    seen: dict = {}
+
+    async def execute(self, user_id: str = "", db_session=None, **kwargs) -> str:
+        FakeLedgerAwareTool.seen = {"ledger": kwargs.get("canvas_ledger"), "canvas_id": kwargs.get("canvas_id")}
+        return json.dumps({"ok": True})
+
+
+async def test_context_injects_canvas_ledger_instance():
+    """台账对象随上下文注入画布工具（每个 LLM 轮次新建执行器，台账必须能传进去）。"""
+    from app.services.canvas_tools import CanvasActionLedger
+
+    FakeLedgerAwareTool.seen = {}
+    ledger = CanvasActionLedger()
+    exc = ToolExecutor(user_id="u1", db_session=None,
+                       context={"canvas_id": "cv-1", "canvas_ledger": ledger})
+    tc = {"id": "call_1", "name": "add_text_block", "arguments": "{}"}
+    with patch("app.services.agents.tool_executor.ToolRegistry.get", return_value=FakeLedgerAwareTool()):
+        r = await exc.execute_tool_call(tc)
+    assert not r.is_error
+    assert FakeLedgerAwareTool.seen["ledger"] is ledger, "必须是同一个台账实例（否则跨轮次失忆）"
+    assert FakeLedgerAwareTool.seen["canvas_id"] == "cv-1"

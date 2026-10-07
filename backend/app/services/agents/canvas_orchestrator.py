@@ -132,9 +132,13 @@ class CanvasOrchestrator:
         history: list[dict],
         user_id: str,
         available_datasources: list[dict],
+        canvas_id: str = "",
         **kwargs,
     ) -> AsyncIterator[dict]:
         """流式执行：报告骨架规划 → 落块执行 → 总结。
+
+        canvas_id 由调用方（画布入口）传入并写入 state，执行器据此为画布工具
+        自动注入画布上下文（LLM 无需也不应自行填写）。
 
         事件类型：status / plan / tool_call / tool_result / text / done / error
         """
@@ -145,6 +149,10 @@ class CanvasOrchestrator:
 
         async def run() -> None:
             state_sink: dict = {}
+            # 本轮画布动作台账：一次运行内共享，让模型看得到"自己刚删/刚加了什么"
+            from app.services.canvas_tools import CanvasActionLedger
+
+            ledger = CanvasActionLedger()
             try:
                 from app.services.observability import get_observer
 
@@ -156,7 +164,7 @@ class CanvasOrchestrator:
                     metadata={"user_msg_length": len(user_msg), "history_length": len(history or [])},
                 ) as trace:
                     await self.graph.invoke(
-                        {"user_id": user_id},
+                        {"user_id": user_id, "canvas_id": canvas_id},
                         user_msg=user_msg,
                         history=history or [],
                         available_datasources=available_datasources or [],
@@ -164,6 +172,7 @@ class CanvasOrchestrator:
                         emit=emit,
                         trace=trace,
                         state_sink=state_sink,
+                        canvas_ledger=ledger,
                     )
             except Exception as e:
                 logger.exception("[canvas_orchestrator] 图执行异常: %s", e)
@@ -346,6 +355,10 @@ class CanvasOrchestrator:
             memo=shared.get("tool_memo"),
             memo_locks=shared.get("tool_memo_locks"),
             allowed_tools=self.extra_plannable_tools or None,
+            # 画布上下文由系统绑定：get_canvas_layout 等工具缺参时自动补 canvas_id；
+            # 台账随本轮运行共享，工具据此校验存在性并让快照反映本轮动作
+            context={"canvas_id": str(state.get("canvas_id") or ""),
+                     "canvas_ledger": shared.get("canvas_ledger")},
         )
 
         context = self._build_executor_context(state, step, results, **shared)

@@ -15,6 +15,9 @@ class DuckDBClient:
     _lock: threading.Lock = threading.Lock()
     _conn_lock: threading.Lock = threading.Lock()
     _conn: duckdb.DuckDBPyConnection | None = None
+    # 已 ATTACH 的外部数据库 schema 缓存：首次 attach 后复用，避免每次查询重复 DETACH+ATTACH。
+    # 进程重启后为空 → 首次查询自然重新 attach（跨重启旧连接失效问题由"重建"覆盖）。
+    _attached_cache: set[str] = set()
 
     def __new__(cls) -> "DuckDBClient":
         with cls._lock:
@@ -108,6 +111,33 @@ class DuckDBClient:
             else:
                 result = conn.execute(query)
             return result.fetchdf()
+
+    def ensure_attached(self, schema_name: str, attach_sql: str, *, force: bool = False) -> bool:
+        """确保外部数据库已 ATTACH 到 DuckDB；已附加则直接复用，避免重复建连。
+
+        首次对该 schema 调用时执行 ATTACH；后续调用命中进程内缓存直接跳过。
+        进程重启后缓存为空，首个请求自然重新 ATTACH（覆盖跨重启旧连接失效场景）。
+        若连接信息发生变化（如数据源同步、密码轮换），传 `force=True` 强制重建。
+
+        Args:
+            schema_name: ATTACH 使用的 schema（database）名。
+            attach_sql: 由对应连接器生成的完整 ATTACH SQL。
+            force: 置 True 时跳过缓存，DETACH 旧连接后重新 ATTACH。
+
+        Returns:
+            True 表示本次实际执行了 ATTACH（新建连接）；False 表示复用了已有连接。
+        """
+        if not force and schema_name in self._attached_cache:
+            return False
+        with self._conn_lock:
+            # 先清理同名残留（schema 不存在时 DETACH 会报错，忽略）
+            try:
+                self.execute(f'DETACH "{schema_name}"')
+            except Exception:
+                pass
+            self.execute(attach_sql)
+            self._attached_cache.add(schema_name)
+        return True
 
     def get_schema_name(self, user_id: str | object, datasource_id: str | object,
                         datasource_name: str = "", db_name: str = "") -> str:

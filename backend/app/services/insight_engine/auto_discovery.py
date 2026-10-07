@@ -254,13 +254,9 @@ async def scan_datasource(db, datasource, user_id) -> list:
     conn_info["user"] = conn_info.get("username", "postgres")
     conn_info["database"] = conn_info.get("db_name", "")
 
-    # ATTACH (DETACH first to ensure fresh connection)
-    try:
-        duckdb_client.execute(f'DETACH "{schema_name}"')
-    except Exception:
-        pass  # schema not attached yet, ignore
+    # 首次 ATTACH 后复用连接
     attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-    duckdb_client.execute(attach_sql)
+    duckdb_client.ensure_attached(schema_name, attach_sql)
 
     # Fetch all columns of all public tables in ONE query (lightweight, no sample values)
     rows = duckdb_client.fetchall(f'''

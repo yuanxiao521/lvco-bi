@@ -1,9 +1,12 @@
 import json
+import logging
 from collections.abc import AsyncIterator
 
 import httpx
 
 from app.config import Settings, settings
+
+logger = logging.getLogger("lvco.llm")
 
 
 class AINotConfiguredError(Exception):
@@ -70,6 +73,27 @@ class LLMClient:
             body["enable_thinking"] = enable_thinking
         return body
 
+    def _log_usage(self, usage: dict) -> None:
+        """统一记录一次调用的 token 与缓存命中（成本分析的基础数据）。"""
+        if not usage:
+            return
+        details = usage.get("prompt_tokens_details") or {}
+        cached = int(details.get("cached_tokens") or usage.get("prompt_cache_hit_tokens") or 0)
+        logger.info(
+            "[llm] call model=%s in=%d out=%d cached=%d",
+            self._settings.openai_model,
+            int(usage.get("prompt_tokens") or 0),
+            int(usage.get("completion_tokens") or 0),
+            cached,
+        )
+
+    def _log_stream_usage(self, usage: dict) -> None:
+        """流式调用在 [DONE] 前补发的 usage chunk（include_usage 开启后才有）。"""
+        if usage:
+            self._log_usage(usage)
+            return
+        logger.info("[llm] call stream=1 usage=missing（服务端未返回 usage，可能是流被中途断开）")
+
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -110,14 +134,22 @@ class LLMClient:
         message = choices[0].get("message") or {}
         content = message.get("content")
         content = content if isinstance(content, str) else ""
+        usage = data.get("usage") or {}
+        # 无条件记录：usage 是服务端每次都会返回的，与调用方是否要 meta 无关。
+        # 否则"没显式要 usage 的调用点"完全不产生 token 数据，成本账单永远算不全。
+        self._log_usage(usage)
         if not return_usage:
             return content
-        usage = data.get("usage") or {}
-        return content, {
+        details = usage.get("prompt_tokens_details") or {}
+        cached = int(details.get("cached_tokens") or usage.get("prompt_cache_hit_tokens") or 0)
+        meta = {
             "model": data.get("model") or body.get("model") or self._settings.openai_model,
             "input": int(usage.get("prompt_tokens") or 0),
             "output": int(usage.get("completion_tokens") or 0),
         }
+        if cached:
+            meta["cached"] = cached
+        return content, meta
 
     async def stream_chat(
         self,
@@ -134,6 +166,10 @@ class LLMClient:
             max_tokens=max_tokens,
             stream=True,
         )
+        # 让服务端在流末尾补一个 usage chunk：否则流式调用完全不产生 token 数据，
+        # 成本分析会漏掉最重的那些调用（执行器/汇总都是流式出字的）。
+        body["stream_options"] = {"include_usage": True}
+        stream_usage: dict = {}
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             async with client.stream(
                 "POST", url, headers=self._headers(), json=body
@@ -153,12 +189,15 @@ class LLMClient:
                     payload = stripped[5:].strip()
                     if not payload or payload == "[DONE]":
                         if payload == "[DONE]":
+                            self._log_stream_usage(stream_usage)
                             return
                         continue
                     try:
                         chunk = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    if chunk.get("usage"):
+                        stream_usage = chunk["usage"]
                     choices = chunk.get("choices") or []
                     if not choices:
                         continue

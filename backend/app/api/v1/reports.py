@@ -10,6 +10,7 @@ from pydantic import Field
 from app.api.deps import get_current_user, get_report_service
 from app.models.user import User
 from app.schemas import CamelModel, SuccessResponse
+from app.services.chart_export import build_option, render_options_to_svg_uris
 from app.services.pdf_export import render_report_html
 from app.services.report_service import ReportService
 from app.services.storage_service import storage
@@ -194,6 +195,8 @@ async def export_report_pdf(
     # Process blocks: convert chart blocks to images
     from app.services.chart_renderer import render_chart
     processed_blocks = []
+    # 待批量渲染成 SVG 的图表块（与前端画布同一份 ECharts option），渲染完覆盖 matplotlib 结果
+    pending_svgs: list[tuple[dict, dict]] = []
     for block in blocks:
         block_copy = dict(block) if isinstance(block, dict) else block
         btype = str(block_copy.get("type", block_copy.get("blockType", ""))).strip().lower()
@@ -213,6 +216,14 @@ async def export_report_pdf(
             chart_images: list[str] = []
             chart_result = block_copy.get("_chartResult")
             chart_result_used = False
+
+            # 0. 首选：复用 render_chart 的 ECharts option 服务端渲染 SVG（与前端同一引擎/配色）
+            if isinstance(chart_result, dict) and chart_result.get("columns") and chart_result.get("rows"):
+                option = await build_option(
+                    chart_type, title, chart_result["columns"], chart_result["rows"]
+                )
+                if option:
+                    pending_svgs.append((block_copy, option))
 
             # 1. 优先取 _chartResult 的真实查询结果（前端自动保存嵌入）
             if isinstance(chart_result, dict) and chart_result.get("rows"):
@@ -261,6 +272,15 @@ async def export_report_pdf(
                 block_copy["_chart_images"] = chart_images
                 block_copy["_resolved_chart_type"] = chart_type
         processed_blocks.append(block_copy)
+
+    # 批量渲染 SVG（一次浏览器渲染全部图），成功则覆盖该块的 matplotlib PNG
+    if pending_svgs:
+        svg_uris = await render_options_to_svg_uris([opt for _, opt in pending_svgs])
+        for (blk, _), uri in zip(pending_svgs, svg_uris):
+            if uri:
+                blk["_chart_image"] = uri
+                blk["_chart_images"] = [uri]
+        logger.info("report pdf svg rendered %d/%d", sum(1 for u in svg_uris if u), len(svg_uris))
 
     html = render_report_html(
         title=report.title,

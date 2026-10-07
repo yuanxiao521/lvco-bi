@@ -320,34 +320,6 @@ async def decide_action(
 
 # ── 首轮合并调用：意图 + 决策 一次 LLM 请求 ────────────────────────────────
 
-# 附在 LEAD_INTENT_SYSTEM + LEAD_DECISION_SYSTEM 之后，说明合并调用的职责与输出字段
-_MERGED_SYSTEM_TAIL = (
-    "════════ 首轮合并调用说明 ════════\n"
-    "本次调用同时负责【意图识别】与【决策】两项任务（仅首轮如此，后续轮次只做决策）。\n"
-    "你必须先按上方意图规则识别当前用户消息，得到 intent，再按上方决策规则决定下一步 action。\n"
-    "输出 JSON 必须同时包含两组字段：\n"
-    "- 意图字段：intent / confidence / needs_plan / slots\n"
-    "- 决策字段：action / tool_name / tool_args / direct_text / reason / complexity\n"
-    "示例：{\"intent\": \"analysis\", \"confidence\": 0.95, \"needs_plan\": true, \"slots\": {\"metric\": \"销售额\"}, "
-    "\"action\": \"call_analysis\", \"tool_name\": \"run_analysis\", \"tool_args\": {\"goal\": \"分析2024年销售额趋势\"}, "
-    "\"direct_text\": null, \"reason\": \"多步分析任务\", \"complexity\": \"complex\"}\n"
-    "更多动作示例（按场景选一个）：\n"
-    "- 需要用户澄清/补信息时（必须 action=ask_user，绝不能 reason 说该问、action 却填 call_analysis）："
-    "{\"intent\": \"canvas_edit\", \"confidence\": 0.9, \"needs_plan\": false, \"slots\": {}, "
-    "\"action\": \"ask_user\", \"tool_name\": null, \"tool_args\": {}, \"direct_text\": \"请告诉我要修改哪个块\", "
-    "\"reason\": \"缺少目标块信息，需要澄清\", \"complexity\": \"simple\"}\n"
-    "- 简单问答可直接给文本（action=answer）：{\"intent\": \"chat\", \"confidence\": 0.9, \"needs_plan\": false, \"slots\": {}, "
-    "\"action\": \"answer\", \"tool_name\": null, \"tool_args\": {}, \"direct_text\": \"好的，请问需要分析哪部分数据？\", "
-    "\"reason\": \"闲聊直接回答\", \"complexity\": \"simple\"}\n"
-    "- 主目标已完成、无新任务（action=stop）：{\"intent\": \"analysis\", \"confidence\": 0.9, \"needs_plan\": false, \"slots\": {}, "
-    "\"action\": \"stop\", \"tool_name\": null, \"tool_args\": {}, \"direct_text\": null, "
-    "\"reason\": \"子任务已完成，主目标达成\", \"complexity\": \"simple\"}\n"
-    "【自洽硬规则】reason 与 action 必须一致：若判断需要先问用户（缺信息/缺目标块），action 必须填 ask_user。"
-    "【重新派发规则】若【上一轮子任务评估】为'未达标'且你决定再次 call_analysis，"
-    "必须附加 guidance 字段（1-3 句：点明上轮问题 + 本轮如何改进），并在 tool_args.goal 中明确本轮目标；"
-    "若评估已达标且无新任务，必须 action=stop，不要重复执行。"
-)
-
 
 async def decide_action_merged(
     user_msg: str,
@@ -370,14 +342,9 @@ async def decide_action_merged(
     Returns:
         MergedOutcome；任何异常均不抛出，`intent.degraded` / `decision.degraded` 标记兜底。
     """
-    from app.services.ai_prompts import LEAD_DECISION_SYSTEM, LEAD_INTENT_SYSTEM
+    from app.services.ai_prompts import LEAD_MERGED_SYSTEM
 
-    # 合并 system：意图规则 + 决策规则（去掉决策段顶部"意图识别已完成"的旧表述，改为本调用自行识别）
-    decision_part = LEAD_DECISION_SYSTEM.replace(
-        "意图识别已完成，你的职责是决定",
-        "你的职责是决定",
-    )
-    system = f"{LEAD_INTENT_SYSTEM}\n\n{decision_part}\n\n{_MERGED_SYSTEM_TAIL}"
+    system = LEAD_MERGED_SYSTEM
     ds_block, canvas_block, assessment_block, summary_block = _build_context_blocks(
         datasources, subtask_summaries, canvas_layout
     )

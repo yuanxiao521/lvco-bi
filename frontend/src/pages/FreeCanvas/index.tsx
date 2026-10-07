@@ -1,5 +1,5 @@
 // 导入 React hooks
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 // 导入路由参数 hook
 import { useSearchParams } from "react-router-dom";
 // 导入 Lucide 图标组件
@@ -12,6 +12,7 @@ import {
   Loader2,
   CheckCircle2,
   Check,
+  LayoutGrid,
 } from "lucide-react";
 // 导入子组件：字段面板、画布块渲染、配置面板、AI 助手、画布列表侧边栏
 import FieldPanel from "../../components/blocks/FieldPanel";
@@ -51,7 +52,8 @@ import type { MetricDefinition } from "../../types/metric";
 import { useToast } from "../../components/ui/Toast";
 // 导入默认模板工具函数
 import { findDefaultTemplate, isSystemTemplateId } from "../../data/defaultTemplates";
-import { REPORT, nextChartSlot, nextFullWidthSlot, applyReportLayout } from "../../utils/reportLayout";
+import { REPORT, resolveGeometry, nextChartSlot, nextFullWidthSlot, applyReportLayout } from "../../utils/reportLayout";
+import { remapChartsForDatasource } from "../../utils/canvasDatasource";
 // 跨图表联动筛选：图表 → store → 其他图表重查
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
 import { Filter as FilterIcon, RefreshCw } from "lucide-react";
@@ -69,6 +71,19 @@ const DEFAULT_BLOCKS: CanvasBlock[] = [
 
 // localStorage 存储键名：画布草稿数据
 const CANVAS_DRAFT_KEY = "lvco:canvas:draft:v1";
+
+// 画布块的稳定 ID：Agent 的 update_chart_block / remove_block 靠 id 精确指代某一块。
+// 图表块一直有 id（chart_xxx），而文本/标题/图片块此前没有 → Agent 拿不到 id，无法删除。
+const newBlockId = (prefix: string) =>
+  `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+// 给缺失 blockId 的块补上 id（加载老画布/模板/草稿时归一化，随后由自动保存落库）
+const ensureBlockIds = (blocks: CanvasBlock[]): CanvasBlock[] =>
+  blocks.map((b) => {
+    const rec = b as Record<string, unknown>;
+    if (typeof rec.blockId === "string" && rec.blockId) return b;
+    return { ...rec, blockId: newBlockId(String(rec.type ?? "block")) };
+  });
 
 // 画布草稿的数据结构，用于 localStorage 持久化
 interface CanvasDraft {
@@ -184,6 +199,27 @@ export default function FreeCanvas() {
   // 图表渲染引擎
   const [renderer, setRenderer] = useState<string>("echarts");
 
+  // 画布内容区实宽（px）：报告式布局据此推导列数/列宽，不再写死 980。
+  // 0 表示尚未测量，布局层会回退到兜底宽度。
+  const [canvasWidth, setCanvasWidth] = useState(0);
+  const canvasAreaRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    // p-6 = 24px 内边距 ×2，实测内容宽要减掉
+    const measure = () => setCanvasWidth(Math.max(0, el.clientWidth - 48));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  /** 当前画布几何（列数/列宽/列 x），按实宽推导 */
+  const geometry = useMemo(() => resolveGeometry(canvasWidth), [canvasWidth]);
+
   // 新建块的统一布局：正方形 250x250，画布偏左、跟在已有块下面
   const NEW_BLOCK_SIZE = 250;
   const GAP = 20;
@@ -295,7 +331,7 @@ export default function FreeCanvas() {
             }
             return b;
           });
-          setBlocks(cleaned);
+          setBlocks(ensureBlockIds(cleaned));
           // 保留模板预置的 chartConfigs（每个图表块的查询配置）
           const templateConfigs: Record<string, ChartQueryConfig> = {};
           if (tpl.chartConfigs) {
@@ -382,7 +418,7 @@ export default function FreeCanvas() {
               }
               return b;
             });
-            setBlocks(cleaned);
+            setBlocks(ensureBlockIds(cleaned));
             setChartConfigs(extractedConfigs);
             setChartResults(extractedResults);
             setSelectedDatasourceId(source.datasourceId ?? null);
@@ -426,7 +462,7 @@ export default function FreeCanvas() {
         return b;
       });
 
-      setBlocks(cleanedBlocks);
+      setBlocks(ensureBlockIds(cleanedBlocks));
       setChartConfigs(extractedConfigs);
       setChartResults(extractedResults);
       if (transferData.datasourceId) {
@@ -446,7 +482,7 @@ export default function FreeCanvas() {
     // 3. 回退：从 localStorage 草稿中恢复
     const draft = readDraft();
     if (draft) {
-      if (Array.isArray(draft.blocks) && draft.blocks.length > 0) setBlocks(draft.blocks);
+      if (Array.isArray(draft.blocks) && draft.blocks.length > 0) setBlocks(ensureBlockIds(draft.blocks));
       if (draft.chartConfigs && typeof draft.chartConfigs === "object")
         setChartConfigs(draft.chartConfigs);
       if (draft.chartResults && typeof draft.chartResults === "object")
@@ -721,19 +757,44 @@ export default function FreeCanvas() {
     return created.id;
   };
 
-  // 切换数据源时重置画布状态，避免旧字段污染新数据源查询
-  const handleSelectDatasource = (id: string) => {
-    if (id !== selectedDatasourceId) {
-      setCanvasId(null);
-      // 清空旧的维度/度量/筛选/图表类型，防止旧数据源的字段在新数据源上查询失败
-      setDimensions([]);
-      setMeasures([]);
-      setFilters([]);
-      setChartType("bar");
-      setRenderer("echarts");
-      setSelectedBlockIdx(null);
-    }
+  // 切换数据源：画布是"画布级单一数据源"，换源后旧图表的字段引用全部失效。
+  // 处理：① 有画布时把画布的数据源改绑到新源（不再偷偷新建画布）；
+  //       ② 画布上的图表保留块本身，但清空维度/度量、丢弃旧结果 → 标记为"待重配"；
+  //       ③ 提示用户哪几张图需要重新选字段，避免"旧源的块被带进新画布"混源。
+  const handleSelectDatasource = async (id: string) => {
+    if (id === selectedDatasourceId) return;
     setSelectedDatasourceId(id);
+    // 清空旧的维度/度量/筛选/图表类型，防止旧数据源的字段在新数据源上查询失败
+    setDimensions([]);
+    setMeasures([]);
+    setFilters([]);
+    setChartType("bar");
+    setSelectedBlockIdx(null);
+
+    if (canvasId) {
+      try {
+        await updateCanvas(canvasId, { datasourceId: id });
+      } catch (e: any) {
+        toast.error(`切换数据源失败：${e?.message || "请重试"}`);
+        return;
+      }
+    }
+    const { chartConfigs: nextConfigs, chartResults: nextResults, affected } =
+      remapChartsForDatasource(blocks, chartConfigs, chartResults, id);
+    setChartConfigs(nextConfigs);
+    setChartResults(nextResults);
+    setBlocks((prev) =>
+      prev.map((b) =>
+        (b as { type?: unknown }).type === "chart"
+          ? ({ ...(b as Record<string, unknown>), datasourceId: id, renderer } as CanvasBlock)
+          : b,
+      ),
+    );
+    if (affected > 0) {
+      toast.info(`已切换到新数据源，${affected} 张图需要重新选择维度/度量`);
+    } else {
+      toast.success("已切换数据源");
+    }
   };
 
   // 应用查询配置：执行图表查询，覆盖已有图表块或创建新的图表块
@@ -869,7 +930,7 @@ export default function FreeCanvas() {
   const handleAddTextBlockAtIdx = (index: number, block: CanvasBlock) => {
     setBlocks((prev) => {
       const next = [...prev];
-      next.splice(index + 1, 0, block);
+      next.splice(index + 1, 0, ensureBlockIds([block])[0]);
       return next;
     });
   };
@@ -908,17 +969,67 @@ export default function FreeCanvas() {
 
   // 添加新的文本块
   const handleAddTextBlock = () => {
-    setBlocks((prev) => [...prev, { type: "text", content: "新文本块...", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    setBlocks((prev) => [...prev, { type: "text", blockId: newBlockId("text"), content: "新文本块...", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
   };
 
   // 添加新的一级标题块
   const handleAddH1Block = () => {
-    setBlocks((prev) => [...prev, { type: "h1", content: "新标题", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    setBlocks((prev) => [...prev, { type: "h1", blockId: newBlockId("h1"), content: "新标题", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
   };
 
   // 添加新的图片块
   const handleAddImageBlock = () => {
-    setBlocks((prev) => [...prev, { type: "image", src: "", width: NEW_BLOCK_SIZE, height: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    setBlocks((prev) => [...prev, { type: "image", blockId: newBlockId("image"), src: "", width: NEW_BLOCK_SIZE, height: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+  };
+
+  // 手动整理布局：按报告式布局（标题/文本通栏、图表双列）重排全部块。
+  // 与 Agent 落块后的自动重排同一套几何，按画布实宽自适应。
+  const handleArrangeLayout = () => {
+    if (blocks.length === 0) {
+      toast.info("画布为空，暂无可整理的块");
+      return;
+    }
+    setBlocks((prev) => applyReportLayout(prev, { width: canvasWidth }));
+    toast.success("已按报告式布局整理画布");
+  };
+
+  // 复制块（⋯ 菜单）：副本紧随原块插入，位置取当前最浅列的下一格避免重叠；
+  // 图表块连查询配置/结果一起复制到新 blockId 下
+  const handleDuplicateBlock = (index: number) => {
+    const src = blocks[index];
+    if (!src) return;
+    const isChart = (src as { type?: unknown }).type === "chart";
+    const newId = newBlockId(String((src as { type?: unknown }).type ?? "block"));
+    const slot = isChart
+      ? nextChartSlot(blocks, { width: canvasWidth })
+      : nextFullWidthSlot(blocks, { width: canvasWidth });
+    const clone = { ...(src as Record<string, unknown>), blockId: newId, x: slot.x, y: slot.y } as CanvasBlock;
+    setBlocks((prev) => {
+      const next = [...prev];
+      next.splice(index + 1, 0, clone);
+      return next;
+    });
+    const srcId = (src as { blockId?: unknown }).blockId;
+    if (isChart && typeof srcId === "string") {
+      const cfg = chartConfigs[srcId];
+      const res = chartResults[srcId];
+      if (cfg) setChartConfigs((prev) => ({ ...prev, [newId]: cfg }));
+      if (res) setChartResults((prev) => ({ ...prev, [newId]: res }));
+    }
+    toast.success("已复制块");
+  };
+
+  // 上移/下移块（⋯ 菜单）：与相邻块交换顺序后按报告式布局重排
+  // （块的顺序决定报告结构，重排才能体现换序结果）
+  const handleMoveBlock = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    setBlocks((prev) => {
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return applyReportLayout(next, { width: canvasWidth });
+    });
+    toast.success(dir < 0 ? "已上移，并重排布局" : "已下移，并重排布局");
   };
 
   /** AI 画布助手推荐图表配置时，直接应用到画布 */
@@ -1016,10 +1127,10 @@ export default function FreeCanvas() {
         }
         const title = block.title || `${ct} 图表`;
         setBlocks((prev) => {
-          const { x, y } = nextChartSlot(prev);
+          const { x, y } = nextChartSlot(prev, { width: canvasWidth });
           return [
             ...prev,
-            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: REPORT.chartW, height: REPORT.chartH, x, y },
+            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: geometry.chartW, height: REPORT.chartH, x, y },
           ];
         });
         scrollToBlock(blockId);
@@ -1032,10 +1143,11 @@ export default function FreeCanvas() {
         const block = action.block || {};
         const content = block.content || "";
         const blockType = block.blockType || "text";
+        const type = blockType === "h1" || blockType === "h2" ? blockType : "text";
+        const blockId = newBlockId(type);
         setBlocks((prev) => {
-          const { x, y } = nextFullWidthSlot(prev);
-          const type = blockType === "h1" || blockType === "h2" ? blockType : "text";
-          return [...prev, { type, content, width: REPORT.fullW, x, y }];
+          const { x, y } = nextFullWidthSlot(prev, { width: canvasWidth });
+          return [...prev, { type, blockId, content, width: geometry.fullW, x, y }];
         });
         break;
       }
@@ -1089,7 +1201,7 @@ export default function FreeCanvas() {
       // 全量重排：报告式布局（h1/h2/text 通栏 + 图表双列网格）
       // 系统自动触发（auto:true，编排器落块后兜底）不弹 toast，避免批量落块时刷屏
       case "arrange_layout": {
-        setBlocks((prev) => applyReportLayout(prev));
+        setBlocks((prev) => applyReportLayout(prev, { width: canvasWidth }));
         if (!action.auto) toast.success("已按报告式布局重排画布");
         break;
       }
@@ -1418,7 +1530,7 @@ export default function FreeCanvas() {
         }
         return b;
       });
-      setBlocks(cleaned);
+      setBlocks(ensureBlockIds(cleaned));
       setChartConfigs(extractedConfigs);
       setChartResults(extractedResults);
       setSelectedDatasourceId(source.datasourceId ?? null);
@@ -1554,9 +1666,9 @@ export default function FreeCanvas() {
       setDraggedType(null);
       return;
     }
-    if (dragType === "h1") setBlocks((prev) => [...prev, { type: "h1", content: "新标题", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
-    else if (dragType === "text") setBlocks((prev) => [...prev, { type: "text", content: "新文本块...", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
-    else if (dragType === "image") setBlocks((prev) => [...prev, { type: "image", src: "", width: NEW_BLOCK_SIZE, height: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    if (dragType === "h1") setBlocks((prev) => [...prev, { type: "h1", blockId: newBlockId("h1"), content: "新标题", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    else if (dragType === "text") setBlocks((prev) => [...prev, { type: "text", blockId: newBlockId("text"), content: "新文本块...", width: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
+    else if (dragType === "image") setBlocks((prev) => [...prev, { type: "image", blockId: newBlockId("image"), src: "", width: NEW_BLOCK_SIZE, height: NEW_BLOCK_SIZE, x: newBlockCenterX(), y: newBlockCenterY(prev) }]);
     else if (dragType === "chart") {
       const blockId = `chart_${Date.now()}`;
       const config: ChartQueryConfig = {
@@ -1706,6 +1818,7 @@ export default function FreeCanvas() {
 
         {/* 中间：画布编辑区，支持拖拽放置和点阵背景 */}
         <div
+          ref={canvasAreaRef}
           className={`flex-1 overflow-auto p-6 relative transition-colors duration-150 ${
             draggedType
               ? "bg-primary-light/40 ring-2 ring-dashed ring-primary/40 ring-inset"
@@ -1765,6 +1878,16 @@ export default function FreeCanvas() {
               <RefreshCw className={`w-3.5 h-3.5 ${refreshingAll ? "animate-spin" : ""}`} />
               <span>{refreshingAll ? "刷新中..." : "强制刷新"}</span>
             </button>
+            {/* 整理布局：手动触发报告式重排（标题/文本通栏、图表双列，按画布实宽自适应） */}
+            <button
+              onClick={handleArrangeLayout}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-border-light rounded-[6px] text-[12px] text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
+              title="按报告式布局整理：标题/文本通栏、图表双列排布"
+              type="button"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>整理布局</span>
+            </button>
             <div className="h-5 w-px bg-border-light mx-1" />
 
             {toolbarButtons.map(({ icon, label, onClick, dragType }) => (
@@ -1812,6 +1935,8 @@ export default function FreeCanvas() {
             onSelectBlock={setSelectedBlockIdx}
             highlightBlockId={highlightBlockId}
             isStreaming={aiStreaming}
+            onDuplicateBlock={handleDuplicateBlock}
+            onMoveBlock={handleMoveBlock}
           />
         </div>
 

@@ -383,6 +383,12 @@ class LeadAgent:
         holder: dict = {}
 
         async def _forward(ev: dict) -> None:
+            # 子执行器（CanvasOrchestrator / AgentOrchestrator / legacy）结束时也会 emit
+            # {"type":"done"}，那是"子任务结束"的内部标记，不能透传给客户端：
+            # 否则前端会在子任务落块完就把流标记完成（解锁输入、清 streaming 状态），
+            # 而外层 Lead 还在继续收尾（决策 stop / 记忆回流），出现"一次请求两个 done"。
+            if isinstance(ev, dict) and ev.get("type") == "done":
+                return
             await out_q.put(ev)
 
         async def _on_progress(p: StepProgress) -> None:

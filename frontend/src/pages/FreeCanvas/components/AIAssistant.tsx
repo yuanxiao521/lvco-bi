@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, memo } from "react";
-import { MessageCircle, Sparkles, X, Send, Loader2, GripVertical, Plus } from "lucide-react";
-import { useCanvasAssistantStore } from "../../../stores/canvasAssistantStore";
+import { MessageCircle, Sparkles, X, Send, Square, Loader2, GripVertical, Plus } from "lucide-react";
+import { useCanvasAssistantStore, abortCanvasStream, getActiveCanvasId } from "../../../stores/canvasAssistantStore";
 import type { CanvasAssistantCtx } from "../../../stores/canvasAssistantStore";
 import ActivityFeed from "./ActivityFeed";
 
@@ -322,12 +322,20 @@ export default memo(function AIAssistant({
     const cid = canvasId ?? null;
     const prev = prevCanvasIdRef.current;
     prevCanvasIdRef.current = cid;
-    // 首次挂载 / 值未变 / 画布落盘（null → ID）：只刷新会话列表
-    if (prev === cid || (prev === null && cid)) {
+    const storeCid = getActiveCanvasId();
+    // store 里保存的状态本来就属于本画布（同画布重新挂载/值未变）→ 只刷新列表
+    if (prev === cid || storeCid === cid) {
       void useCanvasAssistantStore.getState().refreshSessions(cid);
       return;
     }
-    // 真正的画布切换：ID → 另一个 ID / ID → null → 交 store 清空会话状态防串记忆
+    // 草稿落盘（store 里还没有归属画布、本次拿到真实 ID）→ 同一段对话，不重置
+    if (prev === null && cid && storeCid === null) {
+      void useCanvasAssistantStore.getState().refreshSessions(cid);
+      return;
+    }
+    // 真正的画布切换：ID → 另一个 ID / ID → null / 从别的画布重新挂载
+    // 后者最易漏：prev 引用随组件重挂载被重置为 null，只看 prev 会误判成"同一画布"，
+    // 于是上一个画布的历史/会话被原样显示到本画布上。
     useCanvasAssistantStore.getState().resetForCanvas(buildCtx());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId]);
@@ -520,12 +528,13 @@ export default memo(function AIAssistant({
                 className="flex-1 text-[12.5px] outline-none bg-transparent text-foreground placeholder:text-muted-foreground"
               />
               <button
-                onClick={() => handleSend()}
-                disabled={!inputValue.trim() || isStreaming}
+                onClick={() => (isStreaming ? abortCanvasStream() : handleSend())}
+                disabled={!isStreaming && !inputValue.trim()}
+                title={isStreaming ? "停止本轮生成" : "发送"}
                 className="p-1 rounded text-ai hover:bg-ai-light transition-colors disabled:opacity-50"
               >
                 {isStreaming ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Square className="w-3.5 h-3.5" fill="currentColor" />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}

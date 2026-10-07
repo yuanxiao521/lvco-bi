@@ -67,18 +67,25 @@ class ReactGraphAgent:
         db_session,
         initial_phase: str = "selecting",
         emit=None,
+        canvas_id: str = "",
     ) -> dict:
         """执行 ReAct 图，返回最终 state。
 
         emit: 异步事件回调（接收 tool_call/tool_result/chart/text 等事件），None 时静默。
+        canvas_id: 画布入口传入，写入 state 供执行器为画布工具自动注入上下文。
         """
         async def _noop(ev):
             pass
         emit_fn = emit or _noop
+        # 本轮画布动作台账：一次运行内共享（每个 LLM 轮次都会新建执行器，
+        # 台账必须挂在运行级，否则跨轮次就"失忆"）
+        from app.services.canvas_tools import CanvasActionLedger
+
         final_state = await self.graph.invoke(
             {
                 "messages": messages,
                 "user_id": user_id,
+                "canvas_id": canvas_id,
                 "phase": ConversationPhase(initial_phase) if isinstance(initial_phase, str) else initial_phase,
                 "executed_tool_names": [],
                 "consecutive_query_failures": 0,
@@ -88,6 +95,7 @@ class ReactGraphAgent:
             },
             db_session=db_session,
             emit=emit_fn,
+            canvas_ledger=CanvasActionLedger(),
         )
         # 观测：把汇总统计写入 trace metadata（迭代数/工具执行/熔断原因）
         if self.agent_trace is not None:
@@ -317,6 +325,10 @@ class ReactGraphAgent:
             db_session=db_session,
             emit=emit,
             trace=self.agent_trace,
+            # 画布上下文由系统绑定：get_canvas_layout 等工具缺参时自动补 canvas_id；
+            # 台账随本轮运行共享，工具据此校验存在性并让快照反映本轮动作
+            context={"canvas_id": str(state.get("canvas_id") or ""),
+                     "canvas_ledger": shared.get("canvas_ledger")},
         )
 
         has_error = False

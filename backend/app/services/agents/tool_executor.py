@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 from dataclasses import dataclass, field
@@ -110,6 +111,7 @@ class ToolExecutor:
         idempotent_tools: frozenset[str] = frozenset(),
         success_cached_tools: frozenset[str] = frozenset(),
         allowed_tools: set[str] | None = None,
+        context: dict | None = None,
     ):
         self.user_id = user_id
         self.db_session = db_session
@@ -118,12 +120,34 @@ class ToolExecutor:
         self.memo = memo
         self.memo_locks = memo_locks
         self.idempotent_tools = idempotent_tools
-        # 成功态缓存工具：结果成功才写 memo（error 不缓存，避免固化错误阻断自纠错）。
-        # 用于非幂等但静态数据下"同参数同结果"的工具（如 query_sql 任务内复用）。
+        # 成功态缓存：结果成功才写 memo（error 不缓存，避免固化错误阻断 LLM 自纠错）
         self.success_cached_tools = success_cached_tools
         # 入口工具白名单：非 None 时，白名单外的工具调用一律拒绝（受限入口防越权）。
         # None 表示不校验（普通 chat / react 路径保持原行为）。
         self.allowed_tools = allowed_tools
+        # 执行器级上下文（如画布入口的 canvas_id）：由系统绑定，缺省参数时自动补进工具
+        self.context = {k: v for k, v in (context or {}).items() if v}
+
+    def _inject_context(self, tool, targs: dict) -> dict:
+        """把执行器级上下文（如 canvas_id）补进本次工具参数。
+
+        画布入口的 canvas_id 由系统绑定（前端请求 → Lead ctx → 执行器），
+        不该让 LLM 抄写或猜测：它看不见 id 时只会留空导致工具报"缺少画布上下文"。
+        LLM 显式传入的同名参数优先；仅当工具签名能接收该参数时才注入，
+        避免给签名固定的工具塞参数抛 TypeError。
+        """
+        if not self.context:
+            return targs
+        try:
+            params = inspect.signature(tool.execute).parameters
+        except (TypeError, ValueError):
+            return targs
+        has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        extra = {
+            k: v for k, v in self.context.items()
+            if k not in targs and (has_var_kw or k in params)
+        }
+        return {**targs, **extra} if extra else targs
 
     async def execute_tool_call(self, tc: dict, args: dict | None = None) -> ToolCallResult:
         """解析 + 执行单个工具调用，返回结构化结果。
@@ -206,6 +230,7 @@ class ToolExecutor:
 
     async def _execute_once(self, tool, tname: str, targs: dict) -> str:
         """执行单次工具调用（观测 span + 异常兜底），返回结果字符串。"""
+        targs = self._inject_context(tool, targs)
         span_obj = None
         try:
             if self.trace is not None:

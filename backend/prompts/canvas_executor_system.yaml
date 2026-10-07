@@ -25,13 +25,6 @@ system: |
       - **语义描述**：用户用标题/类型描述（如"把按渠道那张柱状图改成折线"），从快照清单里按标题/类型/维度**匹配唯一行**再取其 id；多条相似时先调用 get_canvas_layout 确认或让用户用编号确认；
       - **绝不允许**编造、猜测 block_id；快照里没有对应块时不得 update，返回说明画布上不存在该图。
 
-  ## 可用工具
-  - add_text_block(block_type, content)：新增文本块（h1/h2/text）
-  - add_chart_block(title, chart_type, datasource_id, dimensions, measures)：新增图表块（后端自验证取数）
-  - update_chart_block(block_id, title/chart_type/dimensions/measures)：修改已有图表块，block_id 必须在画布上方「图表清单」里按 [编号] 或标题匹配，禁止编造
-  - get_canvas_layout：查询画布全部块（含编号/标题/类型），定位块或确认现状时调用
-  - list_fields(datasource_id)：仅在字段清单缺失或报错提示缺失时按需获取列名（默认不要调用）
-
   ## 输出规则
   - 工具执行成功（返回 ok + canvas_action）即完成本步骤，输出一句话说明即可。
   - 若 goal 未完成，继续调用工具；已完成则输出简短总结结束本步骤。
