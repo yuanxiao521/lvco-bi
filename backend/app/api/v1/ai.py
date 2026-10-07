@@ -69,17 +69,32 @@ _SESSION_BUSY_MSG = "上一轮还在处理中，请等它结束后再发。"
 router = APIRouter(prefix="/ai", tags=["AI助手"])
 
 
-async def _load_memory_summary(db: AsyncSession, session_id) -> str | None:
-    """读取会话级压缩记忆，供本轮注入上下文（无会话/无记忆返回 None）。"""
+async def _load_session_memory(db: AsyncSession, session_id) -> tuple[str | None, int]:
+    """读取会话级记忆：长期摘要 + 已并入轮数进度（无会话/无记忆返回 (None, 0)）。"""
     if not session_id:
-        return None
+        return None, 0
     try:
         from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
         memory = await SQLAlchemyAIMemoryRepository(db).get_by_session(session_id)
-        return memory.summary if memory else None
+        if memory is None:
+            return None, 0
+        return memory.summary, int(memory.covered_rounds or 0)
     except Exception:
         _log.warning("load_ai_memory_failed", exc_info=True)
-        return None
+        return None, 0
+
+
+def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
+    """画布历史过滤：只跳过"空占位"的 assistant 行（保留有内容的助手消息，含反问/说明），
+    并按 id 排除本条用户消息（它由 Lead 统一 add_turn，避免窗口里重复）。"""
+    history: list[dict] = []
+    for pm in rows:
+        if current_msg_id is not None and getattr(pm, "id", None) == current_msg_id:
+            continue
+        if pm.role == AIMessageRole.assistant and not (pm.content or "").strip():
+            continue
+        history.append({"role": pm.role.value, "content": pm.content})
+    return history
 
 
 async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
@@ -1041,7 +1056,7 @@ async def data_chat_stream(
             except Exception:
                 _log.info("metrics context injection skipped", exc_info=True)
 
-            memory_summary = await _load_memory_summary(db, session_id)
+            memory_summary, memory_covered = await _load_session_memory(db, session_id)
 
             def _event_factory(db_session: AsyncSession):
                 """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。
@@ -1058,9 +1073,19 @@ async def data_chat_stream(
                         entry="chat",
                         datasource_id=body.datasource_id,
                         history_summary=memory_summary or "",
+                        memory_covered=memory_covered,
                         metrics_ctx=metrics_ctx_for_lead,
                     )
-                    for h in history:
+                    # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
+                    # 会统一 add_turn 当前消息——这里剔除尾部的本条，避免同一消息在窗口里出现两次。
+                    history_for_ctx = history
+                    if (
+                        history_for_ctx
+                        and history_for_ctx[-1].get("role") == "user"
+                        and history_for_ctx[-1].get("content") == body.message
+                    ):
+                        history_for_ctx = history_for_ctx[:-1]
+                    for h in history_for_ctx:
                         if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
                             lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
                     return _lead_stream_guard(
@@ -2103,6 +2128,7 @@ async def canvas_ai_chat(
                     return
 
             # ---- 2. 保存用户消息 + 占位 assistant 行（立即落库：断流/切页也不丢） ----
+            current_user_msg_id = None
             if session_id:
                 user_msg_model = AIMessage(
                     session_id=session_id,
@@ -2128,6 +2154,7 @@ async def canvas_ai_chat(
                 db.add(assistant_msg)
                 # 会话 + 用户消息 + 占位行一次性提交，保证客户端断开后历史仍可读到
                 await db.commit()
+                current_user_msg_id = user_msg_model.id
                 # Redis 任务态：标记 running（供"上次未完成"提示）
                 try:
                     get_cache_repository().set(
@@ -2148,16 +2175,15 @@ async def canvas_ai_chat(
                     await db.execute(
                         select(AIMessage)
                         .where(AIMessage.session_id == session_id)
-                        .order_by(AIMessage.created_at.desc())
+                        # 次级键 role 方向必须与 created_at 一致（都是 desc）：本轮随后会
+                        # reversed() 成全量正序，方向一致才能在反转后仍得到"提问在前"。
+                        # 反向会得到"答在问前"——有 tie 时 DESC+LIMIT 再反转 ≠ ASC。
+                        .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
                         .limit(12)
                     )
                 ).scalars().all()
                 prior_msgs.reverse()
-                for pm in prior_msgs:
-                    if pm.role == AIMessageRole.assistant:
-                        # 跳过刚保存的当前 user_msg 后的 assistant 消息（尚未生成）
-                        continue
-                    history.append({"role": pm.role.value, "content": pm.content})
+                history = _filter_canvas_history(prior_msgs, current_user_msg_id)
 
             # ---- 4. Agent 流式执行 ----
             # 画布有数据源（已绑定或平台已有）时直接进 analyzing，
@@ -2173,7 +2199,7 @@ async def canvas_ai_chat(
                 has_ds = datasource is not None
             canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
             # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
-            memory_summary = await _load_memory_summary(db, session_id)
+            memory_summary, memory_covered = await _load_session_memory(db, session_id)
 
             def _legacy_stream():
                 return ai_service.agent_stream(
@@ -2200,6 +2226,7 @@ async def canvas_ai_chat(
                     canvas_id=body.canvas_id,
                     datasource_id=str(datasource.id) if datasource else body.datasource_id,
                     history_summary=memory_summary or "",
+                    memory_covered=memory_covered,
                     metrics_ctx=metrics_ctx_for_lead,
                 )
                 for h in history:

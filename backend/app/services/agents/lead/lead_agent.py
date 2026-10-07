@@ -44,10 +44,116 @@ _ANSWER_SYSTEM = (
     "时必须引用清单里的指标 key 与名称，不要把数据源裸字段（如 total_amount）当作指标名。"
 )
 
-_SUMMARY_SYSTEM = (
-    "把下面这段对话压缩为不超过 200 字的中文摘要，"
-    "保留关键事实、涉及的数据源、已完成的动作与仍未解决的问题。只输出摘要正文。"
+_MEMORY_MERGE_SYSTEM = (
+    "把【已有长期记忆】与【新增对话】合并为一段不超过 200 字的中文摘要："
+    "保留已有记忆里的关键事实、口径与结论（不要丢）；剔除重复内容；"
+    "把新增对话中有长期价值的信息（结论、数字口径、数据源、未解决问题）并入。只输出摘要正文。"
 )
+
+
+def _resolve_memory_progress(total_rounds: int, covered_rounds: int) -> int:
+    """归一化记忆合并进度：越界/脏数据（旧语义混杂、负数）一律按 0 处理。
+
+    covered_rounds 契约：已并入长期记忆的用户轮数（累计、单调递增）。
+    历史存量里可能混有旧语义（消息条数等），越界时归零——最多多合并一次，不丢内容。
+    """
+    if total_rounds <= 0:
+        return 0
+    if 0 <= covered_rounds <= total_rounds:
+        return covered_rounds
+    return 0
+
+
+def _should_merge_memory(total_rounds: int, covered_rounds: int, min_rounds: int) -> bool:
+    """节流判定：未合并的用户轮数达到 min_rounds 才触发一次记忆合并。"""
+    if total_rounds <= 0 or min_rounds <= 0:
+        return False
+    return (total_rounds - _resolve_memory_progress(total_rounds, covered_rounds)) >= min_rounds
+
+
+def _build_memory_merge_input(
+    old_summary: str,
+    new_messages: list[dict],
+    per_msg_limit: int = 800,
+    total_limit: int = 6000,
+) -> str:
+    """组装记忆合并输入：【已有长期记忆】+【新增对话】（逐条截断 + 总量封顶）。"""
+    parts: list[str] = []
+    if (old_summary or "").strip():
+        parts.append(f"【已有长期记忆】\n{old_summary.strip()}")
+    lines: list[str] = []
+    for m in new_messages or []:
+        content = str(m.get("content", "") or "").strip()
+        if not content:
+            continue
+        role = "用户" if m.get("role") == "user" else "助手"
+        lines.append(f"{role}: {content[:per_msg_limit]}")
+    if lines:
+        new_text = "\n".join(lines)[:total_limit]
+        parts.append(f"【新增对话】\n{new_text}")
+    return "\n\n".join(parts)
+
+
+async def _count_session_user_rounds(db_session, session_id: str) -> int:
+    """统计会话累计用户轮数（记忆合并进度的分母）；无 db/session 或查询失败返回 0。"""
+    if db_session is None or not session_id:
+        return 0
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import func, select
+
+        from app.models.ai_message import AIMessage, AIMessageRole
+
+        sid = session_id
+        if isinstance(sid, str):
+            sid = UUID(sid)
+        result = await db_session.execute(
+            select(func.count())
+            .select_from(AIMessage)
+            .where(AIMessage.session_id == sid, AIMessage.role == AIMessageRole.user)
+        )
+        return int(result.scalar() or 0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[lead_agent] count_user_rounds_failed: {e}")
+        return 0
+
+
+async def _load_unmerged_messages(db_session, session_id: str, new_rounds: int) -> list[dict]:
+    """取最近 new_rounds 轮的对话消息（带缓冲、封顶 24 条防爆；跳过空占位行）。"""
+    if db_session is None or not session_id or new_rounds <= 0:
+        return []
+    limit = min(new_rounds * 2 + 4, 24)
+    try:
+        from uuid import UUID
+
+        from sqlalchemy import select
+
+        from app.models.ai_message import AIMessage
+
+        sid = session_id
+        if isinstance(sid, str):
+            sid = UUID(sid)
+        rows = (
+            await db_session.execute(
+                select(AIMessage)
+                .where(AIMessage.session_id == sid)
+                # 次级键 role 与 created_at 同方向：下面会 reversed() 成正序，
+                # 同方向才能在反转后得到"提问在前、回答在后"。缺它则同轮问答对颠倒
+                # （同轮两行 created_at 相同，来自事务级 now()，且 id 为随机 uuid）。
+                .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        rows = list(reversed(rows))
+        return [
+            {"role": r.role.value, "content": str(r.content or "")}
+            for r in rows
+            if str(r.content or "").strip()
+        ]
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[lead_agent] load_unmerged_messages_failed: {e}")
+        return []
 
 
 @dataclass
@@ -60,10 +166,10 @@ class LeadContext:
     canvas_id: int | None = None
     datasource_id: int | None = None
     history_summary: str = ""                 # 长期记忆（ai_memories 摘要）
+    memory_covered: int = 0                   # 已并入长期记忆的用户轮数（记忆合并进度）
     turns: list[dict] = field(default_factory=list)          # 会话活记忆
     turn_summaries: list[str] = field(default_factory=list)  # 关键节点汇报累积
     metrics_ctx: str = ""                     # 受治理指标清单（入口注入，answer/决策复用）
-    _summarized_upto: int = 0                 # 已纳入摘要的 turns 边界（内部）
 
     def add_turn(self, role: str, content: str) -> None:
         """追加一轮对话（自动裁剪窗口，避免上下文膨胀）。"""
@@ -72,20 +178,28 @@ class LeadContext:
         self.turns.append({"role": role, "content": str(content)})
         cap = max(1, settings.LEAD_MAX_TURNS_IN_CTX) * 2
         if len(self.turns) > cap:
-            dropped = len(self.turns) - cap
-            self.turns = self.turns[dropped:]
-            self._summarized_upto = max(0, self._summarized_upto - dropped)
+            self.turns = self.turns[len(self.turns) - cap:]
 
     def digest(self, max_chars: int = 4000) -> str:
-        """给决策注入的紧凑上下文（长期摘要 + 最近轮次）。"""
-        parts: list[str] = []
+        """给决策注入的紧凑上下文（长期摘要 + 最近轮次）。
+
+        超限时保留【长期记忆】头部、只截最近轮次的尾部——不能反过来，
+        否则长期记忆会先被截掉（旧记忆平白消失）。
+        """
+        memory = ""
         if self.history_summary.strip():
-            parts.append(f"【长期记忆】{self.history_summary.strip()}")
-        for t in self.turns[-max(1, settings.LEAD_MAX_TURNS_IN_CTX):]:
-            role = "用户" if t.get("role") == "user" else "助手"
-            parts.append(f"{role}: {str(t.get('content', ''))}")
-        text = "\n".join(parts)
-        return text if len(text) <= max_chars else text[-max_chars:]
+            memory = f"【长期记忆】{self.history_summary.strip()}"
+        turns_text = "\n".join(
+            f"{'用户' if t.get('role') == 'user' else '助手'}: {str(t.get('content', ''))}"
+            for t in self.turns[-max(1, settings.LEAD_MAX_TURNS_IN_CTX):]
+        )
+        if not memory:
+            return turns_text if len(turns_text) <= max_chars else turns_text[-max_chars:]
+        budget = max_chars - len(memory) - 1
+        if budget <= 0:
+            return memory[:max_chars]
+        tail = turns_text if len(turns_text) <= budget else turns_text[-budget:]
+        return f"{memory}\n{tail}" if tail else memory
 
 
 class LeadAgent:
@@ -252,8 +366,8 @@ class LeadAgent:
             async for ev in self._maybe_final_summary(ctx):
                 yield ev
 
-            # ── 3) 记忆回流 ──
-            memory_event = await self._maybe_summarize(ctx, trace=trace)
+            # ── 3) 记忆回流（累积合并：旧长期记忆 + 未合并对话段 → 新累积摘要）──
+            memory_event = await self._maybe_summarize(ctx, db_session=db_session, trace=trace)
             if memory_event:
                 yield {"type": "memory_saved", "chars": len(memory_event["summary"])}
                 yield {"type": "compressed_history", **memory_event}
@@ -584,32 +698,42 @@ class LeadAgent:
         yield {"type": "text", "content": text}
         ctx.turn_summaries.append(f"[总结] {text}")
 
-    # ── 记忆回流：把较早轮次折叠为摘要，交给 API 层持久化 ──
-    async def _maybe_summarize(self, ctx: LeadContext, trace=None) -> dict | None:
-        """每积累 4 轮且总量 >= 6 轮时，把较早轮次压缩为摘要。
+    # ── 记忆回流：累积合并（旧长期记忆 + 未合并对话段 → 新累积摘要），API 层持久化 ──
+    async def _maybe_summarize(self, ctx: LeadContext, db_session=None, trace=None) -> dict | None:
+        """跨轮记忆累积合并：每积累 LEAD_MEMORY_MERGE_ROUNDS 轮触发一次。
 
-        返回 `{"summary":..., "covered_rounds":...}`，由 API 层 upsert 到 ai_memories。
+        进度语义（covered_rounds = 已并入长期记忆的累计用户轮数）：
+        - 最新一轮留待下次（进度停在 total-1）——本轮助手产出此刻还在生成、
+          尚未落库，提前计入进度会让它的内容永远进不了记忆；
+        - 摘要输入 = 【旧长期记忆】+【未合并对话段】→ 覆盖写新累积值（不丢旧记忆）；
+        - 失败不推进进度，下一轮自然重试。
+        已知限制：极端积压（未合并轮数超出最近 24 条消息窗口）时只合并最近窗口，
+        更早的积压段不再回补（内容仍在 ai_messages 全文中）。
         """
-        total = len(ctx.turns)
-        if total < 6 or total - ctx._summarized_upto < 4:
+        min_rounds = max(1, int(getattr(settings, "LEAD_MEMORY_MERGE_ROUNDS", 4) or 4))
+        total_rounds = await _count_session_user_rounds(db_session, ctx.session_id)
+        if not _should_merge_memory(total_rounds, ctx.memory_covered, min_rounds):
             return None
-        older = ctx.turns[ctx._summarized_upto : total - 2]
-        if not older:
+        progress = _resolve_memory_progress(total_rounds, ctx.memory_covered)
+        new_rounds = total_rounds - 1 - progress
+        if new_rounds <= 0:
             return None
-        text = "\n".join(
-            f"{'用户' if t.get('role') == 'user' else '助手'}: {str(t.get('content', ''))[:800]}"
-            for t in older
-        )[:6000]
+        new_messages = await _load_unmerged_messages(db_session, ctx.session_id, new_rounds)
+        if not new_messages:
+            return None
+        text = _build_memory_merge_input(ctx.history_summary, new_messages)
+        if not text.strip():
+            return None
         try:
             if trace is not None:
                 from app.services.observability import observe_llm_call
 
                 with observe_llm_call(trace, "lead_memory_summary",
-                                      messages=[{"role": "system", "content": _SUMMARY_SYSTEM},
+                                      messages=[{"role": "system", "content": _MEMORY_MERGE_SYSTEM},
                                                 {"role": "user", "content": text}]) as span:
                     result = await self.llm.complete(
                         [
-                            {"role": "system", "content": _SUMMARY_SYSTEM},
+                            {"role": "system", "content": _MEMORY_MERGE_SYSTEM},
                             {"role": "user", "content": text},
                         ],
                         temperature=0.2,
@@ -623,7 +747,7 @@ class LeadAgent:
             else:
                 summary = await self.llm.complete(
                     [
-                        {"role": "system", "content": _SUMMARY_SYSTEM},
+                        {"role": "system", "content": _MEMORY_MERGE_SYSTEM},
                         {"role": "user", "content": text},
                     ],
                     temperature=0.2,
@@ -631,14 +755,14 @@ class LeadAgent:
                     enable_thinking=False,
                 )
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"[lead_agent] summarize_failed: {e}")
+            logger.warning(f"[lead_agent] memory_merge_failed: {e}")
             return None
         summary = (summary or "").strip()
         if not summary:
             return None
-        ctx._summarized_upto = total - 2
+        ctx.memory_covered = total_rounds - 1
         ctx.turn_summaries.append(summary)
-        return {"summary": summary, "covered_rounds": len(older)}
+        return {"summary": summary, "covered_rounds": total_rounds - 1}
 
 
 def json_dumps(obj) -> str:

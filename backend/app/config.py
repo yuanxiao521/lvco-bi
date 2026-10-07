@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     LEAD_DECISION_TIMEOUT: float = 10.0
     # 注入 LeadContext 的最近轮次上限（短期记忆窗口）
     LEAD_MAX_TURNS_IN_CTX: int = 20
+    # 记忆合并节流：未并入长期记忆的用户轮数达到该阈值才触发一次累积合并
+    LEAD_MEMORY_MERGE_ROUNDS: int = 4
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
