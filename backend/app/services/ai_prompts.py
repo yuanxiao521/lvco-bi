@@ -691,3 +691,7 @@ _LEAD_MERGED_SYSTEM_FALLBACK = """你是 Lvco BI 主导 Agent（LeadAgent）的�
 }"""
 
 LEAD_MERGED_SYSTEM = _load("lead_merged_system", _LEAD_MERGED_SYSTEM_FALLBACK)
+# 画布场景专用决策 prompt（与对话版各自独立成篇，便于按场景分别调优——
+# 此前一份 prompt 要同时兼顾两个场景，模型无从知道自己在哪个页面）。
+# 文件缺失时回落对话版，保证行为不劣化。
+LEAD_MERGED_SYSTEM_CANVAS = _load("lead_merged_system_canvas") or LEAD_MERGED_SYSTEM

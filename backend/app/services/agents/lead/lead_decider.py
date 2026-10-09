@@ -358,6 +358,7 @@ async def decide_action(
 async def decide_action_merged(
     user_msg: str,
     *,
+    entry: str = "chat",
     history_summary: str = "",
     datasources: list[dict] | None = None,
     subtask_summaries: list[str] | None = None,
@@ -376,9 +377,11 @@ async def decide_action_merged(
     Returns:
         MergedOutcome；任何异常均不抛出，`intent.degraded` / `decision.degraded` 标记兜底。
     """
-    from app.services.ai_prompts import LEAD_MERGED_SYSTEM
+    from app.services.ai_prompts import LEAD_MERGED_SYSTEM, LEAD_MERGED_SYSTEM_CANVAS
 
-    system = LEAD_MERGED_SYSTEM
+    # 决策 prompt 按助手身份选：画布页与对话页各有一份（感知/派发/评审本就已按 entry
+    # 分化，这一份补上"决策"维度——两个场景的 Lead 至此四维齐备）。
+    system = LEAD_MERGED_SYSTEM_CANVAS if entry == "canvas" else LEAD_MERGED_SYSTEM
     ds_block, canvas_block, assessment_block, summary_block = _build_context_blocks(
         datasources, subtask_summaries, canvas_layout
     )
