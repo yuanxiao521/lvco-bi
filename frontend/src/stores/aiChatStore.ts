@@ -46,8 +46,9 @@ interface AIChatStore {
   setActiveSession: (sid: string | null) => void;
   /** 拉取会话列表（entry=chat） */
   refreshSessions: () => Promise<void>;
-  /** 加载某个会话的消息（过滤"未完成"的空 assistant 占位行） */
-  loadMessages: (sid: string) => Promise<void>;
+  /** 加载某个会话的消息（过滤"未完成"的空 assistant 占位行）。
+   * force=true 专供"流结束后的收尾刷新"——那时 isStreaming 仍为 true，必须放行。 */
+  loadMessages: (sid: string, force?: boolean) => Promise<void>;
   /** agent 模式流式（POST /ai/chat/stream）；resume=true 时不新增用户消息，纯订阅续收 */
   streamChat: (sid: string | null, content: string, selectedDsId: string, resume?: boolean) => Promise<void>;
   /** fallback 普通 chat（POST /ai/sessions/{id}/messages，无数据源时） */
@@ -79,15 +80,22 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
     }
   },
 
-  loadMessages: async (sid) => {
+  loadMessages: async (sid, force = false) => {
     try {
       const msgs = await listMessages(sid);
+      // 流进行中禁止用 DB 历史覆盖本地消息：DB 里 assistant 正文要等流结束才落库，
+      // 此刻恢复会把流中的 assistant 占位整体覆盖 → 后续 patchAssistant 全部 MISS，
+      // 回复整条丢失（首条消息必现：sendChat 建会话 → activeSessionId 变化 → 组件
+      // effect 触发本函数）。收尾刷新由调用方显式 force=true 放行。
+      if (!force && get().isStreaming) {
+        return;
+      }
       set({
         messages: msgs.filter((m) => !(m.role === "assistant" && !m.content.trim())),
       });
       // 后台续跑：刷新/断线后该会话后端任务仍在跑 → 自动续收（不新增用户消息）
       const sess = get().sessions.find((s) => s.id === sid);
-      if (sess?.running) {
+      if (sess?.running && !get().isStreaming) {
         await get().streamChat(sid, "", "", true);
       }
     } catch {
@@ -353,7 +361,7 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
               if (isResume) {
                 set((s) => ({ messages: s.messages.filter((m) => m.id !== assistantId) }));
                 // handleLine 非 async，这里 fire-and-forget（流结束收尾无需等待）
-                void get().loadMessages(sid || "").then(() => get().refreshSessions());
+                void get().loadMessages(sid || "", true).then(() => get().refreshSessions());
               }
               agentStreamingLock = false;
               set({ isStreaming: false });
@@ -471,7 +479,7 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
                 break;
               case "done":
                 // 后端已保存本轮消息：拉取一次真实数据刷新（含 auto-title）
-                await get().loadMessages(sid);
+                await get().loadMessages(sid, true);
                 await get().refreshSessions();
                 break;
               case "error":
@@ -496,7 +504,7 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
           try {
             const event = JSON.parse(jsonStr);
             if (event.type === "done") {
-              await get().loadMessages(sid);
+              await get().loadMessages(sid, true);
               await get().refreshSessions();
             }
           } catch { /* skip unparseable */ }

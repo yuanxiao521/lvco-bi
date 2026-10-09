@@ -699,13 +699,15 @@ export default function AIChat() {
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={aiNotConfigured}
+              disabled={isStreaming || aiNotConfigured}
               placeholder={
                 aiNotConfigured
                   ? "请先在 backend/.env 中配置 DeepSeek API Key"
-                  : "输入你的问题，例如：分析本季度各区域的销售表现..."
+                  : isStreaming
+                    ? "正在生成回答…"
+                    : "输入你的问题，例如：分析本季度各区域的销售表现..."
               }
-              className="flex-1 text-[13px] text-foreground placeholder:text-muted-foreground bg-transparent border-none outline-none resize-none leading-relaxed transition-[height] duration-150 ease-out"
+              className="flex-1 text-[13px] text-foreground placeholder:text-muted-foreground bg-transparent border-none outline-none resize-none leading-relaxed transition-[height] duration-150 ease-out disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <button
               onClick={handleSend}
