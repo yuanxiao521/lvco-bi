@@ -1,0 +1,632 @@
+"""CanvasOrchestrator：画布专用编排器（报告骨架 → 落块执行 → 简短总结）。
+
+与 AgentOrchestrator 的关系：**编排策略独立**，仅复用底层设施。
+- 独立：Planner 用画布版 prompt（canvas_planner_system）规划"报告骨架"
+  （h1 标题 / 章节图表 / 叙事），执行器用画布版 prompt（canvas_executor_system）
+  逐步调用 add_text_block / add_chart_block 落块；结束时不生成整篇文字报告
+  （报告由画布块承载），输出简短总结。
+- 复用：Graph 图引擎、ToolExecutor 执行内核、模块级辅助（拓扑排序/分层/失败签名/历史摘要）。
+
+设计取舍：
+- add_chart_block 后端自验证取数，因此骨架里不需要单独的 query_sql 步骤；
+- 执行阶段工具集**再次收紧**：入口注入的白名单（CANVAS_ALLOWED_TOOL_NAMES）
+  含查询类工具（query_engine/query_sql/list_*），那是 Planner/入口用的；
+  但执行器（Executor）只暴露纯落块工具（add_chart_block 自带取数验证，
+  不再需要裸查数工具），避免 LLM"先查数据却不建图"（实践踩坑：执行步骤
+  反复调 query_engine 拿数据而不调 add_chart_block，导致图表/叙事块缺失）；
+- 步骤依赖（depends_on）控制叙事/章节顺序，同层并发执行。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import AsyncIterator
+
+from app.services.agent_tools import ToolRegistry
+from app.services.agents.agent_orchestrator import (
+    _group_steps_by_level,
+    _make_fail_key,
+    _summarize_history_safe,
+    _topo_sort,
+)
+from app.services.agents.graph import Graph
+from app.services.agents.planner_agent import PlannerAgent
+from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
+
+logger = logging.getLogger(__name__)
+
+_MAX_TOOL_CALLS_PER_STEP = 4  # 单步内最多工具调用次数
+_STEP_TIMEOUT = 45  # 单步超时（秒）
+_MAX_STEP_FAILURES = 3  # 同一工具+参数连续失败跳过阈值
+
+# 执行器可见工具：纯落块工具 + list_fields。
+# 查询/取数由 add_chart_block 内部完成，不再让 LLM 在"建图"步骤里先 query_engine
+# 再落块（会查而不建）。但 **list_fields 保留**：当注入的字段清单缺失或有字段不确定
+# 时，执行器可主动拉真实列名，避免凭空猜列名导致整块失败。
+_EXECUTOR_TOOL_NAMES = frozenset({
+    "add_chart_block", "add_text_block",
+    "update_chart_block", "remove_block", "clear_canvas", "arrange_layout",
+    "list_fields",
+})
+
+# goal 达成校验：连续"无工具调用直接收尾"的最大容忍次数。
+# 画布每个步骤的目标都是落到一个块（文本/图表/改/删/布局），
+# 达成的唯一判据 = 本轮产出了 canvas_action；纯文本收尾 = 未达成。
+_MAX_NO_TOOL_STREAK = 2
+
+
+def _has_canvas_action(result_str: str) -> bool:
+    """判定工具执行结果是否成功产出可落块的 canvas_action（goal 达成判据）。
+
+    画布步骤完成的标准：结果 JSON 中携带 canvas_action（add_text_block /
+    add_chart_block / update_chart_block / remove_block / arrange_layout 都会返回）。
+    纯文本、error、或非 JSON 一律视为未达成。
+    """
+    try:
+        parsed = json.loads(result_str)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("error"):
+        return False
+    return isinstance(parsed.get("canvas_action"), dict)
+
+
+def _collect_landed_chart_types(results: dict) -> list[str]:
+    """从已成功落块的画布步骤结果里收集图表类型（chartType）。
+
+    results: {step_id: 结果JSON字符串}。只统计 canvas_action 成功且 block 带 chartType 的
+    （add_chart_block 成功落块 / update_chart_block 改类型后的最终类型都计入）。
+    """
+    types: list[str] = []
+    for r in results.values():
+        if not isinstance(r, str):
+            continue
+        try:
+            parsed = json.loads(r)
+        except Exception:
+            continue
+        if not isinstance(parsed, dict) or parsed.get("error"):
+            continue
+        block = (parsed.get("canvas_action") or {}).get("block") or {}
+        ct = block.get("chartType")
+        if ct:
+            types.append(str(ct))
+    return types
+
+
+class CanvasOrchestrator:
+    """画布编排器：报告骨架规划 → 逐步落块 → 简短总结，流式产出事件。"""
+
+    def __init__(self, llm, db_session, extra_plannable_tools: set[str] | None = None):
+        from app.services.ai_prompts import CANVAS_EXECUTOR_SYSTEM, CANVAS_PLANNER_SYSTEM
+
+        self.llm = llm
+        self.db_session = db_session
+        # 严格白名单：由画布入口注入（CANVAS_ALLOWED_TOOL_NAMES）。空集时 Executor 无工具可用。
+        self.extra_plannable_tools: set[str] = set(extra_plannable_tools or ())
+        self.planner = PlannerAgent(llm, self.extra_plannable_tools, system_prompt=CANVAS_PLANNER_SYSTEM)
+        self._executor_system = CANVAS_EXECUTOR_SYSTEM
+        self.graph = self._build_graph()
+
+    def _build_graph(self) -> Graph:
+        """图结构：plan（报告骨架）→ execute_steps（落块）→ finish（总结）。
+
+        不需要普通编排的 chart_steps / report 节点：落块即图表，报告由画布块呈现。
+        """
+        g = Graph("canvas_orchestrator")
+        g.add_node("plan", self._plan_node)
+        g.add_node("execute_steps", self._execute_steps_node)
+        g.add_node("finish", self._finish_node)
+        g.set_entry_point("plan")
+        g.add_conditional_edges("plan", self._route_plan, {"ok": "execute_steps", "done": "finish"})
+        g.add_edge("execute_steps", "finish")
+        g.set_finish_point("finish")
+        return g
+
+    async def execute_task(
+        self,
+        user_msg: str,
+        history: list[dict],
+        user_id: str,
+        available_datasources: list[dict],
+        canvas_id: str = "",
+        **kwargs,
+    ) -> AsyncIterator[dict]:
+        """流式执行：报告骨架规划 → 落块执行 → 总结。
+
+        canvas_id 由调用方（画布入口）传入并写入 state，执行器据此为画布工具
+        自动注入画布上下文（LLM 无需也不应自行填写）。
+
+        事件类型：status / plan / tool_call / tool_result / text / done / error
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def emit(ev: dict) -> None:
+            await queue.put(ev)
+
+        async def run() -> None:
+            state_sink: dict = {}
+            # 本轮画布动作台账：一次运行内共享，让模型看得到"自己刚删/刚加了什么"
+            from app.services.canvas_tools import CanvasActionLedger
+
+            ledger = CanvasActionLedger()
+            try:
+                from app.services.observability import get_observer
+
+                observer = get_observer()
+                with observer.trace(
+                    "canvas_execute",
+                    user_id=user_id,
+                    session_id=getattr(self.db_session, "session_id", None) if self.db_session else None,
+                    metadata={"user_msg_length": len(user_msg), "history_length": len(history or [])},
+                ) as trace:
+                    await self.graph.invoke(
+                        {"user_id": user_id, "canvas_id": canvas_id},
+                        user_msg=user_msg,
+                        history=history or [],
+                        available_datasources=available_datasources or [],
+                        db_session=self.db_session,
+                        emit=emit,
+                        trace=trace,
+                        state_sink=state_sink,
+                        canvas_ledger=ledger,
+                    )
+            except Exception as e:
+                logger.exception("[canvas_orchestrator] 图执行异常: %s", e)
+                await emit({"type": "error", "message": f"画布编排执行异常: {str(e)}"})
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run())
+        while True:
+            ev = await queue.get()
+            if ev is None:
+                break
+            yield ev
+        await task
+
+    # ── 节点 1：规划报告骨架 ──
+    async def _plan_node(self, state: dict, **shared) -> dict:
+        emit = shared["emit"]
+        await emit({"type": "status", "message": "正在规划报告骨架..."})
+        user_msg = shared["user_msg"]
+        result = await self.planner.execute(
+            user_msg=user_msg,
+            history=shared["history"],
+            available_datasources=shared["available_datasources"],
+        )
+        if not result.success:
+            logger.warning("[canvas_orchestrator] 规划失败，使用降级计划: %s", result.error)
+            plan = self._build_fallback_plan(user_msg, shared["available_datasources"])
+        else:
+            plan = result.data
+        steps = plan.get("steps", [])
+        logger.info("[canvas_orchestrator] 报告骨架完成 steps=%d", len(steps))
+        await emit({"type": "plan", "plan": plan})
+        shared["state_sink"]["plan"] = plan
+        return {"plan": plan, "ordered_steps": _topo_sort(steps)}
+
+    @staticmethod
+    def _build_fallback_plan(user_msg: str, available_datasources: list[dict]) -> dict:
+        """Planner 失败时的降级计划：h1 标题 + 核心图表 + 叙事。"""
+        steps = [
+            {
+                "step_id": 1,
+                "goal": "写报告大标题（与用户需求相关的中文标题）",
+                "tool": "add_text_block",
+                "depends_on": [],
+                "purpose": "报告标题",
+            },
+            {
+                "step_id": 2,
+                "goal": f"根据数据源新增一张最能回答用户问题的图表：{user_msg[:80]}",
+                "tool": "add_chart_block",
+                "depends_on": [],
+                "purpose": "核心图表",
+            },
+            {
+                "step_id": 3,
+                "goal": "写一段简短叙事，引用图表中的关键数字结论",
+                "tool": "add_text_block",
+                "depends_on": [2],
+                "purpose": "结论叙事",
+            },
+        ]
+        return {
+            "task_summary": f"画布报告：{user_msg[:50]}",
+            "steps": steps,
+            "expected_output": "report",
+        }
+
+    async def _route_plan(self, state: dict, **shared) -> str:
+        steps = (state.get("plan") or {}).get("steps") or []
+        return "ok" if steps else "done"
+
+    # ── 节点 2：执行落块步骤（同层并发） ──
+    async def _execute_steps_node(self, state: dict, **shared) -> dict:
+        emit = shared["emit"]
+        await emit({"type": "status", "message": "正在画布上落块..."})
+        results = dict(state.get("results") or {})
+        ordered = state.get("ordered_steps") or []
+        shared.setdefault("tool_memo", {})
+        shared.setdefault("tool_memo_locks", {})
+        levels = _group_steps_by_level(ordered)
+        for level in levels:
+            await asyncio.gather(
+                *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
+            )
+
+        # 报告式多图引导：计划含 ≥2 个 add_chart_block 步骤，但实际只落出 <2 种图表类型时，
+        # 追加一个补图步骤（补一种缺失的推荐类型），从机制上保证报告图表多样性，
+        # 不再单纯依赖 LLM 自觉（避免"失败几次后收敛成单一图表类型/自暴自弃"）。
+        await self._fill_missing_chart_types(results, state, **shared)
+
+        # 落块完成自动整理布局：本次确实产出过可落块的 canvas_action 时，
+        # 确定性触发一次报告式重排（前端 applyReportLayout），
+        # 不依赖 LLM 主动调用 arrange_layout，避免每轮添加后块位置错乱。
+        any_block = any(
+            _has_canvas_action(str(r)) for r in results.values()
+        )
+        if any_block:
+            await emit({
+                "type": "canvas_action",
+                "action": {"action": "arrange_layout", "layout": "auto", "auto": True},
+            })
+            logger.info("[canvas_orchestrator] 落块完成，自动触发 report 布局重排")
+
+        shared["state_sink"]["results"] = dict(results)
+        return {"results": results}
+
+    async def _run_step_with_timeout(self, step: dict, results: dict, state: dict, **shared) -> None:
+        emit = shared["emit"]
+        sid = step["step_id"]
+        goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
+        try:
+            await asyncio.wait_for(
+                self._agentic_run_step(step, results, state, **shared),
+                timeout=_STEP_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            results[sid] = json.dumps({
+                "skipped": True, "timeout": True, "goal": goal[:30],
+            }, ensure_ascii=False)
+            await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
+            logger.warning("[canvas_orchestrator] 步骤 %s 执行超时", sid)
+        except asyncio.CancelledError:
+            raise
+
+    # 报告式补图引导：推荐类型覆盖（缺失类型自动补一张图）
+    _REPORT_RECOMMEND = ("kpi_card", "line", "bar", "grouped_bar")
+
+    async def _fill_missing_chart_types(self, results: dict, state: dict, **shared) -> None:
+        """报告式多图引导：已落图表类型不足时，自动补一张缺失类型的图。
+
+        触发条件（全部满足）：
+        - 计划是报告式：add_chart_block 步骤 ≥2（单图/改图请求不触发）；
+        - 已成功落块的图表类型去重后 <2 种（多样性不够）。
+        补图选型：从推荐组合里挑第一种"尚未落出"的类型，避免报告全部收敛成单一图表。
+        """
+        plan = state.get("plan") or {}
+        steps = plan.get("steps") or []
+        chart_steps = [s for s in steps if (s.get("tool") or "") == "add_chart_block"]
+        if len(chart_steps) < 2:
+            return
+        landed = _collect_landed_chart_types(results)
+        landed_set = set(landed)
+        if len(landed_set) >= 2 or not landed_set:
+            # 已达多样性（≥2 种）或一张图都没落成（补图也无依据，交给下轮重派）
+            return
+        # 挑缺失推荐类型
+        missing_type = next((t for t in self._REPORT_RECOMMEND if t not in landed_set), None)
+        if missing_type is None:
+            return
+        sid = max((int(s.get("step_id") or 0) for s in steps), default=0) + 1
+        fill_step = {
+            "step_id": sid,
+            "goal": (
+                f"新增图表（{missing_type}）：补充一张不同类型的图表以丰富报告结构。"
+                f"当前报告已落图表类型：{landed}，请用 {missing_type} 类型，"
+                "维度/度量从【目标数据源字段清单】中选取。"
+            ),
+            "tool": "add_chart_block",
+            "depends_on": [],
+            "purpose": "报告图表多样性（系统补图）",
+        }
+        ordered = state.get("ordered_steps") or []
+        state["ordered_steps"] = [*ordered, fill_step]
+        await self._run_step_with_timeout(fill_step, results, state, **shared)
+        logger.info("[canvas_orchestrator] 报告式补图：已落 %s → 补 %s", sorted(landed_set), missing_type)
+
+    async def _agentic_run_step(self, step: dict, results: dict, state: dict, **shared) -> None:
+        """单步 mini-ReAct：LLM 决策落块工具 → ToolExecutor 执行 → 直到 goal 完成。"""
+        emit = shared["emit"]
+        db_session = shared.get("db_session")
+        user_id = state.get("user_id", "")
+        sid = step["step_id"]
+        goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
+
+        executor = ToolExecutor(
+            user_id=user_id,
+            db_session=db_session,
+            emit=emit,
+            memo=shared.get("tool_memo"),
+            memo_locks=shared.get("tool_memo_locks"),
+            allowed_tools=self.extra_plannable_tools or None,
+            # 画布上下文由系统绑定：get_canvas_layout 等工具缺参时自动补 canvas_id；
+            # 台账随本轮运行共享，工具据此校验存在性并让快照反映本轮动作
+            context={"canvas_id": str(state.get("canvas_id") or ""),
+                     "canvas_ledger": shared.get("canvas_ledger")},
+        )
+
+        context = self._build_executor_context(state, step, results, **shared)
+        messages: list[dict] = [
+            {"role": "system", "content": self._executor_system},
+            {"role": "user", "content": context},
+        ]
+        all_tools = self._executor_tools()
+
+        tool_call_count = 0
+        fail_counts: dict[str, int] = {}
+        consecutive_errors = 0
+        no_tool_streak = 0  # goal 达成校验：连续"无工具调用直接收尾"次数
+
+        while tool_call_count < _MAX_TOOL_CALLS_PER_STEP:
+            # 1. LLM 决策
+            tool_calls: list[dict] = []
+            text_parts: list[str] = []
+            # LLM 决策观测：同 Lead/ReAct 口径（Langfuse generation + 真实模型名）
+            _obs_cm = None
+            _trace = shared.get("trace")
+            if _trace is not None:
+                from app.services.observability import observe_llm_call
+
+                _obs_cm = observe_llm_call(
+                    _trace, f"canvas_exec_{sid}", messages=messages,
+                    model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+                )
+                _obs_cm.__enter__()
+            try:
+                try:
+                    async for event in self.llm.stream_chat_with_tools(
+                        messages, all_tools, temperature=0.3, max_tokens=2000,
+                    ):
+                        if event["type"] == "text":
+                            text_parts.append(event.get("content", ""))
+                        elif event["type"] == "tool_call":
+                            tool_calls.append(event)
+                finally:
+                    if _obs_cm is not None:
+                        try:
+                            _obs_cm.__exit__(None, None, None)
+                        except Exception:  # noqa: BLE001
+                            logger.debug("canvas exec span exit failed", exc_info=True)
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    results[sid] = json.dumps({"error": f"连续 3 次 API 调用失败: {e}"}, ensure_ascii=False)
+                    return
+                for msg in messages:
+                    msg.pop("reasoning_content", None)
+                continue
+
+            # 2a. 无工具调用：goal 达成校验。画布步骤必须靠工具落块，
+            #     纯文本输出不等于完成 → 回灌强制调用（连续逃逸才跳过错）
+            if not tool_calls:
+                no_tool_streak += 1
+                text_out = "".join(text_parts)
+                if text_out:
+                    messages.append({"role": "assistant", "content": text_out})
+                if no_tool_streak >= _MAX_NO_TOOL_STREAK:
+                    results[sid] = json.dumps({
+                        "skipped": True,
+                        "skipped_reason": f"步骤 {sid} 连续 {no_tool_streak} 轮未调用画布落块工具，goal 未达成，跳过",
+                    }, ensure_ascii=False)
+                    logger.warning("[canvas_orchestrator] 步骤 %s 无工具调用逃逸 %d 次，跳过", sid, no_tool_streak)
+                    return
+                tool_call_count += 1
+                messages.append({
+                    "role": "user",
+                    "content": "步骤未完成：本步骤的目标是把内容落到画布上，但本轮没有调用任何画布工具"
+                               "（add_text_block / add_chart_block / update_chart_block 等）。"
+                               "请立即调用相应工具完成落块，禁止只输出文字后结束步骤。",
+                })
+                continue
+
+            # 2b. 并行执行工具（ToolExecutor 统一执行/观测/白名单校验/emit）
+            messages.append(build_assistant_message(tool_calls))
+            parallel_results = await asyncio.gather(
+                *(executor.execute_tool_call(tc) for tc in tool_calls)
+            )
+
+            # 3. 结果回传 + 失败签名
+            any_fatal = any(pr.fatal for pr in parallel_results)
+            for i, pr in enumerate(parallel_results):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": pr.tc.get("id", f"call_{tool_call_count + i}"),
+                    "content": pr.result,
+                })
+                if pr.is_error and not pr.fatal:
+                    fkey = _make_fail_key(pr.name, pr.args)
+                    fails = fail_counts.get(fkey, 0) + 1
+                    fail_counts[fkey] = fails
+                    if fails >= _MAX_STEP_FAILURES:
+                        results[sid] = json.dumps({
+                            "skipped": True,
+                            "skipped_reason": f"同一工具与参数连续失败 {fails} 次，跳过步骤 {sid}: {pr.name}",
+                        }, ensure_ascii=False)
+                        return
+
+            tool_call_count += len(tool_calls)
+            if any_fatal:
+                results[sid] = next(pr.result for pr in parallel_results if pr.fatal)
+                return
+            # 4. goal 达成校验：必须产出可落块的 canvas_action 才结束本步骤。
+            #    工具全部"成功"但没落块（理论上执行器白名单只有落块工具，防御性兜底）
+            block_ok = any(
+                _has_canvas_action(pr.result) for pr in parallel_results
+            )
+            if block_ok:
+                results[sid] = parallel_results[-1].result
+                logger.info("[canvas_orchestrator] 步骤 %s 落块成功", sid)
+                return
+            if tool_call_count >= _MAX_TOOL_CALLS_PER_STEP:
+                results[sid] = json.dumps({
+                    "skipped": True,
+                    "skipped_reason": f"步骤 {sid} 工具调用均未产出 canvas_action（goal 未达成），超上限跳过",
+                }, ensure_ascii=False)
+                return
+            messages.append({
+                "role": "user",
+                "content": "本轮工具调用虽已成功，但未在画布上产出任何块（缺少 canvas_action 落块结果）。"
+                           "请继续调用 add_text_block / add_chart_block（或 update_chart_block）完成本步骤的落块目标。",
+            })
+
+        if tool_call_count > 0:
+            # 走到这里说明已超工具调用上限且仍未落块（goal 未达成）——显式跳过，不当成功
+            results[sid] = json.dumps({
+                "skipped": True,
+                "skipped_reason": f"步骤 {sid} 超过工具调用上限且未完成落块（goal 未达成）",
+            }, ensure_ascii=False)
+        else:
+            results[sid] = json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
+
+    def _executor_tools(self) -> list[dict]:
+        """Executor 可见工具 schema：执行阶段只暴露纯落块工具（入口白名单 ∩ 落块工具集）。
+
+        查数/分析类工具（query_engine/query_sql/list_*）对执行器不可见：
+        add_chart_block 自带取数验证，裸查工具只会诱导 LLM"取数但不建图"。
+        """
+        if not self.extra_plannable_tools:
+            return []
+        allowed = set(self.extra_plannable_tools) & _EXECUTOR_TOOL_NAMES
+        if not allowed:
+            return []
+        return [
+            t for t in ToolRegistry.schemas()
+            if isinstance(t, dict)
+            and isinstance(t.get("function"), dict)
+            and t["function"].get("name") in allowed
+        ]
+
+    def _build_plan_overview(self, state: dict, step: dict, results: dict) -> str:
+        """构建「全局计划全景图」注入 Executor 上下文（AB 实验开关 AGENT_PLAN_INJECTION_ENABLED）。
+
+        让单步执行 LLM 看到整体骨架：共几步 / 第几步 / 每一步状态（✓完成/⚡当前/·待办），
+        弥补纯单步工单的衔接盲区（如叙事步骤看不到兄弟图表的存在，导致引用不全）。
+        开关关闭或 plan 缺失时返回空串（不注入），保持原单步行为。
+        """
+        from app.config import settings
+
+        if not settings.AGENT_PLAN_INJECTION_ENABLED:
+            return ""
+        plan = state.get("plan") or {}
+        steps = plan.get("steps") or []
+        if not steps:
+            return ""
+        cur_id = step.get("step_id")
+        done_ids = set(results.keys())
+        lines = [f"整体计划（共 {len(steps)} 步，当前执行第 {cur_id} 步；只需完成当前步骤，不要执行其他步骤）："]
+        for s in steps:
+            sid = s.get("step_id")
+            tool = s.get("tool") or s.get("purpose") or "?"
+            goal = str(s.get("goal") or "")[:40]
+            if sid == cur_id:
+                mark = "⚡当前"
+            elif sid in done_ids:
+                mark = "✓完成"
+            else:
+                mark = "·待办"
+            lines.append(f"  {mark} [{sid}] {tool}: {goal}")
+        lines.append("已完成步骤的详细结果见下方「已完成的依赖步骤结果」。")
+        return "\n".join(lines)
+
+    def _build_executor_context(self, state: dict, step: dict, results: dict, **shared) -> str:
+        """构建执行 Agent 上下文：用户问题 + 当前步骤 + 依赖结果 + 数据源信息。"""
+        parts: list[str] = []
+        parts.append(f"用户问题：{shared.get('user_msg', '')}")
+        hist = shared.get("history")
+        if hist:
+            summary = _summarize_history_safe(hist)
+            if summary:
+                parts.append(summary)
+        parts.append(
+            f"当前步骤（step_id={step['step_id']}）：目标：{step.get('goal', '')}；"
+            f"建议工具：{step.get('tool') or '（无）'}"
+        )
+        overview = self._build_plan_overview(state, step, results)
+        if overview:
+            parts.append(overview)
+        prior: list[str] = []
+        for dep in (step.get("depends_on") or []):
+            r = results.get(dep)
+            if r:
+                prior.append(f"- 步骤{dep}: {self._compact_result(r, 600)}")
+        if prior:
+            parts.append("已完成的依赖步骤结果：\n" + "\n".join(prior))
+        ds = shared.get("available_datasources") or []
+        if ds:
+            # 权威字段段：只列出已注入字段的数据源（选中源 / 画布默认目标源），
+            # 其余源（fields 为空）以表级摘要带过，避免混淆且省上下文。
+            with_fields = [d for d in ds if d.get("fields")]
+            ds_lines = []
+            for d in with_fields[:5]:
+                fields = d.get("fields") or []
+                field_parts = [
+                    f"{f.get('name', '?')}({f.get('data_type', '')})"
+                    for f in (fields[:40] if isinstance(fields, list) else [])
+                ]
+                ds_lines.append(
+                    f"- id={d.get('id')} name={d.get('name')} table_ref={d.get('table_ref', '')} "
+                    f"字段: {', '.join(field_parts)}"
+                )
+            other_names = [
+                f"{d.get('name')}({d.get('id')})"
+                for d in ds if not d.get("fields")
+            ]
+            if with_fields:
+                parts.append(
+                    "【目标数据源字段清单】以下列名是本画布唯一可信来源，"
+                    "add_chart_block 的 dimensions/measures 必须一字不差抄这里的字段名"
+                    "（不要汉化、不要翻译、不要臆造）；可直接使用，无需再调 list_fields：\n"
+                    + "\n".join(ds_lines)
+                )
+            if other_names:
+                parts.append("其他数据源（仅表级，需字段时先 list_fields）：" + "、".join(other_names))
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _compact_result(result_str: str, max_chars: int) -> str:
+        """依赖步骤结果的简明摘要（图表数据 summary / 错误 / 截断文本）。"""
+        try:
+            parsed = json.loads(result_str)
+        except Exception:
+            return str(result_str)[:max_chars]
+        if isinstance(parsed, dict):
+            if "summary" in parsed:
+                return json.dumps(parsed["summary"], ensure_ascii=False)[:max_chars]
+            if "error" in parsed:
+                return f"[失败] {str(parsed['error'])[:200]}"
+        return str(result_str)[:max_chars]
+
+    # ── 节点 3：收尾总结 ──
+    async def _finish_node(self, state: dict, **shared) -> dict:
+        emit = shared["emit"]
+        results = state.get("results") or {}
+        block_count = sum(
+            1 for r in results.values()
+            if isinstance(r, str) and "canvas_action" in r
+        )
+        await emit({"type": "status", "message": "报告已生成"})
+        await emit({
+            "type": "text",
+            "content": (
+                f"\n\n> 已在画布生成分析报告（{block_count} 个落块），"
+                "图表与叙事段落已就位，可自由拖拽调整布局。"
+            ),
+        })
+        await emit({"type": "done"})
+        return {}

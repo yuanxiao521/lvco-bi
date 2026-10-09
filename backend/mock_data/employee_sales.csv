@@ -1,0 +1,201 @@
+employee_id,name,region,department,role,hire_date,monthly_target,actual_sales,achievement_pct,commission,deals_closed
+EMP-0001,Employee_1,North,Marketing,Brand Manager,2023-02-04,81799.48,108956.91,133.2,5447.85,22
+EMP-0002,Employee_2,North,Marketing,Marketing Specialist,2023-09-21,115993.05,68203.91,58.8,2046.12,1
+EMP-0003,Employee_3,Central,Marketing,Marketing Specialist,2023-10-10,121895.92,123114.88,101.0,6155.74,3
+EMP-0004,Employee_4,East,Marketing,Brand Manager,2024-02-18,132014.73,188385.02,142.7,9419.25,7
+EMP-0005,Employee_5,East,Sales,Account Manager,2022-09-14,113811.42,58499.07,51.4,1754.97,8
+EMP-0006,Employee_6,East,Finance,Accountant,2020-01-13,137916.69,209771.29,152.1,10488.56,7
+EMP-0007,Employee_7,East,Marketing,Marketing Specialist,2023-06-26,51664.06,58277.06,112.8,2913.85,1
+EMP-0008,Employee_8,North,Operations,Supply Chain,2023-11-23,48813.73,76344.67,156.4,3817.23,3
+EMP-0009,Employee_9,Central,Marketing,Campaign Manager,2023-11-19,80814.46,96411.65,119.3,4820.58,7
+EMP-0010,Employee_10,North,Marketing,Campaign Manager,2022-03-11,94067.97,116173.94,123.5,5808.7,3
+EMP-0011,Employee_11,Central,Operations,Ops Coordinator,2023-06-06,177879.19,193888.32,109.0,9694.42,21
+EMP-0012,Employee_12,East,Operations,Ops Coordinator,2021-09-22,134846.25,149949.03,111.2,7497.45,3
+EMP-0013,Employee_13,South,R&D,Product Manager,2021-04-02,132398.48,159540.17,120.5,7977.01,5
+EMP-0014,Employee_14,North,Operations,Supply Chain,2021-09-02,180721.05,197889.55,109.5,9894.48,6
+EMP-0015,Employee_15,West,R&D,Data Analyst,2022-08-31,54262.3,61913.28,114.1,3095.66,3
+EMP-0016,Employee_16,East,Sales,Account Manager,2023-03-21,135185.1,132616.58,98.1,3978.5,4
+EMP-0017,Employee_17,Central,Finance,Financial Analyst,2021-09-20,146620.28,146327.04,99.8,4389.81,5
+EMP-0018,Employee_18,Central,Finance,Financial Analyst,2022-04-10,76885.93,118711.88,154.4,5935.59,9
+EMP-0019,Employee_19,Central,Finance,Financial Analyst,2020-08-18,99862.09,69004.7,69.1,2070.14,2
+EMP-0020,Employee_20,Central,R&D,Engineer,2022-03-27,154622.94,161426.35,104.4,8071.32,6
+EMP-0021,Employee_21,West,R&D,Data Analyst,2022-12-29,34752.24,25994.68,74.8,779.84,5
+EMP-0022,Employee_22,Central,Marketing,Campaign Manager,2023-08-03,117510.84,102586.96,87.3,3077.61,19
+EMP-0023,Employee_23,South,Sales,Sales Rep,2020-12-01,97740.17,151790.48,155.3,7589.52,22
+EMP-0024,Employee_24,West,R&D,Data Analyst,2023-05-17,183294.41,77350.24,42.2,2320.51,3
+EMP-0025,Employee_25,East,Finance,Financial Analyst,2022-01-04,118414.19,156780.39,132.4,7839.02,31
+EMP-0026,Employee_26,Central,Finance,CFO,2021-01-24,178738.79,243978.45,136.5,12198.92,12
+EMP-0027,Employee_27,East,Finance,CFO,2021-04-30,135205.24,173603.53,128.4,8680.18,10
+EMP-0028,Employee_28,North,Finance,Financial Analyst,2022-05-01,197322.16,134968.36,68.4,4049.05,12
+EMP-0029,Employee_29,West,R&D,Engineer,2020-04-06,30107.42,13698.88,45.5,410.97,1
+EMP-0030,Employee_30,West,Operations,Ops Coordinator,2023-04-27,181062.77,241537.74,133.4,12076.89,11
+EMP-0031,Employee_31,South,Sales,Account Manager,2022-03-04,79773.25,85357.38,107.0,4267.87,2
+EMP-0032,Employee_32,South,Operations,Supply Chain,2023-09-23,173594.02,275840.9,158.9,13792.05,11
+EMP-0033,Employee_33,Central,Sales,Sales Director,2024-04-07,111574.9,141142.25,126.5,7057.11,24
+EMP-0034,Employee_34,North,Finance,Financial Analyst,2020-11-27,100455.72,117633.65,117.1,5881.68,18
+EMP-0035,Employee_35,North,Marketing,Brand Manager,2022-02-01,181054.45,99036.78,54.7,2971.1,6
+EMP-0036,Employee_36,East,R&D,Product Manager,2020-09-26,132247.01,201808.94,152.6,10090.45,9
+EMP-0037,Employee_37,East,R&D,Product Manager,2023-02-18,183405.77,161580.48,88.1,4847.41,3
+EMP-0038,Employee_38,South,R&D,Engineer,2022-02-12,54099.77,72169.09,133.4,3608.45,7
+EMP-0039,Employee_39,East,Finance,CFO,2022-06-12,178281.26,100550.63,56.4,3016.52,2
+EMP-0040,Employee_40,South,Marketing,Marketing Specialist,2020-09-12,133528.03,106555.37,79.8,3196.66,7
+EMP-0041,Employee_41,East,Operations,Ops Coordinator,2021-06-13,114813.67,112058.14,97.6,3361.74,5
+EMP-0042,Employee_42,Central,R&D,Data Analyst,2024-05-27,85365.65,95353.43,111.7,4767.67,3
+EMP-0043,Employee_43,East,Marketing,Marketing Specialist,2024-10-02,170095.21,115324.55,67.8,3459.74,8
+EMP-0044,Employee_44,North,Operations,Ops Coordinator,2020-10-07,78869.88,100480.23,127.4,5024.01,7
+EMP-0045,Employee_45,South,Finance,Accountant,2020-01-07,155973.79,136165.12,87.3,4084.95,4
+EMP-0046,Employee_46,North,Sales,Sales Director,2024-05-14,110291.24,166319.19,150.8,8315.96,5
+EMP-0047,Employee_47,West,Operations,Ops Coordinator,2022-05-21,161308.15,168244.4,104.3,8412.22,6
+EMP-0048,Employee_48,South,Finance,Financial Analyst,2023-02-12,84567.45,102326.61,121.0,5116.33,3
+EMP-0049,Employee_49,South,Marketing,Campaign Manager,2023-10-01,81896.55,99750.0,121.8,4987.5,5
+EMP-0050,Employee_50,East,Sales,Account Manager,2020-08-24,196174.72,155566.55,79.3,4667.0,7
+EMP-0051,Employee_51,North,Operations,Ops Coordinator,2020-04-22,87118.0,40335.63,46.3,1210.07,1
+EMP-0052,Employee_52,North,R&D,Product Manager,2023-05-12,45766.84,42929.3,93.8,1287.88,2
+EMP-0053,Employee_53,West,Marketing,Brand Manager,2023-07-31,66520.07,88272.13,132.7,4413.61,5
+EMP-0054,Employee_54,Central,R&D,Engineer,2024-09-02,164210.02,156492.15,95.3,4694.76,7
+EMP-0055,Employee_55,East,Finance,Financial Analyst,2021-02-12,74192.77,105131.16,141.7,5256.56,3
+EMP-0056,Employee_56,North,R&D,Engineer,2022-09-27,116792.67,50921.6,43.6,1527.65,4
+EMP-0057,Employee_57,Central,Marketing,Brand Manager,2020-06-19,178553.98,86063.02,48.2,2581.89,6
+EMP-0058,Employee_58,Central,Finance,Accountant,2022-05-24,189177.64,192204.48,101.6,9610.22,7
+EMP-0059,Employee_59,South,Finance,Accountant,2021-12-23,165048.66,161087.49,97.6,4832.62,6
+EMP-0060,Employee_60,North,R&D,Data Analyst,2022-06-09,61272.26,74813.43,122.1,3740.67,4
+EMP-0061,Employee_61,North,Operations,Supply Chain,2021-09-18,99460.93,139046.38,139.8,6952.32,10
+EMP-0062,Employee_62,East,Marketing,Brand Manager,2024-07-21,166982.09,169319.84,101.4,8465.99,18
+EMP-0063,Employee_63,Central,Sales,Account Manager,2022-05-20,146545.04,91737.2,62.6,2752.12,5
+EMP-0064,Employee_64,West,Operations,Ops Coordinator,2024-02-14,111462.44,143898.01,129.1,7194.9,3
+EMP-0065,Employee_65,Central,Operations,Supply Chain,2020-05-13,197779.28,132314.34,66.9,3969.43,3
+EMP-0066,Employee_66,South,Finance,CFO,2023-03-24,73681.93,62703.32,85.1,1881.1,2
+EMP-0067,Employee_67,East,R&D,Engineer,2023-06-02,129882.13,143259.99,110.3,7163.0,23
+EMP-0068,Employee_68,North,Sales,Sales Rep,2022-12-26,131248.15,106048.51,80.8,3181.46,7
+EMP-0069,Employee_69,North,Finance,Accountant,2024-09-01,188291.03,235552.08,125.1,11777.6,19
+EMP-0070,Employee_70,North,Finance,CFO,2022-04-18,142807.09,106962.51,74.9,3208.88,6
+EMP-0071,Employee_71,East,Operations,Logistics Manager,2024-02-16,189440.11,252334.23,133.2,12616.71,14
+EMP-0072,Employee_72,Central,Operations,Supply Chain,2022-01-29,104466.87,112092.95,107.3,5604.65,3
+EMP-0073,Employee_73,West,R&D,Data Analyst,2023-12-25,127072.49,165829.6,130.5,8291.48,16
+EMP-0074,Employee_74,Central,Sales,Sales Director,2020-04-15,60455.52,29381.38,48.6,881.44,1
+EMP-0075,Employee_75,West,Finance,CFO,2023-09-14,182522.98,258270.02,141.5,12913.5,6
+EMP-0076,Employee_76,South,R&D,Data Analyst,2023-01-11,61880.34,69924.78,113.0,3496.24,2
+EMP-0077,Employee_77,North,Operations,Ops Coordinator,2021-11-03,157604.17,163120.32,103.5,8156.02,4
+EMP-0078,Employee_78,East,R&D,Engineer,2024-06-05,75198.9,113625.54,151.1,5681.28,5
+EMP-0079,Employee_79,South,Finance,Financial Analyst,2022-12-07,47817.9,29599.28,61.9,887.98,2
+EMP-0080,Employee_80,North,Marketing,Campaign Manager,2022-10-26,88092.23,81132.94,92.1,2433.99,3
+EMP-0081,Employee_81,North,Finance,Accountant,2023-06-02,197632.15,195655.83,99.0,5869.67,7
+EMP-0082,Employee_82,East,R&D,Data Analyst,2020-01-24,180876.35,77234.2,42.7,2317.03,2
+EMP-0083,Employee_83,Central,Marketing,Marketing Specialist,2022-06-30,109561.76,49960.16,45.6,1498.8,3
+EMP-0084,Employee_84,Central,Operations,Logistics Manager,2023-04-13,65313.39,90654.99,138.8,4532.75,4
+EMP-0085,Employee_85,East,Finance,CFO,2024-03-17,33513.48,42428.07,126.6,2121.4,1
+EMP-0086,Employee_86,North,R&D,Engineer,2020-09-16,144466.87,61253.95,42.4,1837.62,2
+EMP-0087,Employee_87,North,Finance,Accountant,2024-05-31,129363.81,53427.25,41.3,1602.82,1
+EMP-0088,Employee_88,Central,Marketing,Campaign Manager,2022-08-29,82253.54,96730.16,117.6,4836.51,5
+EMP-0089,Employee_89,North,Marketing,Campaign Manager,2022-05-23,37184.63,17513.96,47.1,525.42,1
+EMP-0090,Employee_90,Central,Sales,Sales Director,2024-01-08,50912.88,37675.53,74.0,1130.27,5
+EMP-0091,Employee_91,South,R&D,Engineer,2024-01-03,108376.55,95479.74,88.1,2864.39,2
+EMP-0092,Employee_92,Central,Operations,Ops Coordinator,2022-02-15,158779.42,90186.71,56.8,2705.6,4
+EMP-0093,Employee_93,South,R&D,Data Analyst,2024-01-15,131929.25,142747.45,108.2,7137.37,10
+EMP-0094,Employee_94,South,Finance,Accountant,2023-12-13,31209.45,24998.77,80.1,749.96,1
+EMP-0095,Employee_95,West,Sales,Account Manager,2023-07-20,192456.48,180909.09,94.0,5427.27,11
+EMP-0096,Employee_96,East,Operations,Logistics Manager,2021-05-05,129413.14,140025.02,108.2,7001.25,7
+EMP-0097,Employee_97,North,Sales,Account Manager,2021-08-17,71836.89,111203.51,154.8,5560.18,3
+EMP-0098,Employee_98,South,Finance,Accountant,2022-08-23,112647.04,106789.39,94.8,3203.68,2
+EMP-0099,Employee_99,Central,Finance,Financial Analyst,2024-04-17,140526.68,125349.8,89.2,3760.49,6
+EMP-0100,Employee_100,South,R&D,Engineer,2022-12-03,43975.16,60201.99,136.9,3010.1,4
+EMP-0101,Employee_101,West,Sales,Sales Rep,2020-08-02,135986.81,168079.7,123.6,8403.99,3
+EMP-0102,Employee_102,East,Marketing,Brand Manager,2023-01-01,178272.71,207152.89,116.2,10357.64,11
+EMP-0103,Employee_103,East,Sales,Account Manager,2020-09-11,36370.48,43753.69,120.3,2187.68,1
+EMP-0104,Employee_104,South,Operations,Ops Coordinator,2020-01-17,74889.99,73691.75,98.4,2210.75,5
+EMP-0105,Employee_105,South,Finance,Accountant,2021-06-23,137739.2,166939.91,121.2,8347.0,7
+EMP-0106,Employee_106,Central,Finance,Accountant,2023-04-27,83888.05,54862.78,65.4,1645.88,9
+EMP-0107,Employee_107,West,Finance,Accountant,2022-05-06,114200.51,81310.76,71.2,2439.32,2
+EMP-0108,Employee_108,Central,Sales,Sales Director,2020-12-21,59432.65,62047.69,104.4,3102.38,1
+EMP-0109,Employee_109,Central,Finance,Financial Analyst,2024-04-16,75835.81,59455.28,78.4,1783.66,1
+EMP-0110,Employee_110,North,Marketing,Brand Manager,2023-01-06,157264.82,148457.99,94.4,4453.74,3
+EMP-0111,Employee_111,North,Operations,Logistics Manager,2024-12-24,63412.82,74193.0,117.0,3709.65,3
+EMP-0112,Employee_112,Central,Finance,Accountant,2024-06-03,47961.92,41247.25,86.0,1237.42,1
+EMP-0113,Employee_113,East,Sales,Sales Rep,2021-09-16,191008.87,211828.84,110.9,10591.44,5
+EMP-0114,Employee_114,North,Finance,Financial Analyst,2021-02-24,123224.04,114844.81,93.2,3445.34,3
+EMP-0115,Employee_115,Central,Marketing,Campaign Manager,2021-04-24,66456.34,49244.15,74.1,1477.32,2
+EMP-0116,Employee_116,North,R&D,Engineer,2021-04-21,151968.22,171116.22,112.6,8555.81,5
+EMP-0117,Employee_117,North,R&D,Engineer,2022-11-15,170403.79,246744.69,144.8,12337.23,5
+EMP-0118,Employee_118,South,Finance,Accountant,2022-03-21,52650.84,37750.65,71.7,1132.52,3
+EMP-0119,Employee_119,North,R&D,Engineer,2023-09-03,174055.01,249768.94,143.5,12488.45,16
+EMP-0120,Employee_120,North,Finance,Accountant,2024-01-23,140903.39,132449.19,94.0,3973.48,12
+EMP-0121,Employee_121,East,R&D,Engineer,2020-02-10,39621.51,48655.21,122.8,2432.76,1
+EMP-0122,Employee_122,East,Sales,Sales Director,2021-03-16,57125.38,48270.95,84.5,1448.13,1
+EMP-0123,Employee_123,Central,Sales,Sales Rep,2023-06-26,112062.6,127639.3,113.9,6381.97,14
+EMP-0124,Employee_124,South,Marketing,Brand Manager,2023-01-19,191860.06,83267.27,43.4,2498.02,2
+EMP-0125,Employee_125,Central,Operations,Ops Coordinator,2024-03-04,96261.68,68057.01,70.7,2041.71,1
+EMP-0126,Employee_126,West,Marketing,Marketing Specialist,2020-12-29,93443.03,148574.42,159.0,7428.72,3
+EMP-0127,Employee_127,South,Marketing,Brand Manager,2020-01-29,75052.5,110177.07,146.8,5508.85,3
+EMP-0128,Employee_128,South,Marketing,Brand Manager,2020-07-23,48339.99,67385.95,139.4,3369.3,9
+EMP-0129,Employee_129,South,R&D,Product Manager,2022-12-12,103375.6,126635.11,122.5,6331.76,9
+EMP-0130,Employee_130,West,Sales,Sales Rep,2023-01-23,97890.57,120699.07,123.3,6034.95,10
+EMP-0131,Employee_131,South,Sales,Sales Rep,2023-05-02,86987.6,117520.25,135.1,5876.01,5
+EMP-0132,Employee_132,West,Marketing,Marketing Specialist,2023-03-15,91266.46,81318.42,89.1,2439.55,3
+EMP-0133,Employee_133,North,Sales,Account Manager,2022-08-10,110885.33,86047.02,77.6,2581.41,11
+EMP-0134,Employee_134,West,Marketing,Marketing Specialist,2021-11-14,192403.54,207026.21,107.6,10351.31,37
+EMP-0135,Employee_135,West,Marketing,Campaign Manager,2022-08-03,45210.79,58909.66,130.3,2945.48,9
+EMP-0136,Employee_136,West,Marketing,Marketing Specialist,2020-07-10,48556.7,50935.98,104.9,2546.8,2
+EMP-0137,Employee_137,North,Finance,Financial Analyst,2024-12-16,42846.99,37191.19,86.8,1115.74,3
+EMP-0138,Employee_138,North,Sales,Account Manager,2021-10-09,177923.59,222760.33,125.2,11138.02,13
+EMP-0139,Employee_139,West,Sales,Account Manager,2020-08-15,126811.5,134039.76,105.7,6701.99,3
+EMP-0140,Employee_140,North,Operations,Ops Coordinator,2022-07-20,73662.0,51121.43,69.4,1533.64,7
+EMP-0141,Employee_141,South,Marketing,Brand Manager,2021-08-23,175660.85,266477.51,151.7,13323.88,24
+EMP-0142,Employee_142,East,Marketing,Marketing Specialist,2023-08-19,97542.94,55892.1,57.3,1676.76,4
+EMP-0143,Employee_143,Central,R&D,Engineer,2020-10-17,192239.48,287782.5,149.7,14389.12,8
+EMP-0144,Employee_144,North,Finance,Financial Analyst,2021-09-16,156124.33,145976.25,93.5,4379.29,3
+EMP-0145,Employee_145,South,Operations,Supply Chain,2020-02-16,65401.5,40483.53,61.9,1214.51,1
+EMP-0146,Employee_146,East,R&D,Engineer,2021-04-05,186901.37,180172.92,96.4,5405.19,21
+EMP-0147,Employee_147,West,Finance,Financial Analyst,2024-01-14,124722.53,195190.76,156.5,9759.54,6
+EMP-0148,Employee_148,East,R&D,Data Analyst,2022-01-05,129338.84,106187.19,82.1,3185.62,5
+EMP-0149,Employee_149,South,Sales,Sales Rep,2023-03-23,143460.52,112473.05,78.4,3374.19,2
+EMP-0150,Employee_150,Central,Sales,Sales Rep,2024-07-07,103077.4,150183.77,145.7,7509.19,3
+EMP-0151,Employee_151,East,Finance,CFO,2024-12-17,100316.06,97808.16,97.5,2934.24,4
+EMP-0152,Employee_152,Central,Operations,Ops Coordinator,2021-03-14,108813.52,173992.82,159.9,8699.64,4
+EMP-0153,Employee_153,Central,Finance,Financial Analyst,2021-09-30,107551.71,46032.13,42.8,1380.96,1
+EMP-0154,Employee_154,West,Finance,Accountant,2023-03-02,48621.03,21344.63,43.9,640.34,1
+EMP-0155,Employee_155,Central,Marketing,Marketing Specialist,2022-06-14,81131.84,37320.65,46.0,1119.62,1
+EMP-0156,Employee_156,Central,Marketing,Brand Manager,2023-05-30,193531.12,222560.79,115.0,11128.04,5
+EMP-0157,Employee_157,East,Marketing,Brand Manager,2023-01-11,75732.64,69976.96,92.4,2099.31,3
+EMP-0158,Employee_158,North,Finance,Accountant,2020-08-28,68080.25,106137.11,155.9,5306.86,5
+EMP-0159,Employee_159,East,Operations,Ops Coordinator,2020-10-30,151450.7,62397.69,41.2,1871.93,8
+EMP-0160,Employee_160,South,Marketing,Campaign Manager,2024-01-28,113583.56,173442.1,152.7,8672.11,15
+EMP-0161,Employee_161,North,R&D,Product Manager,2020-01-04,179370.37,235692.67,131.4,11784.63,46
+EMP-0162,Employee_162,North,Sales,Sales Director,2022-11-28,94073.57,127187.47,135.2,6359.37,3
+EMP-0163,Employee_163,West,Operations,Ops Coordinator,2023-04-30,48909.08,19857.09,40.6,595.71,1
+EMP-0164,Employee_164,Central,Finance,Accountant,2020-09-05,72860.84,64627.57,88.7,1938.83,13
+EMP-0165,Employee_165,Central,Sales,Account Manager,2023-03-08,158004.66,182179.37,115.3,9108.97,4
+EMP-0166,Employee_166,South,Operations,Ops Coordinator,2022-07-24,156167.97,171472.43,109.8,8573.62,6
+EMP-0167,Employee_167,Central,Operations,Supply Chain,2024-01-07,135021.91,116928.97,86.6,3507.87,4
+EMP-0168,Employee_168,East,R&D,Data Analyst,2024-09-21,191662.33,293435.03,153.1,14671.75,7
+EMP-0169,Employee_169,Central,Operations,Logistics Manager,2021-06-12,96046.34,43124.81,44.9,1293.74,7
+EMP-0170,Employee_170,Central,Finance,CFO,2021-07-21,146330.48,102285.01,69.9,3068.55,10
+EMP-0171,Employee_171,North,Marketing,Brand Manager,2020-06-17,188026.75,193291.5,102.8,9664.58,22
+EMP-0172,Employee_172,North,Finance,CFO,2023-08-15,92794.6,65976.96,71.1,1979.31,2
+EMP-0173,Employee_173,Central,R&D,Engineer,2020-02-07,62149.14,44250.19,71.2,1327.51,1
+EMP-0174,Employee_174,North,Sales,Account Manager,2021-02-20,85070.13,58443.18,68.7,1753.3,2
+EMP-0175,Employee_175,North,Operations,Logistics Manager,2022-02-07,190386.44,214946.29,112.9,10747.31,13
+EMP-0176,Employee_176,Central,R&D,Product Manager,2022-06-03,105074.85,132289.24,125.9,6614.46,14
+EMP-0177,Employee_177,Central,Marketing,Brand Manager,2024-12-09,139473.61,58439.44,41.9,1753.18,5
+EMP-0178,Employee_178,Central,Sales,Sales Director,2022-11-04,55875.28,31569.53,56.5,947.09,2
+EMP-0179,Employee_179,West,Finance,Financial Analyst,2020-01-03,55379.61,81352.65,146.9,4067.63,7
+EMP-0180,Employee_180,Central,R&D,Data Analyst,2024-12-22,41904.73,29919.98,71.4,897.6,2
+EMP-0181,Employee_181,South,Operations,Ops Coordinator,2024-06-05,185166.26,215718.69,116.5,10785.93,16
+EMP-0182,Employee_182,East,Marketing,Marketing Specialist,2021-12-06,199276.78,83895.52,42.1,2516.87,5
+EMP-0183,Employee_183,South,Finance,Accountant,2024-04-29,125202.33,70989.72,56.7,2129.69,2
+EMP-0184,Employee_184,North,Finance,Accountant,2023-11-07,101174.39,48867.23,48.3,1466.02,4
+EMP-0185,Employee_185,East,R&D,Data Analyst,2020-02-06,78767.0,113424.48,144.0,5671.22,5
+EMP-0186,Employee_186,North,Sales,Account Manager,2023-05-17,59391.82,27676.59,46.6,830.3,1
+EMP-0187,Employee_187,North,Sales,Sales Rep,2020-09-18,125464.79,128852.34,102.7,6442.62,5
+EMP-0188,Employee_188,North,Sales,Sales Director,2024-12-05,156758.39,95779.38,61.1,2873.38,2
+EMP-0189,Employee_189,South,Finance,CFO,2023-07-08,102626.67,84256.5,82.1,2527.69,8
+EMP-0190,Employee_190,East,Finance,CFO,2022-02-05,31959.82,41004.45,128.3,2050.22,2
+EMP-0191,Employee_191,East,Marketing,Campaign Manager,2024-03-24,73953.3,63451.93,85.8,1903.56,9
+EMP-0192,Employee_192,East,Marketing,Marketing Specialist,2022-06-19,101223.53,67111.2,66.3,2013.34,2
+EMP-0193,Employee_193,West,Sales,Sales Rep,2023-06-27,44979.14,30765.73,68.4,922.97,1
+EMP-0194,Employee_194,South,R&D,Product Manager,2024-09-27,55313.13,37723.55,68.2,1131.71,1
+EMP-0195,Employee_195,West,Sales,Account Manager,2022-04-19,120908.87,72061.69,59.6,2161.85,4
+EMP-0196,Employee_196,North,Marketing,Brand Manager,2023-09-30,191961.39,167582.29,87.3,5027.47,3
+EMP-0197,Employee_197,Central,Operations,Logistics Manager,2023-12-11,167570.77,255042.71,152.2,12752.14,5
+EMP-0198,Employee_198,West,Marketing,Marketing Specialist,2021-07-19,197206.06,305274.98,154.8,15263.75,9
+EMP-0199,Employee_199,West,Operations,Supply Chain,2022-06-24,116808.24,165050.04,141.3,8252.5,4
+EMP-0200,Employee_200,East,Operations,Logistics Manager,2024-08-26,43688.33,25863.49,59.2,775.9,3

@@ -1,0 +1,1974 @@
+"""Agent 工具注册：list_datasources, query_sql, render_chart."""
+import asyncio
+import json
+import logging
+import re
+from abc import ABC, abstractmethod
+from enum import Enum
+
+from app.config import settings
+from app.core.duckdb_client import duckdb_client
+from app.services.sql_guard import sql_guard, GuardResult
+
+log = logging.getLogger("lvco.agent_tools")
+
+
+def _flatten_measures(measures) -> list[dict]:
+    """把 LLM 产出的 measures 归一为扁平 dict 列表。
+
+    LLM 结构化输出偶发把每个度量都包成独立 list（如 ``[[{field,agg}],[{field,agg}]]``），
+    与 schema 声明的 `[{field, agg}]` 不一致。此处做防御性扁平化，避免下游
+    `isinstance(m, dict)` 过滤后度量为空、查询退化。
+    """
+    out: list[dict] = []
+    for m in (measures or []):
+        if isinstance(m, dict):
+            out.append(m)
+        elif isinstance(m, list):
+            for sub in m:
+                if isinstance(sub, dict):
+                    out.append(sub)
+                elif isinstance(sub, str):
+                    out.append({"field": sub, "agg": "SUM"})
+        elif isinstance(m, str):
+            out.append({"field": m, "agg": "SUM"})
+    return out
+
+
+def _resolve_time_filters(raw_filters) -> list:
+    """把过滤条件里的相对时间表达式（'now() - interval 3 month' 等）解析为具体日期边界。
+
+    让 query_engine/query_sql 对日期列的参数化比较一次成功，避免首次查询
+    Conversion Error 后被迫退化到裸 SQL。
+    """
+    from app.services.relative_time import apply_to_filters
+    return apply_to_filters(raw_filters)
+
+
+# ==================== 对话阶段状态机 ====================
+
+class ConversationPhase(str, Enum):
+    """对话阶段枚举：控制每个阶段可用的工具，防止跨阶段调用。
+
+    枚举值：
+        SELECTING：选数据源阶段，只暴露 list_datasources 工具
+        ANALYZING：查数据阶段，暴露 query_sql 和 list_datasources（查询失败时自纠错需要）
+        GENERATING：生图表阶段，只暴露 render_chart 工具
+        REPORTING：出报告阶段，无工具可用，纯文本输出
+    """
+    SELECTING = "selecting"      # 选数据源 → 只暴露 list_datasources
+    ANALYZING = "analyzing"      # 查数据   → 只暴露 query_sql
+    GENERATING = "generating"    # 生图表   → 只暴露 render_chart
+    REPORTING = "reporting"      # 出报告   → 无工具，纯文本
+
+
+# 各阶段可用工具集合（按职责映射，提升 Agent 协作能力）
+# SELECTING:  只暴露数据源浏览
+# ANALYZING:  查数据(list_fields取列 + query/query_engine) + 数据质量 + 洞察 + 清洗建议
+# GENERATING: 图表生成(render) + 图表自校验(validate) + 类型推荐(recommend)
+# REPORTING:  报告润色
+# 不暴露给 Agent 的工具（集中清单）：属 UI 交互能力或未启用能力——
+# 注册表保留（前端按钮/独立端点仍可用、可一行恢复），但一律不进 LLM schema、
+# 不进阶段白名单、不进编排器/执行器白名单。
+# 判据：能力在 UI 已有调用路径 + agent 路径实测 0 调用。见《工具审计（20 工具）》。
+AGENT_HIDDEN_TOOLS = frozenset({
+    "insight", "clean_suggest", "polish_text", "recommend_charts",
+    "validate_chart", "data_quality",
+})
+
+_PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
+    ConversationPhase.SELECTING: {"list_datasources", "list_metrics"},
+    ConversationPhase.ANALYZING: {
+        "list_datasources",
+        "list_fields",
+        "list_metrics",
+        "query_sql",
+        "query_engine",
+        "stats_analyzer",
+        "add_chart_block",
+        "add_text_block",
+        "update_chart_block",
+        "remove_block",
+        "clear_canvas",
+        "arrange_layout",
+        "get_canvas_layout",
+    },
+    ConversationPhase.GENERATING: {
+        "render_chart",
+        "add_chart_block",
+        "add_text_block",
+        "update_chart_block",
+        "remove_block",
+        "clear_canvas",
+        "arrange_layout",
+        "get_canvas_layout",
+    },
+    ConversationPhase.REPORTING: {
+        "add_text_block",
+        "add_chart_block",
+        "update_chart_block",
+        "remove_block",
+        "clear_canvas",
+        "get_canvas_layout",
+    },
+}
+
+
+def get_tools_for_phase(phase: ConversationPhase, all_schemas: list[dict]) -> list[dict]:
+    """根据当前对话阶段过滤可用工具。
+
+    根据传入的对话阶段（phase），从全部工具 schema 列表中筛选出当前阶段允许使用的工具。
+
+    参数：
+        phase: 当前对话阶段（ConversationPhase 枚举值）
+        all_schemas: 全部工具 schema 列表，每项包含 function name 等信息
+
+    返回：
+        过滤后的工具 schema 列表；REPORTING 阶段仅保留 polish_text
+    """
+    allowed = _PHASE_TOOLS.get(phase, set())
+    return [s for s in all_schemas if s["function"]["name"] in allowed]
+
+
+# ==================== AI 推荐图表 ECharts option 构建 ====================
+# 镜像前端 buildMultiMeasureOption（echartsUtils.ts），保证双Y轴/图例/水平条形等
+# 在 AI 推荐链路和画布手动配置链路下行为一致。
+_MULTI_MEASURE_COLORS = [
+    '#2BB5A0', '#6C7BF2', '#F5A623', '#EF5B5B',
+    '#4EADFF', '#A78BFA', '#F472B6', '#34D399',
+]
+
+
+_AXIS_LABEL_FORMATTER = "__lvco_fmt_y__"
+
+
+def _safe_float(v, default=0.0):
+    """安全地将值转换为浮点数，转换失败时返回默认值（默认 0.0）。
+
+    参数：
+        v: 待转换的值，可以是数字、字符串或 None
+        default: 转换失败时返回的默认值，默认为 0.0
+
+    返回：
+        转换后的浮点数，或默认值
+    """
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_multi_measure_option(
+    chart_type: str,
+    columns: list,
+    rows: list,
+    title: str,
+    horizontal: bool = False,
+    stacked: bool = False,
+) -> dict:
+    """Python 版 multi_measure ECharts option 构建器（双Y轴 + PowerBI 图例 + 水平条形）。
+
+    该函数镜向前端 buildMultiMeasureOption（echartsUtils.ts），
+    保证 AI 推荐链路和画布手动配置链路下行为一致。
+    当数据有 2+ 个度量值时，自动分配左/右双Y轴以提升可读性。
+
+    参数：
+        chart_type: 图表基础类型（"bar" / "line" / "area"）
+        columns: 数据列名列表，第一列为维度列，后续为度量列
+        rows: 数据行二维数组
+        title: 图表标题
+        horizontal: 是否水平布局（水平条形图时 True）
+        stacked: 是否堆叠（堆叠柱状图时 True）
+
+    返回：
+        ECharts option 配置字典；若 columns 或 rows 为空则返回空字典
+    """
+    if not columns or not rows:
+        return {}
+
+    dim_col = columns[0]
+    measure_cols = list(columns[1:])
+    n_measures = len(measure_cols)
+    use_dual_axis = n_measures >= 2
+    is_area = chart_type == "area"
+    is_stacked = stacked and chart_type == "bar"
+    show_legend = n_measures > 1
+
+    # 维度数据
+    dims = [str(r[0]) if r else "" for r in rows]
+
+    # 提取度量数值
+    measure_values = []
+    for m_col in measure_cols:
+        m_idx = columns.index(m_col)
+        vals = [_safe_float(r[m_idx] if m_idx < len(r) else 0) for r in rows]
+        measure_values.append(vals)
+
+    # 每列最大值，用于右轴分配
+    maxes = [max(v) if v else 0 for v in measure_values]
+    global_max = max(maxes) if maxes else 0
+
+    # 右轴分配：明显小于最大值的放到右轴
+    axis_assignments: list[int] = []
+    for m in maxes:
+        axis_assignments.append(1 if (use_dual_axis and m > 0 and m < global_max) else 0)
+    # 至少保证左轴有一个度量
+    if use_dual_axis and 0 not in axis_assignments and axis_assignments:
+        axis_assignments[0] = 0
+
+    # 左轴 + 右轴
+    yaxis_list = []
+    if use_dual_axis:
+        # 左轴
+        yaxis_list.append({
+            "type": "value",
+            "name": measure_cols[0],
+            "nameTextStyle": {"color": _MULTI_MEASURE_COLORS[0], "fontSize": 11},
+            "position": "left",
+            "axisLine": {"show": True, "lineStyle": {"color": _MULTI_MEASURE_COLORS[0]}},
+            "axisLabel": {"formatter": _AXIS_LABEL_FORMATTER, "color": "#8B97A8", "fontSize": 11},
+            "splitLine": {"lineStyle": {"color": "#EEF1F6", "type": "dashed"}},
+        })
+        # 右轴：找第一个被分到右轴的度量
+        right_idx = next((i for i, a in enumerate(axis_assignments) if a == 1), 0)
+        right_color = _MULTI_MEASURE_COLORS[right_idx % len(_MULTI_MEASURE_COLORS)]
+        right_name = measure_cols[right_idx] if right_idx < len(measure_cols) else ""
+        yaxis_list.append({
+            "type": "value",
+            "name": right_name,
+            "nameTextStyle": {"color": right_color, "fontSize": 11},
+            "position": "right",
+            "axisLine": {"show": True, "lineStyle": {"color": right_color}},
+            "axisLabel": {"formatter": _AXIS_LABEL_FORMATTER, "color": "#8B97A8", "fontSize": 11},
+            "splitLine": {"show": False},
+        })
+    else:
+        yaxis_list.append({
+            "type": "value",
+            "axisLabel": {"formatter": _AXIS_LABEL_FORMATTER, "color": "#8B97A8", "fontSize": 11},
+            "splitLine": {"lineStyle": {"color": "#EEF1F6", "type": "dashed"}},
+        })
+
+    # series
+    series = []
+    for i, m_col in enumerate(measure_cols):
+        s = {
+            "name": m_col,
+            "type": "line" if (chart_type == "line" or is_area) else "bar",
+            "data": measure_values[i],
+            "itemStyle": {"color": _MULTI_MEASURE_COLORS[i % len(_MULTI_MEASURE_COLORS)]},
+            "yAxisIndex": axis_assignments[i],
+        }
+        if is_stacked:
+            s["stack"] = "total"
+        if chart_type == "line" or is_area:
+            s["smooth"] = True
+            s["symbol"] = "circle"
+            s["symbolSize"] = 6
+        if is_area:
+            s["areaStyle"] = {"opacity": 0.25}
+        if chart_type == "bar":
+            s["barMaxWidth"] = 40
+        series.append(s)
+
+    # xAxis
+    if horizontal:
+        xaxis = {
+            "type": "value",
+            "axisLabel": {"formatter": _AXIS_LABEL_FORMATTER, "color": "#8B97A8", "fontSize": 11},
+            "splitLine": {"lineStyle": {"color": "#EEF1F6", "type": "dashed"}},
+        }
+    else:
+        xaxis = {
+            "type": "category",
+            "data": dims,
+            "axisLabel": {
+                "color": "#8B97A8",
+                "fontSize": 11,
+                "interval": 0,
+                "rotate": 30 if len(dims) > 6 else 0,
+            },
+            "axisLine": {"lineStyle": {"color": "#E2E8F0"}},
+        }
+
+    # yAxis output
+    if horizontal:
+        yaxis_out = {
+            "type": "category",
+            "data": list(reversed(dims)),
+            "axisLabel": {"color": "#8B97A8", "fontSize": 11},
+            "axisLine": {"show": False},
+            "axisTick": {"show": False},
+        }
+    elif use_dual_axis:
+        yaxis_out = yaxis_list
+    else:
+        yaxis_out = yaxis_list[0]
+
+    # legend (PowerBI 风格)
+    legend_data = [
+        {"name": m, "icon": "roundRect", "textStyle": {"color": "#1A2332", "fontSize": 11}}
+        for m in measure_cols
+    ]
+
+    grid_bottom = 28 if horizontal else 36
+    grid_top = 40 if title else (32 if show_legend else 12)
+
+    return {
+        "title": (
+            {"text": title, "left": "center", "textStyle": {"fontSize": 13, "fontWeight": 600, "color": "#1A2332"}}
+            if title else None
+        ),
+        "tooltip": {
+            "trigger": "axis",
+            "axisPointer": {"type": "shadow" if horizontal else "line"},
+            "backgroundColor": "#FFFFFF",
+            "borderColor": "#E2E8F0",
+            "borderWidth": 1,
+            "textStyle": {"color": "#1A2332", "fontSize": 12},
+        },
+        "legend": {
+            "show": show_legend,
+            "data": legend_data,
+            "top": 6,
+            "left": "center",
+            "selectedMode": "multiple",
+            "type": "scroll",
+            "pageIconColor": "#8B97A8",
+            "pageTextStyle": {"color": "#8B97A8"},
+            "itemWidth": 12,
+            "itemHeight": 8,
+            "itemGap": 14,
+        },
+        "grid": {
+            "top": grid_top,
+            "left": 8,
+            "right": 12 if use_dual_axis else 16,
+            "bottom": grid_bottom,
+            "containLabel": True,
+        },
+        "xAxis": xaxis,
+        "yAxis": yaxis_out,
+        "series": series,
+    }
+
+
+# ==================== 工具基类 ====================
+
+class BaseTool(ABC):
+    """工具基类，定义所有 Agent 工具的公共接口。
+
+    所有具体工具（如 ListDatasourcesTool、QueryDatasourceTool、RenderChartTool）需继承此类并实现以下抽象方法。
+    """
+
+    # 是否允许 Planner/编排器使用（默认 False；安全工具标记为 True）
+    orchestrator_safe: bool = False
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """返回工具名称，用于工具路由和注册。"""
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        """返回工具描述，供 LLM 理解工具用途。"""
+
+    @abstractmethod
+    def schema(self) -> dict:
+        """返回工具的 OpenAI function calling schema 定义。"""
+
+    @abstractmethod
+    async def execute(self, **kwargs) -> str:
+        """执行工具逻辑，接收参数字典，返回 JSON 字符串结果。"""
+
+
+class ToolRegistry:
+    _tools: dict[str, BaseTool] = {}
+
+    @classmethod
+    def register(cls, tool: BaseTool) -> None:
+        cls._tools[tool.name] = tool
+
+    @classmethod
+    def get(cls, name: str) -> BaseTool | None:
+        return cls._tools.get(name)
+
+    @classmethod
+    def schemas(cls) -> list[dict]:
+        return [t.schema() for t in cls._tools.values()]
+
+    @classmethod
+    def orchestrator_safe_tools(cls) -> set[str]:
+        """返回所有标记为 orchestrator_safe=True 的工具名称集合。"""
+        return {
+            name for name, tool in cls._tools.items()
+            if getattr(tool, "orchestrator_safe", False) and name not in AGENT_HIDDEN_TOOLS
+        }
+
+
+# ==================== 工具实现 ====================
+
+class ListDatasourcesTool(BaseTool):
+    """浏览当前用户可用的所有数据源"""
+
+    name = "list_datasources"
+    orchestrator_safe = True
+    description = "列出当前可用的所有数据源（表级信息）：ID、名称、类型、行数、table_ref。需要某数据源的字段/列名时，另调用 list_fields(datasource_id)。"
+
+    def schema(self) -> dict:
+        """返回 list_datasources 工具的 OpenAI function calling schema。
+
+        该工具无参数，调用时无需传入任何参数。
+
+        返回：
+            OpenAI function calling 格式的 schema 字典
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+
+    async def execute(self, user_id: str, db_session=None, **kwargs) -> str:
+        """执行列出数据源的操作，返回当前用户所有数据源的概要信息。
+
+        从数据库中查询当前用户的数据源列表，为每个数据源提取字段信息、
+        构建 table_ref（表引用）和 sample_sql（预览 SQL），最后以 JSON 格式返回。
+
+        参数：
+            user_id: 当前用户 ID，用于过滤数据源
+            db_session: 数据库会话对象，用于异步查询（若为 None 则返回错误）
+            **kwargs: 额外关键字参数（未使用）
+
+        返回：
+            JSON 字符串，包含数据源总数、总行数估计值、数据源详情列表以及查询提示
+        """
+        import uuid
+        from app.models.datasource import SourceType
+        from app.repositories.datasource_repository import SQLAlchemyDataSourceRepository
+
+        if db_session is None:
+            return json.dumps({"error": "数据库会话不可用"}, ensure_ascii=False)
+
+        # 使用 Repository 查询（严格模式，要求 user_id 是合法 UUID）
+        repo = SQLAlchemyDataSourceRepository(db_session)
+        try:
+            user_uuid = uuid.UUID(user_id)
+            datasources, _ = await repo.list_datasources(
+                user_id=user_uuid,
+                page=1,
+                page_size=100,
+                source_type=None,
+                status=None,
+                search=None,
+            )
+        except ValueError:
+            return json.dumps({"error": f"无效的用户 ID: {user_id}"}, ensure_ascii=False)
+
+        summary = []
+        for ds in datasources:
+            schema_meta = ds.schema_meta or {}
+            # 表级信息：不再内嵌 columns/fields/sample_sql —— 列名按需走 list_fields(datasource_id)，避免一次性暴露全部列
+            conn_cfg = dict(ds.connection_config) if ds.connection_config else {}
+            schema_name = duckdb_client.get_schema_name(user_id, str(ds.id), ds.name, db_name=conn_cfg.get("db_name", ""))
+            if ds.source_type in (SourceType.postgresql, SourceType.mysql):
+                table_name = schema_meta.get("table_name", "data") if isinstance(schema_meta, dict) else "data"
+                table_ref = f'"{schema_name}".public."{table_name}"'
+            else:
+                table_ref = f'"{schema_name}"."data"'
+
+            summary.append({
+                "id": str(ds.id),
+                "name": ds.name,
+                "description": ds.description,
+                "type": ds.source_type.value if ds.source_type else "unknown",
+                "row_count": ds.row_count,
+                "table_ref": table_ref,
+            })
+
+        total = len(summary)
+        total_rows = sum(d.get("row_count", 0) for d in summary if d.get("row_count"))
+
+        return json.dumps({
+            "total_datasources": total,
+            "total_rows_estimate": total_rows,
+            "datasources": summary,
+            "tip": (
+                "本工具只返回表级信息（不含列名）。需要某数据源的完整字段/列名时，"
+                "调用 list_fields(datasource_id)。FROM 用 table_ref，列名用 list_fields 返回的 columns。"
+            ),
+        }, ensure_ascii=False)
+
+
+class ListFieldsTool(BaseTool):
+    """获取单个数据源的完整字段/列名（按需拉取，避免一次性暴露全部列）。"""
+
+    name = "list_fields"
+    orchestrator_safe = True
+    description = (
+        "获取指定数据源的完整字段列表：columns（列名数组，可直接用于 SQL/query_engine）"
+        "与 fields（列名+类型+示例值）。在编写查询前调用一次，或字段不确定时调用。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {
+                            "type": "string",
+                            "description": "数据源 ID（从 list_datasources 获取）",
+                        },
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, user_id: str, db_session=None, **kwargs) -> str:
+        from sqlalchemy import select
+        from app.models.datasource import DataSource
+
+        ds_result = await db_session.execute(
+            select(DataSource).where(DataSource.id == datasource_id, DataSource.user_id == user_id)
+        )
+        datasource = ds_result.scalar_one_or_none()
+        if datasource is None:
+            return json.dumps({"error": "数据源不存在或无权限", "hint": "先从 list_datasources 获取正确的数据源 ID"}, ensure_ascii=False)
+
+        schema_meta = dict(datasource.schema_meta or {})
+        fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
+        columns: list[str] = []
+        field_names: list[str] = []
+        examples: dict[str, list] = {}
+        for f in fields:
+            if isinstance(f, dict):
+                name = f.get("name", "?")
+                dtype = f.get("data_type", "?")
+                columns.append(name)
+                field_names.append(f"{name}({dtype})")
+                if f.get("sample"):
+                    examples[name] = f["sample"]
+        if not columns:
+            return json.dumps({"error": "数据源表结构为空", "hint": "请先同步该数据源的 schema"}, ensure_ascii=False)
+
+        return json.dumps({
+            "datasource_id": str(datasource.id),
+            "name": datasource.name,
+            "columns": columns,
+            "fields": field_names,
+            "samples": examples,
+        }, ensure_ascii=False)
+
+
+class QueryDatasourceTool(BaseTool):
+    """执行 SQL 查询（带三层安全防护）"""
+
+    name = "query_sql"
+    orchestrator_safe = True
+    description = (
+        "高级 SQL 兜底查询（仅支持 SELECT）：当 query_engine 覆盖不了时使用——"
+        "如时间趋势（date_trunc 按天/月聚合）、窗口函数、CTE、查询明细数据等复杂场景。"
+        "常规分组/对比/占比/排名等标准聚合分析请优先使用 query_engine（更安全、参数化）。"
+        "传入 datasource_id 和 SQL 语句。返回前 50 行结果。"
+        "重要：FROM 用 table_ref；列名用 list_fields 返回的 columns 数组中的值并加双引号；"
+        "严禁写 SELECT *（会被安全拦截），需要结构时用显式列名 + LIMIT 1。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {
+                            "type": "string",
+                            "description": "数据源 ID（从 list_datasources 获取）",
+                        },
+                        "sql": {
+                            "type": "string",
+                            "description": "DuckDB SQL 查询（仅 SELECT）",
+                        },
+                    },
+                    "required": ["datasource_id", "sql"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, sql: str, user_id: str,
+                      db_session=None, **kwargs) -> str:
+        """在指定数据源上执行 SQL 查询并返回结果。
+
+        流程：L3 安全校验 → 查询数据源元信息 → ATTACH 外部数据源（PostgreSQL/MySQL）→ 执行查询 → 解析列名 → 返回结果。
+        查询失败时返回详细的纠错信息（table_ref、可用列名），供 LLM 自纠错。
+
+        参数：
+            datasource_id: 数据源 ID（从 list_datasources 获取）
+            sql: 要执行的 DuckDB SQL 查询语句（仅支持 SELECT）
+            user_id: 当前用户 ID，用于权限校验
+            db_session: 数据库会话对象，用于查询数据源元信息
+            **kwargs: 额外关键字参数（未使用）
+
+        返回：
+            JSON 字符串，成功时包含 columns（列名）、row_count（行数）、rows（数据行）；
+            失败时包含 error 信息和纠错 hint
+        """
+        # L3 安全检查：通过 sql_guard 对 SQL 进行完整校验（拦截危险操作）
+        guard: GuardResult = sql_guard.full_check("", sql)
+        if not guard.allowed:
+            # 日志：拦截时同时输出实际 SQL 和 reason，便于排查 AST 误报（如 COUNT(*) 被当成 SELECT *）
+            # ast_details 若有 failed_rule 一起打，可精确定位到是哪一条 AST 规则命中
+            failed_rule = (guard.ast_details or {}).get("failed_rule")
+            log.warning(
+                "[QueryDatasourceTool] GUARD BLOCKED layer=%s rule=%s reason=%s sql=%s",
+                guard.layer, failed_rule or "-", guard.reason, sql[:500],
+            )
+            return json.dumps({"error": guard.reason}, ensure_ascii=False)
+
+        final_sql = guard.sanitized_sql or sql
+
+        # ── 安全说明 ────────────────────────────────────────────────────────────
+        # 此处使用 raw SQL 执行（duckdb_client.fetchall），而非参数化查询，原因如下：
+        #
+        # 1. SQL 由 LLM 动态生成，字面值（如 WHERE region = 'East'）直接嵌入在语句中，
+        #    无法像传统应用那样将值与模板分离，因此参数化在此场景下不适用。
+        #
+        # 2. 安全防护由多层机制构成，形成纵深防御（defense-in-depth）：
+        #    - AST 层：sql_guard 的 AST 校验已分析 SQL 语法树，确保仅允许 SELECT 语句，
+        #      禁止子查询、SELECT *、危险函数（如 read_parquet / load / ATTACH / DETACH）
+        #      以及非常用聚合函数，并对列名/表名进行引用校验。
+        #    - 正则层（L3）：在 AST 层之前或作为 fallback，通过正则表达式拦截危险模式。
+        #    - LIMIT 注入：AST 防护已在 SQL 末尾注入 LIMIT 子句，防止全表扫描。
+        # 3. duckdb_client.fetchall() 为只读操作，不会修改数据库状态。
+        #
+        # 综上，AST 验证 + L3 正则 + LIMIT 注入 + 只读执行 共同构成充足的安全保障，
+        # 无需对 LLM 生成的 SQL 进行参数化。
+        # ──────────────────────────────────────────────────────────────────────────
+
+        from sqlalchemy import select
+        from app.models.datasource import DataSource, SourceType
+
+        ds_result = await db_session.execute(
+            select(DataSource).where(
+                DataSource.id == datasource_id,
+                DataSource.user_id == user_id,
+            )
+        )
+        datasource = ds_result.scalar_one_or_none()
+        if not datasource:
+            return json.dumps({"error": "数据源不存在或无权限"}, ensure_ascii=False)
+
+        conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
+        schema_name = duckdb_client.get_schema_name(user_id, datasource_id, datasource.name, db_name=conn_info.get("db_name", ""))
+
+        # 如果数据源是外部数据库（PostgreSQL/MySQL），先解密连接密码并 ATTACH 到 DuckDB
+        if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
+            from app.utils.crypto import decrypt_value, get_encryption_key
+            key = get_encryption_key()
+            if key and conn_info.get("password"):
+                conn_info["password"] = decrypt_value(conn_info["password"], key)
+            # 按连接器各自默认用户/库名填充，避免错连（pg 默认 postgres，mysql 默认 root）
+            conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
+            conn_info["database"] = conn_info.get("db_name", "")
+            if datasource.source_type == SourceType.mysql:
+                from app.connectors.mysql_connector import mysql_connector as mysql_conn
+                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
+            else:
+                from app.connectors.postgres_connector import postgres_connector as pg_conn
+                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
+            # 首次 ATTACH 后复用连接：同 schema 再次查询直接跳过 DETACH+ATTACH
+            duckdb_client.ensure_attached(schema_name, attach_sql)
+
+        # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
+        # 本地库 table_ref 为 "schema"."data"（归属在 db），外部库为 "schema".public."table"（归属在 catalog）。
+        # 防止 LLM 生成 SQL 访问不属于当前数据源的 schema。
+        from app.services.sql_guard_ast import check_sql_table_ownership
+        ownership_ok, ownership_reason, _ownership_refs = check_sql_table_ownership(final_sql, {schema_name})
+        if not ownership_ok:
+            log.warning("Query tool ownership blocked: %s", ownership_reason)
+            return self._build_query_error(datasource, schema_name, ownership_reason, attempted_sql=final_sql[:300])
+
+        # 执行 SQL 查询并解析结果列名
+        # to_thread：DuckDB 为同步调用，放到线程池执行，避免阻塞事件循环；
+        # wait_for：查询超时保护，超过上限返回错误而不挂死请求。
+        try:
+            rows_raw = await asyncio.wait_for(
+                asyncio.to_thread(duckdb_client.fetchall, final_sql),
+                timeout=settings.QUERY_EXEC_TIMEOUT,
+            )
+            cols = []
+            # 通过正则从 SELECT 子句中提取列名（支持 AS 别名和双引号包裹）
+            select_match = re.match(
+                r"SELECT\s+(.+?)\s+FROM", final_sql,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if select_match:
+                cols_str = select_match.group(1)
+                # 按逗号分割列表达式（忽略括号内的逗号，如函数调用）
+                col_parts = re.split(r",(?![^(]*\))", cols_str)
+                for part in col_parts:
+                    part = part.strip()
+                    # 匹配 "column AS alias" 或 "column" 或带引号的列名
+                    as_match = re.search(
+                        r'(?:AS\s+)?["\']?(\w+)["\']?\s*$',
+                        part, re.IGNORECASE,
+                    )
+                    if as_match:
+                        cols.append(as_match.group(1))
+                    else:
+                        clean = part.strip('"').strip("'")
+                        if "." in clean:
+                            clean = clean.split(".")[-1]
+                        cols.append(clean)
+            # 如果正则提取失败但存在数据，生成默认列名
+            if not cols and rows_raw:
+                cols = [f"col_{i}" for i in range(len(rows_raw[0]))]
+
+            def _safe(v):
+                if v is None:
+                    return None
+                if isinstance(v, (int, float, str, bool)):
+                    return v
+                return str(v)
+
+            data_rows = [[_safe(v) for v in row] for row in rows_raw[:50]]
+            # 聚合判断（SQL 结构特征，非 LLM）：含 GROUP BY 或聚合函数 → 聚合查询（结果已浓缩，完整返回）
+            _sql_upper = (final_sql or "").upper()
+            _is_aggregate = bool(
+                re.search(r"\bGROUP\s+BY\b", _sql_upper)
+                or re.search(r"\b(SUM|AVG|COUNT|MIN|MAX|STDDEV|MEDIAN|PERCENTILE|STRING_AGG)\s*\(", _sql_upper)
+            )
+            total_rows = len(data_rows)
+            if _is_aggregate:
+                notice = (
+                    f"聚合查询已完成，已完整返回 {total_rows} 行（聚合结果本身已是浓缩数据），"
+                    "数据已齐全，不要再重复查询"
+                )
+            else:
+                notice = (
+                    f"明细查询已完成，共 {total_rows} 行；rows 仅为展示样本（行数超 50 时被截断）。"
+                    "若确需更多行请显式调大 LIMIT 后再查，否则不要重复查询同一数据"
+                )
+            # summary：供 LLM 核对结果是否符合用户问题意图（语义自评）+ 防恐慌重查声明
+            summary = {
+                "columns_count": len(cols),
+                "rows_count": total_rows,
+                "sample": data_rows[:3],
+                "aggregate": _is_aggregate,
+                "notice": notice,
+            }
+            return json.dumps({
+                # 执行结果附完整 SQL：审计追溯 + 供 LLM 精确续查（调大 LIMIT/加 OFFSET 翻页）。
+                # 放在最前，compact_result_json 截断时优先保留（rows 靠后被裁）。
+                "executed_sql": final_sql,
+                "columns": cols,
+                "row_count": len(data_rows),
+                "rows": data_rows,
+                "summary": summary,
+            }, ensure_ascii=False, default=str)
+        except asyncio.TimeoutError:
+            log.warning("Query tool timeout after %ss: %s", settings.QUERY_EXEC_TIMEOUT, final_sql[:200])
+            return self._build_query_error(
+                datasource, schema_name,
+                f"查询执行超时（>{settings.QUERY_EXEC_TIMEOUT}s），已中断",
+                attempted_sql=final_sql[:300],
+            )
+        except Exception as e:
+            log.warning("Query tool error: %s", e)
+            # 复用统一错误构造：table_ref + 可用列 hint 供 LLM 自纠错
+            return self._build_query_error(datasource, schema_name, str(e)[:200], attempted_sql=final_sql[:300])
+
+    def _build_query_error(self, datasource, schema_name: str, error_msg: str, attempted_sql: str = "") -> str:
+        """构造查询失败的错误 JSON（含正确 table_ref 与可用列 hint，供 LLM 自纠错）。
+
+        归属校验失败与执行异常共用此方法，保证错误契约一致。
+        """
+        if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
+            meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
+            table_name = meta.get("table_name", "data")
+            table_ref = f'"{schema_name}".public."{table_name}"'
+        else:
+            table_ref = f'"{schema_name}"."data"'
+
+        # 把数据源真实列名和 table_ref 注入 hint，让 LLM 能立即自纠错
+        available_columns: list[str] = []
+        schema_meta = datasource.schema_meta or {}
+        fields = schema_meta.get("fields", []) if isinstance(schema_meta, dict) else []
+        for f in fields:
+            if isinstance(f, dict) and f.get("name"):
+                available_columns.append(str(f["name"]))
+        hint_lines = [
+            f"FROM 子句必须用: {table_ref}（直接复制这个字符串，不要修改）",
+            "列名必须加双引号。",
+            "以下为该数据源真实列名（必须一字不差从这里复制）：",
+            ", ".join(f'"{c}"' for c in available_columns),
+        ]
+        payload = {
+            "error": f"查询执行失败: {error_msg}",
+            "table_ref": table_ref,
+            "hint": "\n".join(hint_lines),
+            "available_columns": available_columns,
+        }
+        if attempted_sql:
+            payload["attempted_sql"] = attempted_sql
+        return json.dumps(payload, ensure_ascii=False)
+
+
+class RenderChartTool(BaseTool):
+    """生成 ECharts 图表配置"""
+
+    name = "render_chart"
+    orchestrator_safe = True
+    description = (
+        "根据数据生成 ECharts 图表配置。**四个参数 chart_type/title/columns/rows 均为必填，"
+        "缺一不可**，请一次性填全：chart_type 选图表类型、title 写标题、columns 传列名数组、"
+        "rows 传数据行二维数组（可从查询结果取）。"
+        "返回 ECharts option 配置对象。"
+        "支持的图表类型: bar(柱状图), line(折线图), pie(饼图), donut(环形图), "
+        "area(面积图), scatter(散点图), kpi_card(指标卡), grouped_bar(分组柱状图), "
+        "stacked_bar(堆叠柱状图), horizontal_bar(水平条形图), "
+        "heatmap(热力图), radar(雷达图), funnel(漏斗图)"
+    )
+
+    def schema(self) -> dict:
+        """返回 render_chart 工具的 OpenAI function calling schema。
+
+        需要四个参数：chart_type（图表类型）、title（图表标题）、columns（数据列名列表）、
+        rows（数据行二维数组）。
+
+        返回：
+            OpenAI function calling 格式的 schema 字典
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chart_type": {
+                            "type": "string",
+                            "enum": [
+                                "bar", "line", "pie", "donut", "area", "scatter",
+                                "kpi_card", "grouped_bar", "stacked_bar",
+                                "horizontal_bar",
+                                "heatmap", "radar", "funnel",
+                            ],
+                            "description": "图表类型",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "图表标题",
+                        },
+                        "columns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "数据列名列表",
+                        },
+                        "rows": {
+                            "type": "array",
+                            "items": {"type": "array"},
+                            "description": "数据行（二维数组）",
+                        },
+                    },
+                    "required": ["chart_type", "title", "columns", "rows"],
+                },
+            },
+        }
+
+    async def execute(self, chart_type: str = "", title: str = "", columns: list | None = None,
+                  rows: list | None = None, **kwargs) -> str:
+        """根据传入的图表类型和数据生成 ECharts 图表 option 配置。
+
+        支持多种图表类型：普通柱状图、折线图、饼图、环形图、面积图、散点图、指标卡、
+        分组柱状图、堆叠柱状图、水平条形图、热力图、雷达图、漏斗图。
+        对于多度量场景（2+ 个度量值），走双Y轴构建器 _build_multi_measure_option，
+        与前端 buildMultiMeasureOption 行为一致。
+
+        参数：
+            chart_type: 图表类型字符串
+            title: 图表标题
+            columns: 数据列名列表，第一个为维度列，后续为度量列
+            rows: 数据行二维数组
+            **kwargs: 额外关键字参数（未使用）
+
+        返回：
+            JSON 字符串，包含原始 chart_type 和 ECharts option 配置对象
+        """
+        # 必填参数显式校验：LLM 流式 function-calling 可能只发出工具名、arguments 为空。
+        # 不靠 Python 的 missing-args TypeError（报错不够友好），而是返回带枚举的引导性错误，
+        # 让 LLM 按 hint 补全后重试。
+        missing = []
+        if not chart_type:
+            missing.append("chart_type")
+        if not title:
+            missing.append("title")
+        if not columns:
+            missing.append("columns")
+        if not rows:
+            missing.append("rows")
+        if missing:
+            return json.dumps({
+                "error": f"render_chart 缺少必填参数: {', '.join(missing)}，请补齐后重新调用",
+                "hint": (
+                    f"chart_type 可选值: bar、line、pie、donut、area、scatter、kpi_card、"
+                    "grouped_bar、stacked_bar、horizontal_bar、heatmap、radar、funnel；"
+                    "title 写图表标题；columns/rows 从查询结果中取"
+                ),
+            }, ensure_ascii=False)
+
+        if not rows or not columns:
+            return json.dumps({"error": "数据为空"}, ensure_ascii=False)
+
+        # 自校验：图表类型 + 数据一致性（内嵌校验，失败信息供 LLM 自纠错）
+        pre_check = validate_chart_option(chart_type, columns, rows, None)
+        if not pre_check["valid"]:
+            return json.dumps({
+                "error": "；".join(pre_check["errors"]),
+                "hint": pre_check["hint"],
+            }, ensure_ascii=False)
+
+        axisless = ("pie", "donut", "kpi_card", "funnel")
+        # 多度量场景（columns 长度 ≥ 3 = 1 维度 + 2+ 度量）走双Y轴 builder
+        # 镜像前端 buildMultiMeasureOption，保证 AI 推荐链路和画布手动配置一致
+        n_measures = max(0, len(columns) - 1)
+        use_multi_measure_builder = (
+            chart_type in ("bar", "line", "area", "stacked_bar",
+                           "grouped_bar", "horizontal_bar")
+            and n_measures >= 2
+        )
+
+        if use_multi_measure_builder:
+            horizontal = chart_type == "horizontal_bar"
+            stacked = chart_type == "stacked_bar"
+            # grouped_bar / stacked_bar / horizontal_bar 都基于 bar 构建
+            base_type = "bar" if chart_type in ("stacked_bar", "grouped_bar",
+                                                "horizontal_bar") else chart_type
+            option = _build_multi_measure_option(
+                chart_type=base_type,
+                columns=columns,
+                rows=rows,
+                title=title,
+                horizontal=horizontal,
+                stacked=stacked,
+            )
+            post_check = validate_chart_option(chart_type, columns, rows, option)
+            if not post_check["valid"]:
+                return json.dumps({
+                    "error": "；".join(post_check["errors"]),
+                    "hint": post_check["hint"],
+                }, ensure_ascii=False)
+            return json.dumps({
+                "chart_type": chart_type,
+                "option": option,
+            }, ensure_ascii=False)
+
+        option = {
+            "title": {"text": title, "left": "center"},
+            "tooltip": {"trigger": "axis" if chart_type not in axisless else "item"},
+        }
+
+        if chart_type in ("kpi_card",):
+            val = rows[0][1] if len(rows[0]) > 1 else rows[0][0]
+            option["series"] = [{
+                "type": "gauge",
+                "data": [{"value": val, "name": columns[1] if len(columns) > 1 else columns[0]}],
+                "detail": {"formatter": "{value}"},
+            }]
+
+        elif chart_type in ("pie", "donut"):
+            option["series"] = [{
+                "type": "pie",
+                "radius": ["40%", "70%"] if chart_type == "donut" else "70%",
+                "data": [{"name": str(r[0]), "value": r[1]} for r in rows],
+            }]
+
+        elif chart_type == "funnel":
+            # 漏斗图：第一列阶段名，第二列数值（降序排列）
+            funnel_data = sorted(
+                [{"name": str(r[0]), "value": r[1]} for r in rows if len(r) > 1],
+                key=lambda x: x["value"], reverse=True,
+            )
+            option["series"] = [{
+                "type": "funnel",
+                "data": funnel_data,
+                "sort": "descending",
+                "gap": 2,
+                "label": {"show": True, "position": "inside"},
+            }]
+
+        elif chart_type == "radar":
+            # 雷达图：第一列是维度名，后续每一列是一个指标
+            indicator = [{"name": str(r[0]), "max": max(r[1:] or [1]) * 1.2} for r in rows]
+            values = [r[1] if len(r) > 1 else 0 for r in rows]
+            option["radar"] = {"indicator": indicator}
+            option["series"] = [{
+                "type": "radar",
+                "data": [{"value": values, "name": title}],
+            }]
+
+        elif chart_type == "heatmap":
+            # 热力图：每行 [x, y, value]，需要去重构建坐标轴
+            x_set = sorted(set(str(r[0]) for r in rows if len(r) > 2))
+            y_set = sorted(set(str(r[1]) for r in rows if len(r) > 2))
+            heat_data = [[str(r[0]), str(r[1]), r[2]] for r in rows if len(r) > 2]
+            option["xAxis"] = {"type": "category", "data": x_set, "splitArea": {"show": True}}
+            option["yAxis"] = {"type": "category", "data": y_set, "splitArea": {"show": True}}
+            option["visualMap"] = {
+                "min": min((r[2] for r in heat_data), default=0),
+                "max": max((r[2] for r in heat_data), default=100),
+                "calculable": True,
+                "orient": "horizontal",
+                "left": "center",
+                "bottom": "0%",
+            }
+            option["series"] = [{
+                "type": "heatmap",
+                "data": heat_data,
+                "label": {"show": True},
+            }]
+            # heatmap 使用 category 轴，tooltip 改为 item
+            option["tooltip"] = {"trigger": "item"}
+
+        elif chart_type in ("grouped_bar", "stacked_bar"):
+            # 分组/堆叠柱状图：第1列是维度，后续每列是一个 series
+            dims = [str(r[0]) for r in rows]
+            series_list = []
+            for col_idx in range(1, len(columns)):
+                series_data = [r[col_idx] if len(r) > col_idx else 0 for r in rows]
+                series_list.append({
+                    "type": "bar",
+                    "name": columns[col_idx],
+                    "data": series_data,
+                    "stack": "total" if chart_type == "stacked_bar" else None,
+                })
+            option["xAxis"] = {"type": "category", "data": dims}
+            option["yAxis"] = {"type": "value"}
+            option["legend"] = {"data": columns[1:]}
+            option["series"] = series_list
+
+        else:
+            dims = [str(r[0]) for r in rows]
+            series_data = [r[1] if len(r) > 1 else 0 for r in rows]
+            series_name = columns[1] if len(columns) > 1 else "value"
+
+            if chart_type == "bar":
+                option["xAxis"] = {"type": "category", "data": dims}
+                option["yAxis"] = {"type": "value"}
+                option["series"] = [{"type": "bar", "data": series_data, "name": series_name}]
+            elif chart_type == "horizontal_bar":
+                # 水平条形：x/y 轴对调，让类目在纵轴、数值在横轴
+                option["xAxis"] = {"type": "value"}
+                option["yAxis"] = {"type": "category", "data": list(reversed(dims))}
+                option["series"] = [{
+                    "type": "bar",
+                    "data": list(reversed(series_data)),
+                    "name": series_name,
+                }]
+            elif chart_type == "line":
+                option["xAxis"] = {"type": "category", "data": dims}
+                option["yAxis"] = {"type": "value"}
+                option["series"] = [{
+                    "type": "line", "data": series_data,
+                    "name": series_name,
+                }]
+            elif chart_type == "area":
+                option["xAxis"] = {"type": "category", "data": dims}
+                option["yAxis"] = {"type": "value"}
+                option["series"] = [{
+                    "type": "line", "data": series_data,
+                    "name": series_name, "areaStyle": {},
+                }]
+            elif chart_type == "scatter":
+                scatter_data = [[r[0], r[1]] for r in rows if len(r) > 1]
+                option["xAxis"] = {"type": "value", "name": columns[0] if columns else ""}
+                option["yAxis"] = {"type": "value", "name": columns[1] if len(columns) > 1 else ""}
+                option["series"] = [{"type": "scatter", "data": scatter_data}]
+
+        post_check = validate_chart_option(chart_type, columns, rows, option)
+        if not post_check["valid"]:
+            return json.dumps({
+                "error": "；".join(post_check["errors"]),
+                "hint": post_check["hint"],
+            }, ensure_ascii=False)
+        return json.dumps({
+            "chart_type": chart_type,
+            "option": option,
+        }, ensure_ascii=False)
+
+
+
+# ==================== 图表配置校验（共享校验器） ====================
+# 单一校验实现：ValidateChartTool（工具）、render_chart（内嵌）、画布助手（API 层复用）三处共用
+
+VALID_CHART_TYPES: frozenset[str] = frozenset({
+    "bar", "line", "pie", "donut", "area", "scatter", "kpi_card",
+    "grouped_bar", "stacked_bar", "horizontal_bar",
+    "funnel", "heatmap", "radar", "sankey",
+})
+
+
+def _validate_chart_type(ct: str) -> str | None:
+    """校验图表类型是否在白名单内，非法返回错误信息，合法返回 None。"""
+    if ct not in VALID_CHART_TYPES:
+        return f"不支持的图表类型: {ct}，支持: {', '.join(sorted(VALID_CHART_TYPES))}"
+    return None
+
+
+def validate_chart_config(config: dict, available_fields: set[str] | None = None) -> dict:
+    """校验画布配置形态：{action, chart_type, dimensions, measures, filters, rationale}。
+
+    与画布助手 API 层校验逻辑等价，作为唯一实现供两端复用。
+
+    返回：
+        {"valid": bool, "errors": list, "hint": str}
+    """
+    errors: list[str] = []
+    if not isinstance(config, dict):
+        return {"valid": False, "errors": ["配置必须是 JSON 对象"], "hint": "请输出正确的图表配置 JSON"}
+    ct = config.get("chart_type") or config.get("chartType") or ""
+    if ct:
+        err = _validate_chart_type(str(ct))
+        if err:
+            errors.append(err)
+    if available_fields:
+        dims = config.get("dimensions") or []
+        meas = config.get("measures") or []
+        if not isinstance(dims, list) or not isinstance(meas, list):
+            errors.append("dimensions 和 measures 必须是数组")
+        else:
+            meas_fields = [m.get("field") if isinstance(m, dict) else m for m in meas]
+            unknown = [
+                d for d in dims
+                if d not in available_fields and d.lower() not in available_fields
+            ] + [
+                m for m in meas_fields
+                if m not in available_fields and m.lower() not in available_fields
+            ]
+            if unknown:
+                errors.append(f"引用了数据源中不存在的字段: {', '.join(str(u) for u in unknown)}")
+    if errors:
+        return {"valid": False, "errors": errors, "hint": "请使用数据源真实字段名，图表类型用英文代码（如 bar/line/pie）"}
+    return {"valid": True, "errors": [], "hint": ""}
+
+
+def validate_chart_option(chart_type: str | None, columns: list | None, rows: list | None, option: dict | None) -> dict:
+    """校验 render_chart 产物形态：{chart_type, columns, rows, option}。
+
+    只拦结构性错误（类型非法 / 数据错位 / option 缺失关键结构），不拦风格差异。
+
+    返回：
+        {"valid": bool, "errors": list, "hint": str}
+    """
+    errors: list[str] = []
+    if chart_type:
+        err = _validate_chart_type(chart_type)
+        if err:
+            errors.append(err)
+    # 数据一致性：rows 每行列数与 columns 对齐、数值列可转 float
+    if columns is not None and rows is not None:
+        if not isinstance(columns, list) or not isinstance(rows, list):
+            errors.append("columns 和 rows 必须是数组")
+        elif rows:
+            for i, row in enumerate(rows[:10]):
+                if not isinstance(row, (list, tuple)) or len(row) != len(columns):
+                    errors.append(f"第 {i + 1} 行数据列数({len(row) if isinstance(row, (list, tuple)) else '?'})与 columns 列数({len(columns)})不一致")
+                    break
+    # option 结构完整性
+    if option is not None:
+        if not isinstance(option, dict):
+            errors.append("option 必须是 JSON 对象")
+        else:
+            series = option.get("series")
+            if not series:
+                errors.append("option 缺少 series 或 series 为空")
+            elif isinstance(series, list):
+                for s in series:
+                    if not isinstance(s, dict):
+                        errors.append("series 元素必须是对象")
+                    elif "data" not in s:
+                        errors.append("series 缺少 data 字段")
+            else:
+                errors.append("series 必须是数组")
+    if errors:
+        return {"valid": False, "errors": errors, "hint": "请根据错误信息修复图表配置后重新调用 render_chart"}
+    return {"valid": True, "errors": [], "hint": ""}
+
+
+class ValidateChartTool(BaseTool):
+    """校验图表配置的合法性（自校验工具，供 Agent 与画布助手复用）"""
+
+    name = "validate_chart"
+    orchestrator_safe = True
+    description = (
+        "校验图表配置是否合法：图表类型白名单、字段引用是否存在、数据行列是否对齐、"
+        "ECharts option 结构是否完整。返回 valid + 问题列表 + 修复建议。"
+        "支持两种输入：1) config 形态（chart_type/dimensions/measures/filters）"
+        "2) option 形态（chart_type/columns/rows/option）。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chart_type": {"type": "string", "description": "图表类型（英文代码）"},
+                        "columns": {"type": "array", "items": {"type": "string"}, "description": "数据列名列表"},
+                        "rows": {"type": "array", "items": {"type": "array"}, "description": "数据行（二维数组）"},
+                        "option": {"type": "object", "description": "ECharts option 配置对象"},
+                        "config": {"type": "object", "description": "画布图表配置：{action, chart_type, dimensions, measures, filters}"},
+                    },
+                    "required": [],
+                },
+            },
+        }
+
+    async def execute(self, chart_type=None, columns=None, rows=None, option=None,
+                      config=None, available_fields=None, **kwargs) -> str:
+        try:
+            if config is not None:
+                fields_set = None
+                if isinstance(available_fields, list):
+                    fields_set = {str(f) for f in available_fields}
+                result = validate_chart_config(config, fields_set)
+            else:
+                result = validate_chart_option(chart_type, columns, rows, option)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"valid": False, "errors": [str(e)], "hint": "校验器内部异常"}, ensure_ascii=False)
+
+
+# ==================== 结构化安全查询工具 ====================
+
+class QueryEngineTool(BaseTool):
+    """通过查询引擎执行结构化查询（参数化 SQL，比原生 SQL 更安全）"""
+
+    name = "query_engine"
+    orchestrator_safe = True
+    description = (
+        "标准聚合分析的**首选**查询工具：传入 datasource_id、dimensions（维度）、"
+        "measures（度量，含聚合方式）、filters（过滤条件）、sort（排序）、limit，"
+        "由查询引擎生成参数化 SQL 执行。字段白名单 + 参数绑定，比手写 SQL 更安全、更不容易出错，"
+        "适合分组/对比/占比/排名/过滤等日常聚合统计。"
+        "支持时间桶（dimension_buckets）：对时间维度按 day/week/month/quarter/year 分组，"
+        "如 {\"order_date\": \"month\"} 会生成 date_trunc('month', \"order_date\")。"
+        "涉及已定义业务指标（销售额/订单量/客单价等，可用 list_metrics 查看）时必须用 metric_key 引用，"
+        "不要自己拼 SUM(field)。"
+        "窗口函数、CTE 等 query_engine 不支持的复杂查询再退回 query_sql。"
+    )
+
+    def schema(self) -> dict:
+        # 复用画布工具的 measures oneOf 双变体：指标引用 / 普通度量
+        from app.services.canvas_tools import _measure_schema
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {"type": "string", "description": "数据源 ID（从 list_datasources 获取）"},
+                        "dimensions": {"type": "array", "items": {"type": "string"}, "description": "维度字段名列表"},
+                        "measures": {
+                            "type": "array",
+                            "items": _measure_schema(),
+                            "description": "度量列表：指标引用 {metric_key, field?} 或普通度量 {field, agg}；涉及已定义指标时用 metric_key",
+                        },
+                        "filters": {
+                            "type": "array",
+                            "items": {"type": "object"},
+                            "description": "过滤条件 [{field, op(eq/neq/gt/gte/lt/lte/like/in/between), value}]",
+                        },
+                        "sort": {"type": "object", "description": "排序 {field, order(desc/asc)}"},
+                        "limit": {"type": "integer", "description": "返回行数上限（默认 50）"},
+                        "dimension_buckets": {
+                            "type": "object",
+                            "description": "时间桶映射：{时间维度字段名: 桶粒度}，桶粒度可选 day/week/month/quarter/year。例：{\"order_date\": \"month\"} 会按月份分组",
+                        },
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, dimensions=None, measures=None, filters=None,
+                      sort=None, limit: int = 50, dimension_buckets=None, user_id: str | None = None,
+                      db_session=None, **kwargs) -> str:
+        try:
+            from uuid import UUID
+            from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig, SortConfig
+            from app.services.query_engine import execute_chart_query
+
+            # LLM 偶发产出嵌套 measures / 相对时间表达式 → 工具边界防御性归一，
+            # 让结构化查询一次成功（避免度量为空或日期 Conversion Error 退化到裸 SQL）。
+            measures = _flatten_measures(measures)
+            filters = _resolve_time_filters(filters)
+
+            # measures 先过指标语义层：含 metric_key/metric_id 的项解析为受治理口径，
+            # 普通 {field, agg} 直通。解析失败给明确错误并提示 list_metrics 自纠错。
+            meas_objs = []
+            if db_session is not None:
+                from app.services.metric_service import MetricServiceError, measure_to_metric_ref, record_query_usage, resolve_measures_for_exec
+                # 覆盖率埋点：本次查询是否走指标引用
+                record_query_usage(any(measure_to_metric_ref(m) for m in (measures or []) if isinstance(m, dict)))
+                try:
+                    meas_objs = await resolve_measures_for_exec(
+                        db_session,
+                        UUID(user_id) if user_id else None,
+                        [m for m in (measures or []) if isinstance(m, dict)],
+                        dimensions=list(dimensions or []),
+                    )
+                except MetricServiceError as e:
+                    return json.dumps({
+                        "error": f"指标解析失败: {e}；请先调 list_metrics 核对指标 key，或改用 field+agg"
+                    }, ensure_ascii=False)
+            else:
+                # db_session 缺失：仍计入"未走指标"统计（保持覆盖率分母完整）
+                from app.services.metric_service import record_query_usage
+                record_query_usage(False)
+            if not meas_objs:  # db_session 缺失或无有效度量 → 回退直接构造
+                for m in (measures or []):
+                    if isinstance(m, dict) and m.get("field"):
+                        meas_objs.append(MeasureConfig(field=str(m["field"]), agg=str(m.get("agg", "SUM"))))
+                    elif isinstance(m, str):
+                        meas_objs.append(MeasureConfig(field=m, agg="SUM"))
+            filt_objs = []
+            for f in (filters or []):
+                if isinstance(f, dict):
+                    filt_objs.append(FilterConfig(field=str(f.get("field", "")), op=str(f.get("op", "eq")), value=f.get("value")))
+            sort_obj = SortConfig(field=str(sort.get("field", "")), order=str(sort.get("order", "desc"))) if isinstance(sort, dict) and sort.get("field") else None
+
+            config = ChartQueryConfig(
+                dimensions=list(dimensions or []),
+                measures=meas_objs,
+                filters=filt_objs,
+                chart_type=None,
+                sort=sort_obj,
+                limit=max(1, min(int(limit or 50), 1000)),
+                dimension_buckets=dimension_buckets or {},
+            )
+            result = await execute_chart_query(
+                datasource_id=datasource_id,
+                config=config,
+                user_id=user_id or "",
+                db=db_session,
+            )
+            return json.dumps({
+                "columns": result.columns,
+                "row_count": len(result.rows),
+                "rows": result.rows[:50],
+                "summary": {
+                    "columns_count": len(result.columns),
+                    "rows_count": len(result.rows),
+                    "sample": result.rows[:3],
+                    "cached": result.cached,
+                    "computed_at": result.computed_at,
+                    "notice": (
+                        "查询已完成，rows 仅为展示样本，完整结果以 rows_count 为准，"
+                        "不要因样本截断重复查询"
+                    ),
+                },
+            }, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"结构化查询失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 指标语义层工具 ====================
+
+class ListMetricsTool(BaseTool):
+    """列出当前用户可引用的受治理业务指标（key/名称/简介）。"""
+
+    name = "list_metrics"
+    orchestrator_safe = True
+    description = (
+        "列出当前用户可引用的受治理业务指标（key/名称/口径简介）。"
+        "查询涉及业务指标口径（销售额/订单量/客单价等）时必须优先引用这些指标；"
+        "只返回 key/名称/简介，不暴露底层公式以避免占用上下文。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "search": {"type": "string", "description": "可选：按名称/描述关键词过滤指标"},
+                    },
+                    "required": [],
+                },
+            },
+        }
+
+    async def execute(self, user_id: str = "", search: str | None = None,
+                      db_session=None, **kwargs) -> str:
+        if db_session is None:
+            return json.dumps({"error": "数据库会话不可用"}, ensure_ascii=False)
+        from app.services.metric_service import list_metrics_for_user
+        import uuid as _uuid
+        uid = None
+        try:
+            uid = _uuid.UUID(user_id) if user_id else None
+        except (ValueError, TypeError):
+            uid = None
+        try:
+            metrics = await list_metrics_for_user(db_session, uid)
+        except Exception as e:  # noqa: BLE001
+            return json.dumps({"error": f"指标列表获取失败: {str(e)[:200]}"}, ensure_ascii=False)
+        if search:
+            kw = (search or "").strip().lower()
+            if kw:
+                metrics = [m for m in metrics if kw in (m.name or "").lower() or kw in (m.key or "").lower() or kw in (m.description or "").lower()]
+        items = [
+            {"key": m.key, "name": m.name, "description": (m.description or "")[:80]}
+            for m in metrics
+        ]
+        return json.dumps({
+            "total": len(items),
+            "metrics": items,
+            "notice": "查询涉及上述指标口径时必须用其 key 引用（如 metric_key=sales_amount），不要自行拼 SUM/AVG",
+        }, ensure_ascii=False)
+
+
+# ==================== 数据质量工具 ====================
+
+class DataQualityTool(BaseTool):
+    """数据质量分析：检查缺失值、异常值、重复行、类型不一致、格式问题"""
+
+    name = "data_quality"
+    orchestrator_safe = True
+    description = (
+        "数据质量分析：对指定数据源执行质量检查（缺失值、IQR 异常值、重复行、"
+        "类型不一致、格式问题）。可传 fields 限定检查范围，不传则检查全部字段。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {"type": "string", "description": "数据源 ID"},
+                        "fields": {"type": "array", "items": {"type": "string"}, "description": "要检查的字段名列表（可选，默认全部）"},
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, fields=None, user_id: str | None = None,
+                      db_session=None, **kwargs) -> str:
+        try:
+            from app.services import data_quality as dq
+
+            target_fields = list(fields) if fields else None
+            if not target_fields and db_session is not None:
+                # 未指定字段时从数据源 schema_meta 取全部字段
+                from sqlalchemy import select
+                from app.models.datasource import DataSource
+                res = await db_session.execute(select(DataSource).where(DataSource.id == datasource_id))
+                ds = res.scalar_one_or_none()
+                if ds and isinstance(ds.schema_meta, dict):
+                    target_fields = [f.get("name") for f in (ds.schema_meta.get("fields") or []) if isinstance(f, dict) and f.get("name")]
+
+            report: list[dict] = []
+            if target_fields:
+                for field in target_fields:
+                    try:
+                        null_res = await dq.null_count(datasource_id, field, db_session)
+                        if null_res.get("count", 0) > 0:
+                            report.append({**null_res, "field": field, "issue_type": "missing"})
+                    except Exception:
+                        pass
+                    try:
+                        outlier_res = await dq.outlier_iqr_count(datasource_id, field, db_session)
+                        if outlier_res.get("count", 0) > 0:
+                            report.append({**outlier_res, "field": field, "issue_type": "outlier_iqr"})
+                    except Exception:
+                        pass
+                    try:
+                        type_res = await dq.type_inconsistency_count(datasource_id, field, db_session)
+                        if type_res.get("count", 0) > 0:
+                            report.append({**type_res, "field": field, "issue_type": "type_inconsistency"})
+                    except Exception:
+                        pass
+                    try:
+                        fmt_res = await dq.format_issue_count(datasource_id, field, db_session)
+                        if fmt_res.get("count", 0) > 0:
+                            report.append({**fmt_res, "field": field, "issue_type": "format"})
+                    except Exception:
+                        pass
+            try:
+                dup_res = await dq.dup_row_count(datasource_id, db_session)
+                if dup_res.get("count", 0) > 0:
+                    report.append({**dup_res, "field": "*", "issue_type": "duplicate"})
+            except Exception:
+                pass
+
+            return json.dumps({
+                "checked_fields": target_fields or [],
+                "issue_count": len(report),
+                "issues": report,
+                "summary": f"共发现 {len(report)} 项数据质量问题" if report else "未发现明显数据质量问题",
+            }, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"数据质量分析失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 洞察工具 ====================
+
+class InsightTool(BaseTool):
+    """自动洞察：聚合查询 + LLM 生成趋势/异常洞察"""
+
+    name = "insight"
+    orchestrator_safe = True
+    description = (
+        "自动洞察：对数据源执行聚合分析（按维度/度量），并生成趋势、异常、分布等数据洞察。"
+        "适合用户询问'有什么趋势/异常/发现'的场景。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {"type": "string", "description": "数据源 ID"},
+                        "dimensions": {"type": "array", "items": {"type": "string"}, "description": "维度字段"},
+                        "measures": {"type": "array", "items": {"type": "object"}, "description": "度量 [{field, agg}]"},
+                        "filters": {"type": "array", "items": {"type": "object"}, "description": "过滤条件"},
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, dimensions=None, measures=None, filters=None,
+                      user_id: str | None = None, db_session=None, **kwargs) -> str:
+        try:
+            from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig
+            from app.services.query_engine import execute_chart_query
+            from app.services.ai_service import AIService
+
+            measures = _flatten_measures(measures)
+            filters = _resolve_time_filters(filters)
+
+            dims = list(dimensions or [])
+            meas_objs = []
+            for m in (measures or []):
+                if isinstance(m, dict):
+                    meas_objs.append(MeasureConfig(field=str(m.get("field", "")), agg=str(m.get("agg", "SUM"))))
+                elif isinstance(m, str):
+                    meas_objs.append(MeasureConfig(field=m, agg="SUM"))
+            if not meas_objs:
+                # 未指定度量时，从数据源取第一个数值字段作为默认度量
+                from sqlalchemy import select
+                from app.models.datasource import DataSource
+                res = await db_session.execute(select(DataSource).where(DataSource.id == datasource_id))
+                ds = res.scalar_one_or_none()
+                if ds and isinstance(ds.schema_meta, dict):
+                    for f in (ds.schema_meta.get("fields") or []):
+                        if isinstance(f, dict) and "int" in str(f.get("data_type", "")).lower():
+                            meas_objs.append(MeasureConfig(field=str(f.get("name")), agg="SUM"))
+                            break
+
+            config = ChartQueryConfig(
+                dimensions=dims,
+                measures=meas_objs,
+                filters=[FilterConfig(field=str(f.get("field", "")), op=str(f.get("op", "eq")), value=f.get("value")) for f in (filters or []) if isinstance(f, dict)],
+                chart_type=None,
+                limit=500,
+            )
+            result = await execute_chart_query(
+                datasource_id=datasource_id, config=config,
+                user_id=user_id or "", db=db_session,
+            )
+            query_config = {"dimensions": dims, "measures": [{"field": m.field, "agg": m.agg} for m in meas_objs]}
+            insights = await AIService().generate_insights(result.rows[:500], query_config)
+            return json.dumps({
+                "row_count": len(result.rows),
+                "insights": insights,
+            }, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"洞察生成失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 清洗建议工具 ====================
+
+class CleanSuggestTool(BaseTool):
+    """数据清洗建议：质量检查 + LLM 生成清洗建议"""
+
+    name = "clean_suggest"
+    orchestrator_safe = True
+    description = (
+        "数据清洗建议：对数据源执行质量检查，并生成按严重程度排序的中文清洗建议。"
+        "适合用户询问'数据有什么问题/需要怎么清洗'的场景。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {"type": "string", "description": "数据源 ID"},
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, user_id: str | None = None,
+                      db_session=None, **kwargs) -> str:
+        try:
+            from sqlalchemy import select
+            from app.models.datasource import DataSource
+            from app.services import data_quality as dq
+            from app.services.ai_service import AIService
+
+            res = await db_session.execute(select(DataSource).where(DataSource.id == datasource_id))
+            ds = res.scalar_one_or_none()
+            if not ds:
+                return json.dumps({"error": "数据源不存在"}, ensure_ascii=False)
+
+            field_meta = []
+            fields: list[str] = []
+            if isinstance(ds.schema_meta, dict):
+                for f in (ds.schema_meta.get("fields") or []):
+                    if isinstance(f, dict) and f.get("name"):
+                        field_meta.append(f)
+                        fields.append(str(f["name"]))
+
+            stats: list[dict] = []
+            for field in fields:
+                try:
+                    n = await dq.null_count(datasource_id, field, db_session)
+                    if n.get("count", 0) > 0:
+                        stats.append({"field": field, "issue_type": "missing", **{k: v for k, v in n.items() if k != "field"}})
+                except Exception:
+                    pass
+                try:
+                    o = await dq.outlier_iqr_count(datasource_id, field, db_session)
+                    if o.get("count", 0) > 0:
+                        stats.append({"field": field, "issue_type": "outlier", **{k: v for k, v in o.items() if k != "field"}})
+                except Exception:
+                    pass
+            try:
+                d = await dq.dup_row_count(datasource_id, db_session)
+                if d.get("count", 0) > 0:
+                    stats.append({"field": "*", "issue_type": "duplicate", **{k: v for k, v in d.items() if k != "field"}})
+            except Exception:
+                pass
+
+            suggestions = await AIService().clean_suggest(field_meta, stats)
+            return json.dumps({
+                "checked_fields": fields,
+                "suggestion_count": len(suggestions),
+                "suggestions": suggestions,
+            }, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"清洗建议生成失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 图表推荐工具 ====================
+
+class RecommendChartsTool(BaseTool):
+    """图表类型推荐：根据字段特征推荐最合适的图表类型"""
+
+    name = "recommend_charts"
+    orchestrator_safe = True
+    description = (
+        "图表类型推荐：根据数据源字段特征推荐 1-3 个最合适的图表类型，"
+        "返回 chart_type + rationale + config。生成图表前可用它辅助选型。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "datasource_id": {"type": "string", "description": "数据源 ID"},
+                        "current_config": {"type": "object", "description": "当前图表配置（可选）：{dimensions, measures, chartType}"},
+                    },
+                    "required": ["datasource_id"],
+                },
+            },
+        }
+
+    async def execute(self, datasource_id: str, current_config=None,
+                      user_id: str | None = None, db_session=None, **kwargs) -> str:
+        try:
+            from sqlalchemy import select
+            from app.models.datasource import DataSource
+            from app.services.ai_service import AIService
+
+            res = await db_session.execute(select(DataSource).where(DataSource.id == datasource_id))
+            ds = res.scalar_one_or_none()
+            if not ds:
+                return json.dumps({"error": "数据源不存在"}, ensure_ascii=False)
+            field_meta = []
+            if isinstance(ds.schema_meta, dict):
+                field_meta = [f for f in (ds.schema_meta.get("fields") or []) if isinstance(f, dict)]
+
+            suggestions = await AIService().recommend_charts(
+                field_meta=field_meta,
+                current_config=current_config or {},
+                user_id=user_id,
+            )
+            return json.dumps({"recommendations": suggestions}, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": f"图表推荐失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 文本润色工具 ====================
+
+class PolishTextTool(BaseTool):
+    """文本润色：4 种风格转换"""
+
+    name = "polish_text"
+    orchestrator_safe = True
+    description = (
+        "文本润色：将文本转换为指定风格（professional 专业 / casual 轻松 / concise 简洁 / academic 学术）。"
+        "适合用户要求改写或润色报告文本的场景。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "要润色的文本"},
+                        "style": {"type": "string", "enum": ["professional", "casual", "concise", "academic"], "description": "目标风格"},
+                    },
+                    "required": ["text"],
+                },
+            },
+        }
+
+    async def execute(self, text: str, style: str = "professional", **kwargs) -> str:
+        try:
+            from app.services.ai_service import AIService
+            result = await AIService().polish_text(text, style)
+            return json.dumps(result, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"润色失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 统计分析工具 ====================
+
+def _numeric_values(values: list) -> list[float]:
+    """把混合值列表转成可统计的数值列表（过滤 None/空串/不可转数值/布尔）。"""
+    out: list[float] = []
+    for v in values:
+        if v is None or isinstance(v, bool):
+            continue
+        try:
+            out.append(float(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    """线性插值分位数（无 numpy 依赖）。"""
+    if not sorted_vals:
+        return 0.0
+    idx = (len(sorted_vals) - 1) * q
+    lo = int(idx)
+    hi = min(lo + 1, len(sorted_vals) - 1)
+    frac = idx - lo
+    return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac
+
+
+class StatsAnalyzerTool(BaseTool):
+    """统计分析：对查询结果（columns + rows）做描述性统计，数据可从依赖步骤自动填充"""
+
+    name = "stats_analyzer"
+    # 纯计算工具（无 db_session 访问，数据从依赖步骤自动填充），且已列入 Planner 工具清单，
+    # 必须标记 orchestrator_safe=True，否则 Executor 白名单（orchestrator_safe ∪ extra）会拦截它。
+    orchestrator_safe = True
+    description = (
+        "统计分析：对已有查询结果做描述性统计——数值列输出 count/mean/std/min/25%分位/中位数/75%分位/max/"
+        "缺失数/异常值提示（IQR 法），类别列输出 Top N 频次与占比。"
+        "适合用户问'统计特征/分布/平均值/中位数/异常值/数据概览'的场景。"
+        "数据（columns+rows）从依赖的查询步骤结果自动填充，无需重新查询。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "columns": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "数据列名列表",
+                        },
+                        "rows": {
+                            "type": "array",
+                            "items": {"type": "array"},
+                            "description": "数据行（二维数组，与 columns 对齐）",
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "统计主题（可选，用于标注统计目的）",
+                        },
+                    },
+                    "required": ["columns", "rows"],
+                },
+            },
+        }
+
+    async def execute(self, columns=None, rows=None, title: str = "", **kwargs) -> str:
+        try:
+            cols = list(columns or [])
+            rows_2d = list(rows or [])
+            if not cols or not rows_2d:
+                return json.dumps({
+                    "error": "数据为空，请先通过 query_sql/query_engine 查询获取数据",
+                    "hint": "先执行查询步骤，再让本步骤依赖该查询步骤的结果",
+                }, ensure_ascii=False)
+            # 内嵌校验：行宽与列数对齐
+            for i, row in enumerate(rows_2d[:10]):
+                if not isinstance(row, (list, tuple)) or len(row) != len(cols):
+                    return json.dumps({
+                        "error": f"第 {i + 1} 行数据列数({len(row) if isinstance(row, (list, tuple)) else '?'})与 columns 列数({len(cols)})不一致",
+                        "hint": "请检查 columns/rows 是否与查询结果一致",
+                    }, ensure_ascii=False)
+
+            n_rows = len(rows_2d)
+            stats: list[dict] = []
+            total_nulls = 0
+            for ci, col in enumerate(cols):
+                col_values = [row[ci] if ci < len(row) else None for row in rows_2d]
+                nulls = sum(1 for v in col_values if v is None or (isinstance(v, str) and not v.strip()))
+                total_nulls += nulls
+                numeric = _numeric_values(col_values)
+                if len(numeric) >= max(2, int(len(col_values) * 0.6)):
+                    sv = sorted(numeric)
+                    q1 = _quantile(sv, 0.25)
+                    q3 = _quantile(sv, 0.75)
+                    iqr = q3 - q1
+                    lo_b, hi_b = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+                    outliers = [v for v in sv if v < lo_b or v > hi_b]
+                    mean = sum(sv) / len(sv)
+                    variance = sum((x - mean) ** 2 for x in sv) / len(sv)
+                    stats.append({
+                        "column": col,
+                        "type": "numeric",
+                        "count": len(col_values),
+                        "non_null": len(col_values) - nulls,
+                        "null_count": nulls,
+                        "mean": round(mean, 4),
+                        "std": round(variance ** 0.5, 4),
+                        "min": round(sv[0], 4),
+                        "p25": round(q1, 4),
+                        "median": round(_quantile(sv, 0.5), 4),
+                        "p75": round(q3, 4),
+                        "max": round(sv[-1], 4),
+                        "outlier_count": len(outliers),
+                        "outlier_share": round(len(outliers) / len(sv), 4),
+                    })
+                else:
+                    from collections import Counter
+                    cnt = Counter(str(v) if v is not None else "(空)" for v in col_values)
+                    top = cnt.most_common(5)
+                    stats.append({
+                        "column": col,
+                        "type": "categorical",
+                        "count": len(col_values),
+                        "null_count": nulls,
+                        "unique_count": len(cnt),
+                        "top": [
+                            {"value": v, "count": c, "share": round(c / len(col_values), 4) if col_values else 0.0}
+                            for v, c in top
+                        ],
+                    })
+
+            return json.dumps({
+                "title": title or "统计分析",
+                "row_count": n_rows,
+                "column_count": len(cols),
+                "null_total": total_nulls,
+                "columns_stats": stats,
+            }, ensure_ascii=False)
+        except Exception as e:
+            return json.dumps({"error": f"统计分析失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+# ==================== 注册工具 ====================
+
+list_datasources_tool = ListDatasourcesTool()
+query_sql_tool = QueryDatasourceTool()
+render_chart_tool = RenderChartTool()
+validate_chart_tool = ValidateChartTool()
+query_engine_tool = QueryEngineTool()
+data_quality_tool = DataQualityTool()
+insight_tool = InsightTool()
+clean_suggest_tool = CleanSuggestTool()
+recommend_charts_tool = RecommendChartsTool()
+polish_text_tool = PolishTextTool()
+stats_analyzer_tool = StatsAnalyzerTool()
+
+ToolRegistry.register(list_datasources_tool)
+ToolRegistry.register(ListFieldsTool())
+ToolRegistry.register(query_sql_tool)
+ToolRegistry.register(render_chart_tool)
+ToolRegistry.register(validate_chart_tool)
+ToolRegistry.register(query_engine_tool)
+ToolRegistry.register(data_quality_tool)
+ToolRegistry.register(insight_tool)
+ToolRegistry.register(clean_suggest_tool)
+ToolRegistry.register(recommend_charts_tool)
+ToolRegistry.register(polish_text_tool)
+ToolRegistry.register(stats_analyzer_tool)
+ToolRegistry.register(ListMetricsTool())
+# 画布操作工具在 app.services.canvas_tools 自身底部注册（避免反向 import 造成循环依赖）。
+# 由 app.services.ai_service 导入 canvas_tools 保证进程启动即注册。
+

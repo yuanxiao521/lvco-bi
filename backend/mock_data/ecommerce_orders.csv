@@ -1,0 +1,1201 @@
+order_id,order_date,customer_name,region,city,product_name,category,subcategory,quantity,unit_price,total_amount,payment_method,channel,status
+ORD-2023000001,2023-07-29,Customer_174,North,Beijing,Running Shoes Pro,Sports,Running,2,136.63,273.26,COD,App,Returned
+ORD-2023000002,2025-10-31,Customer_155,West,Chengdu,iPhone 15,Electronics,Smartphones,1,914.68,914.68,Credit Card,Third-party,Processing
+ORD-2023000003,2023-01-14,Customer_195,Central,Zhengzhou,Canon EOS R6,Electronics,Cameras,4,2565.92,10263.68,Alipay,Phone,Shipped
+ORD-2023000004,2025-02-17,Customer_25,East,Shanghai,iPad Air,Electronics,Tablets,3,527.52,1582.56,WeChat Pay,Store,Returned
+ORD-2023000005,2025-02-14,Customer_21,East,Shanghai,Leather Boots,Clothing,Footwear,5,141.1,705.5,COD,Store,Returned
+ORD-2023000006,2024-04-11,Customer_198,East,Nanjing,iPad Air,Electronics,Tablets,1,517.38,517.38,WeChat Pay,App,Processing
+ORD-2023000007,2025-01-17,Customer_42,North,Tianjin,Running Shoes Pro,Sports,Running,4,155.07,620.28,WeChat Pay,Store,Processing
+ORD-2023000008,2023-12-17,Customer_137,East,Nanjing,Organic Coffee Beans,Food & Beverage,Beverages,1,20.64,20.64,Alipay,Website,Cancelled
+ORD-2023000009,2024-10-26,Customer_197,West,Chongqing,Data Science 101,Books,Non-Fiction,5,45.79,228.95,Credit Card,Website,Completed
+ORD-2023000010,2024-10-06,Customer_55,East,Hangzhou,Running Shoes Pro,Sports,Running,1,136.08,136.08,Bank Transfer,Phone,Cancelled
+ORD-2023000011,2024-06-22,Customer_192,South,Guangzhou,AirPods Pro,Electronics,Headphones,2,267.3,534.6,COD,Phone,Returned
+ORD-2023000012,2023-07-06,Customer_194,West,Chongqing,Canon EOS R6,Electronics,Cameras,2,2506.14,5012.28,Credit Card,App,Processing
+ORD-2023000013,2025-02-20,Customer_153,South,Xiamen,Silk Dress,Clothing,Women's Wear,5,112.11,560.55,Bank Transfer,Third-party,Shipped
+ORD-2023000014,2024-06-30,Customer_197,Central,Wuhan,Organic Coffee Beans,Food & Beverage,Beverages,1,21.08,21.08,WeChat Pay,App,Shipped
+ORD-2023000015,2024-06-23,Customer_129,West,Chengdu,Leather Boots,Clothing,Footwear,1,180.65,180.65,Alipay,Third-party,Completed
+ORD-2023000016,2025-02-04,Customer_196,East,Nanjing,Standing Desk,Home & Garden,Furniture,5,453.93,2269.65,Alipay,Third-party,Returned
+ORD-2023000017,2025-01-13,Customer_79,North,Shenyang,Camping Tent 4P,Sports,Outdoor,4,255.9,1023.6,Alipay,App,Processing
+ORD-2023000018,2025-12-26,Customer_197,Central,Wuhan,MacBook Air,Electronics,Laptops,4,1312.67,5250.68,Alipay,Website,Cancelled
+ORD-2023000019,2025-05-16,Customer_55,Central,Wuhan,Running Shoes Pro,Sports,Running,5,165.65,828.25,COD,Website,Shipped
+ORD-2023000020,2025-11-25,Customer_116,West,Xi'an,Data Science 101,Books,Non-Fiction,3,49.06,147.18,Credit Card,Website,Processing
+ORD-2023000021,2024-03-27,Customer_2,North,Tianjin,iPhone 15,Electronics,Smartphones,5,1015.16,5075.8,Credit Card,App,Processing
+ORD-2023000022,2024-07-24,Customer_172,North,Beijing,Camping Tent 4P,Sports,Outdoor,1,300.27,300.27,Bank Transfer,Website,Returned
+ORD-2023000023,2025-08-26,Customer_105,South,Xiamen,LED Floor Lamp,Home & Garden,Lighting,5,88.27,441.35,Alipay,App,Completed
+ORD-2023000024,2023-04-21,Customer_173,West,Chongqing,Silk Dress,Clothing,Women's Wear,4,127.72,510.88,Credit Card,App,Cancelled
+ORD-2023000025,2025-07-07,Customer_36,East,Shanghai,Canon EOS R6,Electronics,Cameras,2,2266.75,4533.5,Bank Transfer,Website,Shipped
+ORD-2023000026,2023-07-20,Customer_13,West,Chengdu,MacBook Air,Electronics,Laptops,4,1309.8,5239.2,COD,App,Completed
+ORD-2023000027,2025-04-01,Customer_16,South,Shenzhen,Silk Dress,Clothing,Women's Wear,4,128.28,513.12,Alipay,Phone,Completed
+ORD-2023000028,2025-09-23,Customer_40,West,Chongqing,Leather Boots,Clothing,Footwear,3,155.33,465.99,Alipay,Store,Processing
+ORD-2023000029,2023-04-28,Customer_13,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,1,31.16,31.16,COD,Phone,Returned
+ORD-2023000030,2024-01-16,Customer_18,Central,Wuhan,Galaxy S24,Electronics,Smartphones,5,785.76,3928.8,COD,App,Processing
+ORD-2023000031,2023-03-23,Customer_159,West,Chengdu,LED Floor Lamp,Home & Garden,Lighting,2,91.11,182.22,Credit Card,Phone,Returned
+ORD-2023000032,2024-10-05,Customer_62,Central,Changsha,Camping Tent 4P,Sports,Outdoor,3,272.47,817.41,WeChat Pay,Phone,Processing
+ORD-2023000033,2023-07-24,Customer_19,East,Hangzhou,Camping Tent 4P,Sports,Outdoor,1,254.99,254.99,COD,Website,Returned
+ORD-2023000034,2025-01-26,Customer_73,East,Shanghai,Dumbbell Set 20kg,Sports,Fitness Equipment,1,99.13,99.13,Alipay,Phone,Returned
+ORD-2023000035,2024-09-05,Customer_170,East,Nanjing,Data Science 101,Books,Non-Fiction,5,42.61,213.05,Credit Card,Website,Shipped
+ORD-2023000036,2024-03-07,Customer_184,North,Beijing,Ceramic Mug Set,Home & Garden,Kitchenware,2,27.02,54.04,WeChat Pay,Website,Shipped
+ORD-2023000037,2025-05-17,Customer_71,Central,Zhengzhou,Running Shoes Pro,Sports,Running,1,130.78,130.78,Credit Card,App,Shipped
+ORD-2023000038,2025-05-25,Customer_144,South,Xiamen,Running Shoes Pro,Sports,Running,2,159.78,319.56,Credit Card,App,Completed
+ORD-2023000039,2023-10-31,Customer_111,South,Xiamen,Galaxy S24,Electronics,Smartphones,3,921.25,2763.75,Alipay,App,Shipped
+ORD-2023000040,2023-07-30,Customer_91,East,Shanghai,Dumbbell Set 20kg,Sports,Fitness Equipment,2,93.86,187.72,COD,Phone,Returned
+ORD-2023000041,2023-02-20,Customer_46,South,Shenzhen,Sony WH-1000XM5,Electronics,Headphones,2,388.93,777.86,WeChat Pay,Phone,Processing
+ORD-2023000042,2023-03-21,Customer_121,East,Shanghai,Dark Chocolate Box,Food & Beverage,Snacks,1,14.46,14.46,Alipay,Website,Cancelled
+ORD-2023000043,2024-01-31,Customer_103,East,Hangzhou,Canon EOS R6,Electronics,Cameras,2,2141.89,4283.78,WeChat Pay,Store,Completed
+ORD-2023000044,2024-11-09,Customer_8,East,Hangzhou,Data Science 101,Books,Non-Fiction,5,48.49,242.45,Credit Card,Store,Processing
+ORD-2023000045,2024-12-08,Customer_187,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,1,925.05,925.05,WeChat Pay,Phone,Returned
+ORD-2023000046,2023-04-01,Customer_182,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,5,71.65,358.25,Bank Transfer,App,Returned
+ORD-2023000047,2023-05-24,Customer_171,Central,Changsha,Organic Coffee Beans,Food & Beverage,Beverages,2,19.18,38.36,WeChat Pay,Third-party,Shipped
+ORD-2023000048,2025-04-16,Customer_84,North,Shenyang,Yoga Mat Premium,Sports,Yoga,5,46.2,231.0,Bank Transfer,Store,Returned
+ORD-2023000049,2023-12-23,Customer_158,South,Shenzhen,Silk Dress,Clothing,Women's Wear,4,135.86,543.44,COD,Store,Cancelled
+ORD-2023000050,2024-10-21,Customer_120,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,3,44.74,134.22,Bank Transfer,Phone,Processing
+ORD-2023000051,2024-11-17,Customer_24,Central,Zhengzhou,Sony WH-1000XM5,Electronics,Headphones,1,326.36,326.36,Alipay,Store,Processing
+ORD-2023000052,2025-08-31,Customer_157,South,Shenzhen,iPhone 15,Electronics,Smartphones,1,922.53,922.53,Credit Card,Phone,Cancelled
+ORD-2023000053,2024-05-14,Customer_38,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,4,14.96,59.84,Credit Card,App,Cancelled
+ORD-2023000054,2024-05-25,Customer_32,South,Shenzhen,Dark Chocolate Box,Food & Beverage,Snacks,5,14.83,74.15,Bank Transfer,Website,Cancelled
+ORD-2023000055,2025-06-25,Customer_157,Central,Changsha,The Great Novel,Books,Fiction,3,28.36,85.08,COD,Phone,Returned
+ORD-2023000056,2024-05-21,Customer_164,West,Chengdu,Wool Scarf,Clothing,Accessories,4,36.18,144.72,WeChat Pay,Third-party,Cancelled
+ORD-2023000057,2024-04-25,Customer_70,South,Guangzhou,Leather Boots,Clothing,Footwear,1,169.19,169.19,WeChat Pay,Store,Returned
+ORD-2023000058,2023-11-09,Customer_181,North,Beijing,AirPods Pro,Electronics,Headphones,2,240.26,480.52,Alipay,App,Cancelled
+ORD-2023000059,2024-02-28,Customer_108,West,Chongqing,Ceramic Mug Set,Home & Garden,Kitchenware,4,28.27,113.08,Bank Transfer,Third-party,Completed
+ORD-2023000060,2024-09-03,Customer_193,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,1,44.18,44.18,Bank Transfer,Phone,Returned
+ORD-2023000061,2025-06-11,Customer_125,Central,Changsha,Canon EOS R6,Electronics,Cameras,4,2288.65,9154.6,Credit Card,Phone,Shipped
+ORD-2023000062,2025-12-29,Customer_7,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,4,392.93,1571.72,Bank Transfer,Third-party,Returned
+ORD-2023000063,2025-08-03,Customer_47,North,Beijing,Data Science 101,Books,Non-Fiction,4,44.53,178.12,Credit Card,Store,Cancelled
+ORD-2023000064,2025-02-15,Customer_72,East,Shanghai,Leather Boots,Clothing,Footwear,3,151.25,453.75,Bank Transfer,Store,Completed
+ORD-2023000065,2024-12-17,Customer_58,West,Chengdu,Ceramic Mug Set,Home & Garden,Kitchenware,1,33.35,33.35,Credit Card,App,Completed
+ORD-2023000066,2023-09-16,Customer_122,South,Shenzhen,iPhone 15,Electronics,Smartphones,5,894.82,4474.1,Credit Card,Third-party,Processing
+ORD-2023000067,2023-08-23,Customer_200,West,Xi'an,Running Shoes Pro,Sports,Running,3,134.15,402.45,Alipay,Store,Completed
+ORD-2023000068,2025-02-07,Customer_102,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,5,51.61,258.05,Alipay,App,Returned
+ORD-2023000069,2023-09-05,Customer_145,South,Shenzhen,Dark Chocolate Box,Food & Beverage,Snacks,3,16.57,49.71,Credit Card,Store,Returned
+ORD-2023000070,2024-11-29,Customer_4,West,Xi'an,Dumbbell Set 20kg,Sports,Fitness Equipment,1,89.16,89.16,Bank Transfer,Phone,Completed
+ORD-2023000071,2025-06-10,Customer_46,West,Chongqing,Data Science 101,Books,Non-Fiction,4,53.1,212.4,COD,Store,Returned
+ORD-2023000072,2024-07-03,Customer_83,Central,Zhengzhou,Leather Boots,Clothing,Footwear,4,174.54,698.16,Alipay,App,Shipped
+ORD-2023000073,2025-02-15,Customer_87,West,Chengdu,Leather Boots,Clothing,Footwear,5,164.26,821.3,Credit Card,Phone,Shipped
+ORD-2023000074,2024-11-28,Customer_72,South,Guangzhou,iPad Air,Electronics,Tablets,3,652.52,1957.56,COD,Store,Returned
+ORD-2023000075,2025-04-12,Customer_126,North,Shenyang,iPad Air,Electronics,Tablets,1,552.52,552.52,COD,Website,Cancelled
+ORD-2023000076,2025-04-08,Customer_178,West,Chongqing,iPhone 15,Electronics,Smartphones,1,937.33,937.33,Alipay,Store,Returned
+ORD-2023000077,2024-11-08,Customer_91,East,Hangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,5,27.64,138.2,Bank Transfer,Store,Shipped
+ORD-2023000078,2024-01-15,Customer_50,East,Shanghai,ThinkPad X1,Electronics,Laptops,2,1321.59,2643.18,Alipay,Phone,Shipped
+ORD-2023000079,2024-02-02,Customer_76,Central,Changsha,The Great Novel,Books,Fiction,3,28.59,85.77,Alipay,Store,Processing
+ORD-2023000080,2023-04-04,Customer_14,East,Shanghai,Dark Chocolate Box,Food & Beverage,Snacks,5,13.31,66.55,COD,Store,Processing
+ORD-2023000081,2025-09-07,Customer_113,West,Chengdu,iPhone 15,Electronics,Smartphones,5,934.37,4671.85,WeChat Pay,Website,Completed
+ORD-2023000082,2023-06-01,Customer_148,East,Hangzhou,ThinkPad X1,Electronics,Laptops,1,1357.33,1357.33,Credit Card,Website,Processing
+ORD-2023000083,2025-05-02,Customer_156,Central,Zhengzhou,MacBook Air,Electronics,Laptops,2,1061.76,2123.52,COD,Third-party,Processing
+ORD-2023000084,2025-05-28,Customer_79,Central,Zhengzhou,Leather Boots,Clothing,Footwear,4,149.33,597.32,COD,Third-party,Completed
+ORD-2023000085,2024-06-25,Customer_170,Central,Changsha,ThinkPad X1,Electronics,Laptops,2,1451.68,2903.36,Credit Card,Website,Processing
+ORD-2023000086,2025-07-11,Customer_177,South,Xiamen,MacBook Air,Electronics,Laptops,2,1020.11,2040.22,COD,Phone,Shipped
+ORD-2023000087,2025-07-18,Customer_19,North,Beijing,Yoga Mat Premium,Sports,Yoga,3,51.98,155.94,Alipay,Store,Returned
+ORD-2023000088,2023-11-02,Customer_69,South,Guangzhou,ThinkPad X1,Electronics,Laptops,5,1283.5,6417.5,Alipay,App,Completed
+ORD-2023000089,2025-06-18,Customer_32,South,Guangzhou,The Great Novel,Books,Fiction,5,28.15,140.75,Bank Transfer,Store,Cancelled
+ORD-2023000090,2023-03-23,Customer_111,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,28.46,113.84,WeChat Pay,Third-party,Shipped
+ORD-2023000091,2023-02-12,Customer_196,North,Beijing,Canon EOS R6,Electronics,Cameras,5,2564.32,12821.6,WeChat Pay,Third-party,Completed
+ORD-2023000092,2024-01-07,Customer_150,South,Guangzhou,Standing Desk,Home & Garden,Furniture,4,561.29,2245.16,Bank Transfer,Phone,Completed
+ORD-2023000093,2023-08-03,Customer_42,West,Chongqing,Silk Dress,Clothing,Women's Wear,3,122.07,366.21,WeChat Pay,Phone,Cancelled
+ORD-2023000094,2023-06-30,Customer_81,East,Nanjing,Denim Jacket,Clothing,Men's Wear,5,68.02,340.1,WeChat Pay,Store,Completed
+ORD-2023000095,2023-04-22,Customer_49,West,Xi'an,iPhone 15,Electronics,Smartphones,5,987.6,4938.0,COD,Store,Returned
+ORD-2023000096,2023-09-26,Customer_74,West,Xi'an,Leather Boots,Clothing,Footwear,1,144.86,144.86,Bank Transfer,Phone,Completed
+ORD-2023000097,2024-09-28,Customer_142,North,Shenyang,The Great Novel,Books,Fiction,2,26.56,53.12,Credit Card,Third-party,Cancelled
+ORD-2023000098,2023-11-12,Customer_128,North,Beijing,ThinkPad X1,Electronics,Laptops,4,1586.63,6346.52,WeChat Pay,Third-party,Shipped
+ORD-2023000099,2023-10-24,Customer_99,West,Chongqing,Wool Scarf,Clothing,Accessories,2,38.49,76.98,Alipay,Third-party,Returned
+ORD-2023000100,2025-11-05,Customer_69,South,Shenzhen,Running Shoes Pro,Sports,Running,4,141.84,567.36,Credit Card,Store,Shipped
+ORD-2023000101,2025-07-03,Customer_138,Central,Changsha,Organic Coffee Beans,Food & Beverage,Beverages,4,22.18,88.72,Bank Transfer,Store,Shipped
+ORD-2023000102,2024-01-22,Customer_179,Central,Changsha,Denim Jacket,Clothing,Men's Wear,4,89.26,357.04,Alipay,Third-party,Cancelled
+ORD-2023000103,2025-02-19,Customer_99,South,Guangzhou,Galaxy S24,Electronics,Smartphones,3,965.0,2895.0,Alipay,Phone,Completed
+ORD-2023000104,2025-06-20,Customer_26,South,Xiamen,LED Floor Lamp,Home & Garden,Lighting,3,98.87,296.61,COD,Phone,Completed
+ORD-2023000105,2024-06-26,Customer_87,South,Guangzhou,Data Science 101,Books,Non-Fiction,2,43.61,87.22,COD,Phone,Completed
+ORD-2023000106,2025-09-26,Customer_139,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,32.95,131.8,Credit Card,Third-party,Completed
+ORD-2023000107,2023-07-05,Customer_112,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,3,22.97,68.91,Credit Card,App,Cancelled
+ORD-2023000108,2023-04-25,Customer_76,South,Xiamen,Yoga Mat Premium,Sports,Yoga,1,42.33,42.33,WeChat Pay,Store,Cancelled
+ORD-2023000109,2024-01-04,Customer_44,South,Shenzhen,Standing Desk,Home & Garden,Furniture,4,508.87,2035.48,Alipay,App,Returned
+ORD-2023000110,2023-10-21,Customer_60,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,2,19.98,39.96,Bank Transfer,Store,Cancelled
+ORD-2023000111,2023-11-20,Customer_19,East,Nanjing,iPhone 15,Electronics,Smartphones,4,1119.24,4476.96,Bank Transfer,Store,Returned
+ORD-2023000112,2024-09-10,Customer_51,East,Nanjing,Silk Dress,Clothing,Women's Wear,3,127.33,381.99,Bank Transfer,Phone,Completed
+ORD-2023000113,2024-08-27,Customer_6,South,Guangzhou,LED Floor Lamp,Home & Garden,Lighting,3,91.0,273.0,Bank Transfer,Store,Completed
+ORD-2023000114,2024-08-09,Customer_199,Central,Changsha,Galaxy S24,Electronics,Smartphones,5,965.12,4825.6,Alipay,Third-party,Shipped
+ORD-2023000115,2023-10-08,Customer_161,South,Xiamen,iPad Air,Electronics,Tablets,5,554.19,2770.95,Credit Card,App,Shipped
+ORD-2023000116,2023-07-04,Customer_76,West,Chengdu,LED Floor Lamp,Home & Garden,Lighting,3,95.2,285.6,WeChat Pay,Phone,Processing
+ORD-2023000117,2024-07-12,Customer_43,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,3,29.27,87.81,WeChat Pay,Phone,Shipped
+ORD-2023000118,2024-04-07,Customer_174,East,Shanghai,Leather Boots,Clothing,Footwear,1,141.86,141.86,Bank Transfer,Third-party,Shipped
+ORD-2023000119,2025-07-20,Customer_95,North,Tianjin,iPhone 15,Electronics,Smartphones,3,1009.96,3029.88,WeChat Pay,Third-party,Cancelled
+ORD-2023000120,2024-11-02,Customer_157,East,Shanghai,Organic Coffee Beans,Food & Beverage,Beverages,2,19.82,39.64,Alipay,App,Cancelled
+ORD-2023000121,2023-03-18,Customer_78,East,Nanjing,Silk Dress,Clothing,Women's Wear,1,115.06,115.06,Bank Transfer,App,Completed
+ORD-2023000122,2025-05-08,Customer_151,South,Xiamen,AirPods Pro,Electronics,Headphones,4,245.54,982.16,Alipay,Phone,Completed
+ORD-2023000123,2025-01-28,Customer_56,West,Xi'an,Silk Dress,Clothing,Women's Wear,3,110.92,332.76,Bank Transfer,Phone,Processing
+ORD-2023000124,2025-01-04,Customer_16,East,Shanghai,Organic Coffee Beans,Food & Beverage,Beverages,3,20.26,60.78,Bank Transfer,Store,Processing
+ORD-2023000125,2023-02-13,Customer_13,North,Tianjin,MacBook Air,Electronics,Laptops,2,1249.97,2499.94,WeChat Pay,Website,Processing
+ORD-2023000126,2024-03-18,Customer_60,Central,Wuhan,MacBook Air,Electronics,Laptops,5,1093.66,5468.3,WeChat Pay,Website,Returned
+ORD-2023000127,2023-12-24,Customer_29,North,Tianjin,AirPods Pro,Electronics,Headphones,2,252.0,504.0,Credit Card,Website,Completed
+ORD-2023000128,2024-06-27,Customer_14,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,3,76.07,228.21,Alipay,Phone,Returned
+ORD-2023000129,2025-01-11,Customer_132,North,Shenyang,MacBook Air,Electronics,Laptops,4,1180.39,4721.56,COD,App,Cancelled
+ORD-2023000130,2025-12-03,Customer_78,Central,Wuhan,The Great Novel,Books,Fiction,1,26.69,26.69,Bank Transfer,App,Completed
+ORD-2023000131,2025-06-27,Customer_19,West,Chongqing,Silk Dress,Clothing,Women's Wear,1,128.62,128.62,Credit Card,Store,Returned
+ORD-2023000132,2024-10-27,Customer_98,South,Shenzhen,AirPods Pro,Electronics,Headphones,3,258.29,774.87,COD,Third-party,Shipped
+ORD-2023000133,2023-08-23,Customer_168,West,Xi'an,The Great Novel,Books,Fiction,4,21.99,87.96,COD,Website,Cancelled
+ORD-2023000134,2025-03-27,Customer_107,West,Chengdu,Silk Dress,Clothing,Women's Wear,3,141.67,425.01,Credit Card,Store,Cancelled
+ORD-2023000135,2025-08-29,Customer_18,East,Nanjing,Running Shoes Pro,Sports,Running,3,169.28,507.84,Credit Card,App,Completed
+ORD-2023000136,2024-11-06,Customer_172,West,Chengdu,Dumbbell Set 20kg,Sports,Fitness Equipment,2,90.51,181.02,Credit Card,Phone,Shipped
+ORD-2023000137,2024-12-21,Customer_27,West,Xi'an,Galaxy S24,Electronics,Smartphones,3,926.08,2778.24,COD,Third-party,Processing
+ORD-2023000138,2024-12-18,Customer_143,South,Xiamen,Wool Scarf,Clothing,Accessories,2,43.06,86.12,WeChat Pay,App,Shipped
+ORD-2023000139,2023-02-23,Customer_156,Central,Wuhan,Silk Dress,Clothing,Women's Wear,5,147.36,736.8,WeChat Pay,App,Processing
+ORD-2023000140,2024-01-07,Customer_37,East,Nanjing,Yoga Mat Premium,Sports,Yoga,3,46.81,140.43,COD,Phone,Completed
+ORD-2023000141,2025-12-22,Customer_56,South,Xiamen,Data Science 101,Books,Non-Fiction,1,43.87,43.87,Bank Transfer,Phone,Cancelled
+ORD-2023000142,2023-06-23,Customer_14,East,Shanghai,Dumbbell Set 20kg,Sports,Fitness Equipment,3,94.92,284.76,Alipay,Website,Returned
+ORD-2023000143,2025-05-18,Customer_125,North,Shenyang,MacBook Air,Electronics,Laptops,3,1178.54,3535.62,COD,Phone,Cancelled
+ORD-2023000144,2023-08-16,Customer_73,East,Shanghai,Standing Desk,Home & Garden,Furniture,1,475.82,475.82,COD,Phone,Returned
+ORD-2023000145,2023-04-23,Customer_2,East,Shanghai,Canon EOS R6,Electronics,Cameras,4,2862.19,11448.76,Alipay,Store,Processing
+ORD-2023000146,2025-10-15,Customer_192,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,3,43.41,130.23,Bank Transfer,Website,Processing
+ORD-2023000147,2024-12-26,Customer_19,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,2,14.99,29.98,Bank Transfer,App,Cancelled
+ORD-2023000148,2025-04-08,Customer_182,North,Tianjin,MacBook Air,Electronics,Laptops,3,1226.25,3678.75,Bank Transfer,Store,Completed
+ORD-2023000149,2025-07-31,Customer_177,West,Chengdu,Camping Tent 4P,Sports,Outdoor,2,326.03,652.06,WeChat Pay,App,Cancelled
+ORD-2023000150,2023-06-11,Customer_102,North,Beijing,Silk Dress,Clothing,Women's Wear,5,125.15,625.75,WeChat Pay,Store,Processing
+ORD-2023000151,2025-12-22,Customer_131,East,Shanghai,MacBook Air,Electronics,Laptops,5,1246.92,6234.6,Alipay,Store,Shipped
+ORD-2023000152,2023-12-22,Customer_155,South,Shenzhen,ThinkPad X1,Electronics,Laptops,2,1296.58,2593.16,Alipay,App,Processing
+ORD-2023000153,2024-10-23,Customer_161,West,Chongqing,LED Floor Lamp,Home & Garden,Lighting,5,87.64,438.2,WeChat Pay,Website,Cancelled
+ORD-2023000154,2023-04-26,Customer_91,North,Tianjin,Leather Boots,Clothing,Footwear,3,173.13,519.39,COD,App,Shipped
+ORD-2023000155,2024-08-10,Customer_20,West,Chongqing,Galaxy S24,Electronics,Smartphones,1,863.6,863.6,Credit Card,Third-party,Returned
+ORD-2023000156,2023-03-26,Customer_116,Central,Zhengzhou,Leather Boots,Clothing,Footwear,5,161.59,807.95,COD,Website,Shipped
+ORD-2023000157,2025-07-11,Customer_27,Central,Zhengzhou,Standing Desk,Home & Garden,Furniture,2,567.52,1135.04,WeChat Pay,App,Returned
+ORD-2023000158,2025-12-09,Customer_134,South,Shenzhen,Canon EOS R6,Electronics,Cameras,4,2867.09,11468.36,COD,Website,Shipped
+ORD-2023000159,2023-04-18,Customer_162,East,Hangzhou,Denim Jacket,Clothing,Men's Wear,4,85.5,342.0,WeChat Pay,App,Shipped
+ORD-2023000160,2023-11-04,Customer_86,North,Shenyang,Organic Coffee Beans,Food & Beverage,Beverages,4,18.7,74.8,Credit Card,Third-party,Processing
+ORD-2023000161,2023-06-23,Customer_80,East,Hangzhou,Data Science 101,Books,Non-Fiction,4,44.43,177.72,COD,Phone,Shipped
+ORD-2023000162,2025-05-17,Customer_131,South,Xiamen,Dark Chocolate Box,Food & Beverage,Snacks,5,13.16,65.8,WeChat Pay,App,Shipped
+ORD-2023000163,2025-09-22,Customer_50,East,Shanghai,iPad Air,Electronics,Tablets,3,679.45,2038.35,Alipay,Website,Processing
+ORD-2023000164,2025-12-14,Customer_10,North,Tianjin,ThinkPad X1,Electronics,Laptops,5,1512.69,7563.45,WeChat Pay,Third-party,Processing
+ORD-2023000165,2023-12-06,Customer_185,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,2,225.16,450.32,Bank Transfer,App,Cancelled
+ORD-2023000166,2025-07-08,Customer_60,East,Nanjing,Canon EOS R6,Electronics,Cameras,4,2581.91,10327.64,COD,Website,Shipped
+ORD-2023000167,2025-08-03,Customer_197,West,Chengdu,Dumbbell Set 20kg,Sports,Fitness Equipment,5,101.93,509.65,WeChat Pay,Phone,Returned
+ORD-2023000168,2023-10-11,Customer_65,Central,Zhengzhou,Sony WH-1000XM5,Electronics,Headphones,2,380.54,761.08,Credit Card,Phone,Shipped
+ORD-2023000169,2024-08-06,Customer_22,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,5,16.57,82.85,Alipay,Store,Cancelled
+ORD-2023000170,2024-03-30,Customer_116,Central,Wuhan,Silk Dress,Clothing,Women's Wear,1,146.28,146.28,WeChat Pay,App,Cancelled
+ORD-2023000171,2023-06-17,Customer_96,North,Tianjin,Standing Desk,Home & Garden,Furniture,3,459.45,1378.35,Alipay,App,Shipped
+ORD-2023000172,2023-10-09,Customer_10,North,Shenyang,Data Science 101,Books,Non-Fiction,3,54.36,163.08,WeChat Pay,Phone,Processing
+ORD-2023000173,2023-02-08,Customer_66,West,Chongqing,The Great Novel,Books,Fiction,1,28.03,28.03,Alipay,Website,Returned
+ORD-2023000174,2024-05-01,Customer_78,Central,Changsha,Silk Dress,Clothing,Women's Wear,1,139.69,139.69,Credit Card,App,Processing
+ORD-2023000175,2025-10-20,Customer_153,West,Xi'an,The Great Novel,Books,Fiction,4,21.71,86.84,COD,App,Returned
+ORD-2023000176,2023-01-04,Customer_158,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,2,14.05,28.1,WeChat Pay,Website,Returned
+ORD-2023000177,2025-01-08,Customer_18,West,Chengdu,Organic Coffee Beans,Food & Beverage,Beverages,1,20.13,20.13,COD,Third-party,Returned
+ORD-2023000178,2023-03-31,Customer_163,Central,Changsha,iPhone 15,Electronics,Smartphones,4,1110.89,4443.56,Bank Transfer,Store,Shipped
+ORD-2023000179,2023-08-01,Customer_198,North,Tianjin,MacBook Air,Electronics,Laptops,3,1105.88,3317.64,COD,Store,Processing
+ORD-2023000180,2023-12-25,Customer_200,North,Tianjin,Ceramic Mug Set,Home & Garden,Kitchenware,3,31.73,95.19,Bank Transfer,Phone,Processing
+ORD-2023000181,2024-02-17,Customer_12,South,Shenzhen,Dark Chocolate Box,Food & Beverage,Snacks,4,12.91,51.64,Alipay,App,Shipped
+ORD-2023000182,2023-03-16,Customer_193,East,Nanjing,Denim Jacket,Clothing,Men's Wear,5,78.37,391.85,Alipay,Store,Shipped
+ORD-2023000183,2025-01-23,Customer_112,North,Shenyang,Camping Tent 4P,Sports,Outdoor,3,265.32,795.96,Bank Transfer,Phone,Cancelled
+ORD-2023000184,2025-11-29,Customer_69,East,Shanghai,Wool Scarf,Clothing,Accessories,4,37.45,149.8,Credit Card,Phone,Completed
+ORD-2023000185,2023-07-30,Customer_21,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,5,327.41,1637.05,WeChat Pay,Store,Shipped
+ORD-2023000186,2025-06-28,Customer_90,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,4,13.49,53.96,Bank Transfer,App,Shipped
+ORD-2023000187,2025-04-11,Customer_94,Central,Zhengzhou,Running Shoes Pro,Sports,Running,1,130.0,130.0,COD,Website,Completed
+ORD-2023000188,2023-05-18,Customer_61,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,4,17.2,68.8,WeChat Pay,Store,Cancelled
+ORD-2023000189,2025-01-29,Customer_96,Central,Wuhan,The Great Novel,Books,Fiction,2,26.33,52.66,Bank Transfer,App,Returned
+ORD-2023000190,2024-07-24,Customer_64,South,Xiamen,Dumbbell Set 20kg,Sports,Fitness Equipment,4,84.04,336.16,Credit Card,App,Processing
+ORD-2023000191,2024-06-17,Customer_181,West,Xi'an,Denim Jacket,Clothing,Men's Wear,5,69.94,349.7,Bank Transfer,Website,Returned
+ORD-2023000192,2023-06-01,Customer_116,East,Nanjing,Wool Scarf,Clothing,Accessories,2,34.58,69.16,Alipay,Phone,Completed
+ORD-2023000193,2024-08-17,Customer_77,East,Nanjing,Dumbbell Set 20kg,Sports,Fitness Equipment,1,90.33,90.33,Alipay,Website,Shipped
+ORD-2023000194,2024-04-29,Customer_127,Central,Wuhan,ThinkPad X1,Electronics,Laptops,2,1521.58,3043.16,Credit Card,Store,Returned
+ORD-2023000195,2023-06-26,Customer_17,Central,Zhengzhou,Leather Boots,Clothing,Footwear,5,141.34,706.7,WeChat Pay,Phone,Cancelled
+ORD-2023000196,2024-10-11,Customer_165,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,5,112.5,562.5,Credit Card,Phone,Cancelled
+ORD-2023000197,2024-01-08,Customer_197,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,5,259.44,1297.2,Alipay,Phone,Returned
+ORD-2023000198,2023-11-28,Customer_83,North,Beijing,Standing Desk,Home & Garden,Furniture,2,469.68,939.36,Alipay,Store,Returned
+ORD-2023000199,2024-07-16,Customer_33,East,Shanghai,Running Shoes Pro,Sports,Running,2,155.04,310.08,WeChat Pay,Third-party,Returned
+ORD-2023000200,2023-11-12,Customer_44,North,Shenyang,Data Science 101,Books,Non-Fiction,2,51.37,102.74,COD,Third-party,Shipped
+ORD-2023000201,2024-06-26,Customer_167,Central,Wuhan,iPhone 15,Electronics,Smartphones,1,862.77,862.77,Alipay,Third-party,Cancelled
+ORD-2023000202,2024-08-16,Customer_165,Central,Changsha,iPhone 15,Electronics,Smartphones,4,1115.58,4462.32,WeChat Pay,Phone,Processing
+ORD-2023000203,2023-11-20,Customer_113,West,Chongqing,Leather Boots,Clothing,Footwear,1,168.0,168.0,Bank Transfer,Phone,Cancelled
+ORD-2023000204,2024-10-15,Customer_188,South,Guangzhou,The Great Novel,Books,Fiction,2,23.58,47.16,WeChat Pay,Phone,Processing
+ORD-2023000205,2025-08-13,Customer_32,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,1,27.43,27.43,WeChat Pay,Phone,Processing
+ORD-2023000206,2025-05-06,Customer_64,South,Shenzhen,Galaxy S24,Electronics,Smartphones,3,1019.12,3057.36,Alipay,Store,Returned
+ORD-2023000207,2025-08-14,Customer_128,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,4,400.93,1603.72,WeChat Pay,Phone,Completed
+ORD-2023000208,2024-03-16,Customer_150,North,Tianjin,Standing Desk,Home & Garden,Furniture,4,568.86,2275.44,WeChat Pay,App,Completed
+ORD-2023000209,2023-01-17,Customer_28,East,Hangzhou,The Great Novel,Books,Fiction,4,23.38,93.52,Bank Transfer,Website,Shipped
+ORD-2023000210,2024-02-03,Customer_93,East,Hangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,1,86.35,86.35,COD,Store,Completed
+ORD-2023000211,2023-09-01,Customer_33,West,Xi'an,Leather Boots,Clothing,Footwear,5,148.49,742.45,Credit Card,Phone,Shipped
+ORD-2023000212,2025-11-08,Customer_103,East,Nanjing,Dumbbell Set 20kg,Sports,Fitness Equipment,2,80.96,161.92,COD,App,Completed
+ORD-2023000213,2025-11-29,Customer_117,North,Beijing,Dark Chocolate Box,Food & Beverage,Snacks,3,16.36,49.08,Alipay,Third-party,Returned
+ORD-2023000214,2024-09-04,Customer_152,South,Guangzhou,The Great Novel,Books,Fiction,3,22.46,67.38,WeChat Pay,Third-party,Returned
+ORD-2023000215,2023-02-04,Customer_95,Central,Zhengzhou,Dark Chocolate Box,Food & Beverage,Snacks,5,14.09,70.45,WeChat Pay,App,Cancelled
+ORD-2023000216,2024-06-27,Customer_168,Central,Zhengzhou,Dark Chocolate Box,Food & Beverage,Snacks,1,15.43,15.43,COD,Third-party,Processing
+ORD-2023000217,2025-02-17,Customer_38,North,Shenyang,Wool Scarf,Clothing,Accessories,2,39.28,78.56,Alipay,App,Returned
+ORD-2023000218,2023-11-07,Customer_106,North,Beijing,iPhone 15,Electronics,Smartphones,4,943.16,3772.64,Alipay,Phone,Returned
+ORD-2023000219,2024-10-27,Customer_170,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,2,904.04,1808.08,Bank Transfer,Third-party,Cancelled
+ORD-2023000220,2024-12-26,Customer_174,East,Shanghai,Leather Boots,Clothing,Footwear,5,151.48,757.4,WeChat Pay,Third-party,Cancelled
+ORD-2023000221,2024-09-01,Customer_198,South,Shenzhen,Running Shoes Pro,Sports,Running,5,139.99,699.95,WeChat Pay,Website,Cancelled
+ORD-2023000222,2024-07-14,Customer_74,East,Hangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,5,100.58,502.9,Credit Card,Third-party,Returned
+ORD-2023000223,2024-08-12,Customer_183,West,Chongqing,Dumbbell Set 20kg,Sports,Fitness Equipment,2,83.41,166.82,Credit Card,Store,Cancelled
+ORD-2023000224,2024-07-09,Customer_144,East,Nanjing,Wool Scarf,Clothing,Accessories,2,35.51,71.02,WeChat Pay,Website,Completed
+ORD-2023000225,2025-12-23,Customer_58,Central,Changsha,LED Floor Lamp,Home & Garden,Lighting,2,82.12,164.24,Alipay,App,Completed
+ORD-2023000226,2023-10-09,Customer_2,West,Chongqing,Dark Chocolate Box,Food & Beverage,Snacks,4,13.19,52.76,COD,Website,Cancelled
+ORD-2023000227,2024-08-11,Customer_83,West,Chongqing,Data Science 101,Books,Non-Fiction,2,53.83,107.66,WeChat Pay,App,Completed
+ORD-2023000228,2023-12-25,Customer_107,Central,Wuhan,Ceramic Mug Set,Home & Garden,Kitchenware,1,32.6,32.6,Alipay,App,Cancelled
+ORD-2023000229,2023-08-08,Customer_86,West,Chengdu,Yoga Mat Premium,Sports,Yoga,1,41.79,41.79,WeChat Pay,Phone,Returned
+ORD-2023000230,2024-01-30,Customer_29,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,5,246.61,1233.05,WeChat Pay,Website,Cancelled
+ORD-2023000231,2024-08-27,Customer_146,East,Nanjing,Sony WH-1000XM5,Electronics,Headphones,1,373.77,373.77,Alipay,Website,Returned
+ORD-2023000232,2023-07-15,Customer_48,West,Chongqing,Standing Desk,Home & Garden,Furniture,3,437.13,1311.39,Alipay,Phone,Shipped
+ORD-2023000233,2024-06-30,Customer_85,South,Shenzhen,Running Shoes Pro,Sports,Running,4,137.18,548.72,WeChat Pay,Third-party,Returned
+ORD-2023000234,2023-05-08,Customer_171,North,Tianjin,Data Science 101,Books,Non-Fiction,3,52.88,158.64,Credit Card,Phone,Shipped
+ORD-2023000235,2024-09-28,Customer_177,South,Guangzhou,Organic Coffee Beans,Food & Beverage,Beverages,5,22.53,112.65,Credit Card,Store,Shipped
+ORD-2023000236,2025-07-20,Customer_192,Central,Wuhan,Canon EOS R6,Electronics,Cameras,2,2482.64,4965.28,COD,Store,Cancelled
+ORD-2023000237,2023-06-17,Customer_135,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,2,31.28,62.56,Bank Transfer,Third-party,Shipped
+ORD-2023000238,2025-11-01,Customer_52,North,Shenyang,ThinkPad X1,Electronics,Laptops,1,1536.99,1536.99,COD,Third-party,Processing
+ORD-2023000239,2024-02-25,Customer_184,South,Guangzhou,Standing Desk,Home & Garden,Furniture,4,441.55,1766.2,COD,Phone,Completed
+ORD-2023000240,2025-04-30,Customer_117,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,4,799.74,3198.96,COD,App,Returned
+ORD-2023000241,2023-01-07,Customer_191,West,Xi'an,Yoga Mat Premium,Sports,Yoga,1,47.47,47.47,Alipay,Third-party,Completed
+ORD-2023000242,2023-05-04,Customer_18,North,Tianjin,Dumbbell Set 20kg,Sports,Fitness Equipment,1,90.1,90.1,Bank Transfer,App,Shipped
+ORD-2023000243,2025-02-22,Customer_115,West,Chengdu,AirPods Pro,Electronics,Headphones,4,239.62,958.48,Bank Transfer,Phone,Completed
+ORD-2023000244,2025-03-15,Customer_136,Central,Wuhan,Data Science 101,Books,Non-Fiction,3,44.27,132.81,Alipay,Website,Completed
+ORD-2023000245,2025-02-15,Customer_59,North,Tianjin,Leather Boots,Clothing,Footwear,5,155.38,776.9,Alipay,Phone,Shipped
+ORD-2023000246,2025-05-08,Customer_158,South,Guangzhou,iPad Air,Electronics,Tablets,1,514.94,514.94,Credit Card,Website,Processing
+ORD-2023000247,2023-04-10,Customer_63,North,Beijing,The Great Novel,Books,Fiction,1,24.59,24.59,Credit Card,Phone,Cancelled
+ORD-2023000248,2024-08-15,Customer_60,South,Xiamen,iPad Air,Electronics,Tablets,1,534.33,534.33,COD,Store,Returned
+ORD-2023000249,2023-10-21,Customer_170,Central,Changsha,Camping Tent 4P,Sports,Outdoor,2,281.22,562.44,COD,Website,Cancelled
+ORD-2023000250,2023-12-25,Customer_161,East,Hangzhou,Galaxy S24,Electronics,Smartphones,5,1019.97,5099.85,Bank Transfer,Third-party,Cancelled
+ORD-2023000251,2024-10-14,Customer_179,North,Tianjin,Data Science 101,Books,Non-Fiction,4,54.28,217.12,Bank Transfer,Phone,Processing
+ORD-2023000252,2024-04-06,Customer_77,East,Hangzhou,Sony WH-1000XM5,Electronics,Headphones,5,346.23,1731.15,Alipay,Phone,Completed
+ORD-2023000253,2025-03-06,Customer_63,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,5,130.16,650.8,WeChat Pay,Website,Shipped
+ORD-2023000254,2024-01-26,Customer_14,North,Tianjin,Dumbbell Set 20kg,Sports,Fitness Equipment,1,89.95,89.95,WeChat Pay,Phone,Returned
+ORD-2023000255,2024-03-20,Customer_123,Central,Wuhan,MacBook Air,Electronics,Laptops,2,1308.58,2617.16,Alipay,Store,Shipped
+ORD-2023000256,2025-09-07,Customer_63,North,Beijing,iPad Air,Electronics,Tablets,1,643.36,643.36,COD,Website,Cancelled
+ORD-2023000257,2025-12-28,Customer_167,South,Xiamen,Camping Tent 4P,Sports,Outdoor,3,288.3,864.9,WeChat Pay,Store,Shipped
+ORD-2023000258,2025-08-19,Customer_195,East,Nanjing,Wool Scarf,Clothing,Accessories,4,34.3,137.2,WeChat Pay,Website,Shipped
+ORD-2023000259,2023-10-26,Customer_5,East,Hangzhou,Galaxy S24,Electronics,Smartphones,5,997.19,4985.95,WeChat Pay,Third-party,Returned
+ORD-2023000260,2024-11-06,Customer_59,Central,Changsha,Silk Dress,Clothing,Women's Wear,3,115.55,346.65,Bank Transfer,Third-party,Processing
+ORD-2023000261,2025-09-27,Customer_186,West,Xi'an,Data Science 101,Books,Non-Fiction,3,46.35,139.05,Bank Transfer,Phone,Processing
+ORD-2023000262,2023-05-01,Customer_135,East,Shanghai,AirPods Pro,Electronics,Headphones,5,248.13,1240.65,Credit Card,App,Completed
+ORD-2023000263,2023-11-06,Customer_3,North,Tianjin,AirPods Pro,Electronics,Headphones,2,216.73,433.46,Alipay,Third-party,Cancelled
+ORD-2023000264,2025-09-26,Customer_5,East,Shanghai,The Great Novel,Books,Fiction,5,28.08,140.4,Credit Card,Third-party,Returned
+ORD-2023000265,2024-08-10,Customer_5,West,Chengdu,iPhone 15,Electronics,Smartphones,5,1065.59,5327.95,COD,Phone,Processing
+ORD-2023000266,2025-12-14,Customer_65,North,Beijing,Standing Desk,Home & Garden,Furniture,2,460.22,920.44,WeChat Pay,Store,Cancelled
+ORD-2023000267,2024-04-07,Customer_77,North,Tianjin,Denim Jacket,Clothing,Men's Wear,4,80.54,322.16,Credit Card,App,Completed
+ORD-2023000268,2023-01-20,Customer_180,West,Chongqing,Denim Jacket,Clothing,Men's Wear,5,78.43,392.15,Alipay,App,Cancelled
+ORD-2023000269,2023-07-15,Customer_136,West,Xi'an,Camping Tent 4P,Sports,Outdoor,5,341.82,1709.1,Credit Card,Website,Processing
+ORD-2023000270,2024-07-28,Customer_140,Central,Zhengzhou,Running Shoes Pro,Sports,Running,1,167.96,167.96,COD,App,Processing
+ORD-2023000271,2025-03-26,Customer_20,East,Shanghai,iPad Air,Electronics,Tablets,5,535.06,2675.3,WeChat Pay,Website,Returned
+ORD-2023000272,2023-10-14,Customer_177,South,Xiamen,Denim Jacket,Clothing,Men's Wear,5,75.01,375.05,Credit Card,Third-party,Shipped
+ORD-2023000273,2024-11-28,Customer_155,North,Beijing,Silk Dress,Clothing,Women's Wear,2,142.11,284.22,COD,Third-party,Cancelled
+ORD-2023000274,2025-07-11,Customer_126,East,Shanghai,Data Science 101,Books,Non-Fiction,3,54.24,162.72,Alipay,Store,Returned
+ORD-2023000275,2023-06-25,Customer_198,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,5,365.82,1829.1,COD,Store,Processing
+ORD-2023000276,2023-11-12,Customer_190,North,Beijing,Running Shoes Pro,Sports,Running,2,143.64,287.28,Bank Transfer,Store,Shipped
+ORD-2023000277,2024-07-06,Customer_27,North,Beijing,iPhone 15,Electronics,Smartphones,3,982.44,2947.32,Alipay,App,Processing
+ORD-2023000278,2023-07-31,Customer_7,West,Chongqing,Ceramic Mug Set,Home & Garden,Kitchenware,5,29.11,145.55,Credit Card,Store,Returned
+ORD-2023000279,2023-01-26,Customer_75,North,Shenyang,The Great Novel,Books,Fiction,3,27.72,83.16,Bank Transfer,Phone,Completed
+ORD-2023000280,2025-02-18,Customer_44,Central,Wuhan,LED Floor Lamp,Home & Garden,Lighting,5,80.18,400.9,Alipay,Store,Shipped
+ORD-2023000281,2024-07-19,Customer_108,East,Hangzhou,AirPods Pro,Electronics,Headphones,1,224.14,224.14,WeChat Pay,Phone,Completed
+ORD-2023000282,2024-02-05,Customer_118,East,Hangzhou,Canon EOS R6,Electronics,Cameras,4,2569.33,10277.32,Credit Card,Website,Shipped
+ORD-2023000283,2024-11-05,Customer_113,North,Tianjin,Camping Tent 4P,Sports,Outdoor,5,288.23,1441.15,WeChat Pay,Phone,Returned
+ORD-2023000284,2024-02-16,Customer_123,South,Guangzhou,Camping Tent 4P,Sports,Outdoor,5,339.12,1695.6,WeChat Pay,Website,Cancelled
+ORD-2023000285,2024-05-11,Customer_84,East,Hangzhou,Dark Chocolate Box,Food & Beverage,Snacks,4,17.09,68.36,Bank Transfer,Store,Cancelled
+ORD-2023000286,2024-01-04,Customer_175,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,2,91.46,182.92,COD,App,Cancelled
+ORD-2023000287,2025-04-17,Customer_173,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,1,53.69,53.69,Bank Transfer,Website,Shipped
+ORD-2023000288,2025-02-11,Customer_19,South,Guangzhou,Organic Coffee Beans,Food & Beverage,Beverages,2,21.28,42.56,Bank Transfer,Third-party,Cancelled
+ORD-2023000289,2025-05-06,Customer_140,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,5,32.68,163.4,Credit Card,Store,Returned
+ORD-2023000290,2024-12-28,Customer_43,Central,Changsha,MacBook Air,Electronics,Laptops,1,1295.74,1295.74,COD,App,Returned
+ORD-2023000291,2024-06-13,Customer_57,West,Chongqing,Silk Dress,Clothing,Women's Wear,1,110.06,110.06,COD,Third-party,Returned
+ORD-2023000292,2025-03-12,Customer_119,Central,Changsha,LED Floor Lamp,Home & Garden,Lighting,2,87.55,175.1,COD,Third-party,Processing
+ORD-2023000293,2023-06-25,Customer_30,East,Shanghai,Wool Scarf,Clothing,Accessories,1,36.61,36.61,Alipay,Store,Shipped
+ORD-2023000294,2025-09-02,Customer_25,East,Hangzhou,iPad Air,Electronics,Tablets,5,595.93,2979.65,Bank Transfer,Phone,Shipped
+ORD-2023000295,2024-12-03,Customer_166,North,Tianjin,Galaxy S24,Electronics,Smartphones,1,770.24,770.24,Credit Card,Website,Processing
+ORD-2023000296,2025-05-23,Customer_119,Central,Wuhan,Ceramic Mug Set,Home & Garden,Kitchenware,2,27.53,55.06,Alipay,Phone,Processing
+ORD-2023000297,2024-02-09,Customer_116,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,4,19.36,77.44,COD,Phone,Cancelled
+ORD-2023000298,2023-05-09,Customer_148,North,Shenyang,iPad Air,Electronics,Tablets,2,559.17,1118.34,Credit Card,Third-party,Processing
+ORD-2023000299,2025-09-29,Customer_136,East,Hangzhou,iPad Air,Electronics,Tablets,4,529.63,2118.52,WeChat Pay,Third-party,Cancelled
+ORD-2023000300,2025-07-26,Customer_159,Central,Zhengzhou,LED Floor Lamp,Home & Garden,Lighting,1,84.94,84.94,Alipay,Store,Returned
+ORD-2023000301,2024-05-03,Customer_79,Central,Wuhan,Organic Coffee Beans,Food & Beverage,Beverages,2,18.87,37.74,Credit Card,Website,Shipped
+ORD-2023000302,2025-02-24,Customer_109,South,Xiamen,Denim Jacket,Clothing,Men's Wear,4,81.29,325.16,Alipay,Phone,Returned
+ORD-2023000303,2024-01-19,Customer_81,South,Xiamen,Sony WH-1000XM5,Electronics,Headphones,4,326.89,1307.56,Bank Transfer,Third-party,Completed
+ORD-2023000304,2025-02-25,Customer_144,East,Shanghai,Wool Scarf,Clothing,Accessories,2,35.43,70.86,COD,Phone,Cancelled
+ORD-2023000305,2023-06-19,Customer_145,West,Chongqing,Dark Chocolate Box,Food & Beverage,Snacks,4,14.94,59.76,Credit Card,Website,Shipped
+ORD-2023000306,2025-07-25,Customer_145,North,Tianjin,Canon EOS R6,Electronics,Cameras,5,2340.57,11702.85,Bank Transfer,Third-party,Returned
+ORD-2023000307,2025-01-21,Customer_139,North,Shenyang,ThinkPad X1,Electronics,Laptops,3,1514.46,4543.38,Credit Card,Phone,Returned
+ORD-2023000308,2023-03-08,Customer_116,South,Guangzhou,ThinkPad X1,Electronics,Laptops,2,1314.1,2628.2,WeChat Pay,Store,Completed
+ORD-2023000309,2024-12-19,Customer_182,West,Chengdu,Canon EOS R6,Electronics,Cameras,2,2731.93,5463.86,COD,Phone,Processing
+ORD-2023000310,2024-12-19,Customer_137,Central,Wuhan,iPad Air,Electronics,Tablets,2,653.89,1307.78,WeChat Pay,Third-party,Returned
+ORD-2023000311,2024-07-01,Customer_132,South,Guangzhou,Dark Chocolate Box,Food & Beverage,Snacks,3,14.04,42.12,Credit Card,Website,Cancelled
+ORD-2023000312,2023-09-29,Customer_64,North,Tianjin,Data Science 101,Books,Non-Fiction,2,53.01,106.02,Alipay,Store,Processing
+ORD-2023000313,2025-04-28,Customer_97,West,Chongqing,AirPods Pro,Electronics,Headphones,5,258.89,1294.45,Bank Transfer,App,Completed
+ORD-2023000314,2025-09-26,Customer_84,West,Xi'an,Running Shoes Pro,Sports,Running,3,146.97,440.91,COD,App,Completed
+ORD-2023000315,2025-12-30,Customer_102,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,3,22.09,66.27,Alipay,Phone,Processing
+ORD-2023000316,2023-09-25,Customer_145,West,Chongqing,Camping Tent 4P,Sports,Outdoor,3,284.45,853.35,Bank Transfer,Store,Completed
+ORD-2023000317,2023-11-20,Customer_113,North,Beijing,Data Science 101,Books,Non-Fiction,4,42.74,170.96,Bank Transfer,App,Cancelled
+ORD-2023000318,2024-07-15,Customer_24,South,Xiamen,AirPods Pro,Electronics,Headphones,3,223.53,670.59,WeChat Pay,Store,Completed
+ORD-2023000319,2024-09-17,Customer_186,East,Nanjing,Data Science 101,Books,Non-Fiction,2,43.27,86.54,Alipay,Phone,Completed
+ORD-2023000320,2024-04-08,Customer_133,North,Beijing,iPad Air,Electronics,Tablets,4,523.16,2092.64,Bank Transfer,App,Completed
+ORD-2023000321,2024-04-13,Customer_99,East,Shanghai,Silk Dress,Clothing,Women's Wear,2,128.14,256.28,Credit Card,App,Completed
+ORD-2023000322,2023-09-30,Customer_165,East,Hangzhou,Yoga Mat Premium,Sports,Yoga,2,47.28,94.56,Alipay,App,Returned
+ORD-2023000323,2024-03-12,Customer_161,Central,Wuhan,The Great Novel,Books,Fiction,2,24.54,49.08,Alipay,Phone,Returned
+ORD-2023000324,2023-09-10,Customer_151,West,Chengdu,MacBook Air,Electronics,Laptops,1,1069.51,1069.51,Bank Transfer,Store,Cancelled
+ORD-2023000325,2024-05-23,Customer_142,East,Shanghai,Canon EOS R6,Electronics,Cameras,3,2607.42,7822.26,COD,Third-party,Returned
+ORD-2023000326,2025-11-09,Customer_49,East,Nanjing,iPhone 15,Electronics,Smartphones,3,910.72,2732.16,Bank Transfer,Store,Completed
+ORD-2023000327,2023-05-26,Customer_136,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,1,72.86,72.86,Credit Card,Store,Shipped
+ORD-2023000328,2023-12-20,Customer_196,South,Guangzhou,LED Floor Lamp,Home & Garden,Lighting,4,85.41,341.64,Bank Transfer,App,Completed
+ORD-2023000329,2023-05-04,Customer_102,Central,Wuhan,iPhone 15,Electronics,Smartphones,3,913.81,2741.43,COD,Store,Returned
+ORD-2023000330,2023-11-09,Customer_72,West,Chongqing,Dark Chocolate Box,Food & Beverage,Snacks,4,13.11,52.44,Credit Card,Store,Completed
+ORD-2023000331,2023-05-16,Customer_80,Central,Wuhan,AirPods Pro,Electronics,Headphones,5,236.06,1180.3,Bank Transfer,Website,Completed
+ORD-2023000332,2023-04-23,Customer_80,South,Shenzhen,Silk Dress,Clothing,Women's Wear,1,127.2,127.2,Alipay,App,Completed
+ORD-2023000333,2024-12-11,Customer_134,South,Xiamen,iPhone 15,Electronics,Smartphones,2,997.92,1995.84,COD,Store,Processing
+ORD-2023000334,2023-03-02,Customer_86,East,Shanghai,Running Shoes Pro,Sports,Running,1,161.13,161.13,Bank Transfer,Store,Returned
+ORD-2023000335,2025-10-13,Customer_117,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,5,15.56,77.8,COD,Store,Completed
+ORD-2023000336,2023-07-30,Customer_147,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,3,313.12,939.36,Credit Card,Website,Returned
+ORD-2023000337,2025-01-15,Customer_99,North,Beijing,iPhone 15,Electronics,Smartphones,2,862.93,1725.86,Alipay,Website,Completed
+ORD-2023000338,2024-05-23,Customer_107,Central,Changsha,Data Science 101,Books,Non-Fiction,4,45.86,183.44,WeChat Pay,Store,Completed
+ORD-2023000339,2023-04-18,Customer_46,Central,Zhengzhou,ThinkPad X1,Electronics,Laptops,5,1471.74,7358.7,Alipay,Third-party,Completed
+ORD-2023000340,2024-09-28,Customer_84,West,Chengdu,Leather Boots,Clothing,Footwear,3,172.05,516.15,Credit Card,Third-party,Cancelled
+ORD-2023000341,2024-09-14,Customer_190,North,Tianjin,iPad Air,Electronics,Tablets,3,610.47,1831.41,COD,Website,Cancelled
+ORD-2023000342,2024-05-17,Customer_39,East,Nanjing,Wool Scarf,Clothing,Accessories,2,41.72,83.44,Credit Card,Phone,Completed
+ORD-2023000343,2023-01-03,Customer_195,South,Xiamen,Dumbbell Set 20kg,Sports,Fitness Equipment,1,101.04,101.04,Bank Transfer,Store,Completed
+ORD-2023000344,2023-05-03,Customer_37,South,Xiamen,Canon EOS R6,Electronics,Cameras,4,2493.02,9972.08,WeChat Pay,App,Completed
+ORD-2023000345,2023-06-23,Customer_149,South,Xiamen,Silk Dress,Clothing,Women's Wear,3,127.39,382.17,Credit Card,Third-party,Processing
+ORD-2023000346,2023-09-25,Customer_61,West,Chengdu,LED Floor Lamp,Home & Garden,Lighting,5,77.31,386.55,WeChat Pay,Store,Shipped
+ORD-2023000347,2024-04-23,Customer_20,West,Xi'an,Camping Tent 4P,Sports,Outdoor,3,294.76,884.28,Alipay,Website,Returned
+ORD-2023000348,2024-10-05,Customer_105,North,Beijing,ThinkPad X1,Electronics,Laptops,2,1377.83,2755.66,Credit Card,Third-party,Shipped
+ORD-2023000349,2023-09-03,Customer_24,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,4,45.55,182.2,Alipay,Store,Returned
+ORD-2023000350,2024-05-23,Customer_92,North,Beijing,Camping Tent 4P,Sports,Outdoor,2,262.33,524.66,Bank Transfer,Third-party,Completed
+ORD-2023000351,2025-07-15,Customer_143,East,Hangzhou,Sony WH-1000XM5,Electronics,Headphones,1,396.33,396.33,COD,Website,Completed
+ORD-2023000352,2024-03-31,Customer_34,West,Chengdu,AirPods Pro,Electronics,Headphones,1,212.54,212.54,Alipay,Phone,Shipped
+ORD-2023000353,2023-06-03,Customer_6,North,Shenyang,LED Floor Lamp,Home & Garden,Lighting,3,100.15,300.45,Credit Card,Website,Cancelled
+ORD-2023000354,2025-08-02,Customer_13,South,Shenzhen,Camping Tent 4P,Sports,Outdoor,1,257.98,257.98,Alipay,Third-party,Cancelled
+ORD-2023000355,2023-12-20,Customer_91,West,Chongqing,iPhone 15,Electronics,Smartphones,4,1053.91,4215.64,Alipay,Website,Shipped
+ORD-2023000356,2024-05-18,Customer_166,East,Hangzhou,AirPods Pro,Electronics,Headphones,1,257.52,257.52,WeChat Pay,Phone,Cancelled
+ORD-2023000357,2023-10-09,Customer_108,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,1,839.61,839.61,Alipay,Third-party,Processing
+ORD-2023000358,2025-09-19,Customer_89,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,3,78.52,235.56,COD,Third-party,Shipped
+ORD-2023000359,2024-03-24,Customer_8,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,1,330.04,330.04,WeChat Pay,App,Cancelled
+ORD-2023000360,2023-07-25,Customer_64,Central,Zhengzhou,LED Floor Lamp,Home & Garden,Lighting,2,101.66,203.32,Alipay,Store,Returned
+ORD-2023000361,2023-12-22,Customer_46,North,Beijing,LED Floor Lamp,Home & Garden,Lighting,4,85.12,340.48,Alipay,Third-party,Shipped
+ORD-2023000362,2023-10-19,Customer_145,East,Nanjing,iPhone 15,Electronics,Smartphones,3,1133.13,3399.39,Alipay,Phone,Returned
+ORD-2023000363,2024-04-21,Customer_155,East,Shanghai,Wool Scarf,Clothing,Accessories,1,34.21,34.21,Alipay,App,Returned
+ORD-2023000364,2023-09-25,Customer_88,West,Chengdu,Camping Tent 4P,Sports,Outdoor,5,272.22,1361.1,Alipay,Store,Completed
+ORD-2023000365,2025-12-13,Customer_94,North,Beijing,LED Floor Lamp,Home & Garden,Lighting,2,96.33,192.66,Credit Card,Store,Cancelled
+ORD-2023000366,2023-11-19,Customer_188,Central,Wuhan,Camping Tent 4P,Sports,Outdoor,3,283.09,849.27,Bank Transfer,Phone,Shipped
+ORD-2023000367,2024-04-02,Customer_171,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,5,31.5,157.5,COD,Website,Cancelled
+ORD-2023000368,2023-01-04,Customer_180,East,Nanjing,Dark Chocolate Box,Food & Beverage,Snacks,3,13.31,39.93,COD,Phone,Returned
+ORD-2023000369,2024-03-28,Customer_164,North,Beijing,The Great Novel,Books,Fiction,3,28.15,84.45,COD,App,Cancelled
+ORD-2023000370,2024-10-16,Customer_43,South,Guangzhou,MacBook Air,Electronics,Laptops,2,1143.9,2287.8,Credit Card,Store,Cancelled
+ORD-2023000371,2024-12-18,Customer_66,North,Tianjin,iPad Air,Electronics,Tablets,2,633.71,1267.42,Credit Card,App,Completed
+ORD-2023000372,2025-10-06,Customer_97,West,Chongqing,Silk Dress,Clothing,Women's Wear,2,143.88,287.76,WeChat Pay,Third-party,Cancelled
+ORD-2023000373,2023-05-31,Customer_9,North,Tianjin,LED Floor Lamp,Home & Garden,Lighting,2,79.99,159.98,WeChat Pay,App,Shipped
+ORD-2023000374,2025-02-07,Customer_42,East,Shanghai,MacBook Air,Electronics,Laptops,3,1080.34,3241.02,Credit Card,Third-party,Completed
+ORD-2023000375,2025-06-02,Customer_168,East,Nanjing,The Great Novel,Books,Fiction,4,26.52,106.08,Alipay,Third-party,Cancelled
+ORD-2023000376,2024-01-25,Customer_105,South,Shenzhen,ThinkPad X1,Electronics,Laptops,3,1275.42,3826.26,COD,Third-party,Shipped
+ORD-2023000377,2025-10-02,Customer_40,East,Hangzhou,Canon EOS R6,Electronics,Cameras,1,2161.36,2161.36,Credit Card,Store,Completed
+ORD-2023000378,2023-07-18,Customer_7,West,Chengdu,Yoga Mat Premium,Sports,Yoga,5,48.71,243.55,Alipay,Website,Shipped
+ORD-2023000379,2025-08-22,Customer_126,North,Tianjin,ThinkPad X1,Electronics,Laptops,3,1518.56,4555.68,WeChat Pay,App,Returned
+ORD-2023000380,2025-07-01,Customer_12,West,Chengdu,Dumbbell Set 20kg,Sports,Fitness Equipment,4,85.51,342.04,WeChat Pay,Phone,Cancelled
+ORD-2023000381,2023-07-18,Customer_22,East,Shanghai,Running Shoes Pro,Sports,Running,5,129.41,647.05,WeChat Pay,Third-party,Cancelled
+ORD-2023000382,2025-12-06,Customer_108,Central,Wuhan,Ceramic Mug Set,Home & Garden,Kitchenware,1,31.96,31.96,COD,Phone,Returned
+ORD-2023000383,2023-03-13,Customer_129,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,1,47.45,47.45,COD,Third-party,Returned
+ORD-2023000384,2023-12-09,Customer_55,Central,Wuhan,ThinkPad X1,Electronics,Laptops,4,1261.71,5046.84,Alipay,Website,Completed
+ORD-2023000385,2023-10-30,Customer_153,West,Chengdu,Organic Coffee Beans,Food & Beverage,Beverages,4,18.2,72.8,WeChat Pay,Store,Completed
+ORD-2023000386,2024-07-19,Customer_134,North,Tianjin,Ceramic Mug Set,Home & Garden,Kitchenware,4,29.45,117.8,Bank Transfer,App,Returned
+ORD-2023000387,2023-10-31,Customer_146,Central,Changsha,Silk Dress,Clothing,Women's Wear,1,125.69,125.69,COD,Third-party,Completed
+ORD-2023000388,2024-12-05,Customer_106,North,Shenyang,ThinkPad X1,Electronics,Laptops,3,1553.23,4659.69,WeChat Pay,Phone,Cancelled
+ORD-2023000389,2025-04-05,Customer_37,Central,Changsha,Wool Scarf,Clothing,Accessories,1,35.16,35.16,COD,Third-party,Cancelled
+ORD-2023000390,2025-08-31,Customer_69,North,Tianjin,Camping Tent 4P,Sports,Outdoor,2,258.57,517.14,WeChat Pay,App,Shipped
+ORD-2023000391,2023-07-21,Customer_59,East,Hangzhou,Running Shoes Pro,Sports,Running,4,165.01,660.04,Alipay,Store,Cancelled
+ORD-2023000392,2024-01-20,Customer_114,East,Hangzhou,Silk Dress,Clothing,Women's Wear,5,134.63,673.15,Alipay,Phone,Cancelled
+ORD-2023000393,2023-05-15,Customer_80,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,5,977.61,4888.05,COD,Phone,Processing
+ORD-2023000394,2024-02-16,Customer_15,Central,Changsha,iPhone 15,Electronics,Smartphones,2,906.92,1813.84,Alipay,App,Cancelled
+ORD-2023000395,2025-08-08,Customer_130,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,2,13.97,27.94,Bank Transfer,App,Completed
+ORD-2023000396,2025-08-29,Customer_151,South,Guangzhou,Wool Scarf,Clothing,Accessories,5,38.37,191.85,COD,Store,Shipped
+ORD-2023000397,2025-03-02,Customer_13,South,Guangzhou,Dark Chocolate Box,Food & Beverage,Snacks,1,14.02,14.02,Alipay,Third-party,Processing
+ORD-2023000398,2025-04-18,Customer_132,South,Xiamen,Canon EOS R6,Electronics,Cameras,2,2325.88,4651.76,Credit Card,App,Cancelled
+ORD-2023000399,2024-04-03,Customer_65,South,Xiamen,Sony WH-1000XM5,Electronics,Headphones,5,380.5,1902.5,COD,Store,Shipped
+ORD-2023000400,2025-08-13,Customer_78,West,Chongqing,Dumbbell Set 20kg,Sports,Fitness Equipment,4,82.38,329.52,COD,Third-party,Cancelled
+ORD-2023000401,2025-02-05,Customer_144,Central,Wuhan,iPhone 15,Electronics,Smartphones,5,1148.68,5743.4,COD,Third-party,Shipped
+ORD-2023000402,2024-07-20,Customer_164,East,Nanjing,ThinkPad X1,Electronics,Laptops,4,1215.94,4863.76,WeChat Pay,Store,Shipped
+ORD-2023000403,2023-04-27,Customer_154,East,Shanghai,AirPods Pro,Electronics,Headphones,5,268.83,1344.15,Bank Transfer,Store,Processing
+ORD-2023000404,2025-05-07,Customer_104,North,Shenyang,Wool Scarf,Clothing,Accessories,3,36.19,108.57,Bank Transfer,App,Returned
+ORD-2023000405,2025-09-01,Customer_172,Central,Wuhan,Camping Tent 4P,Sports,Outdoor,2,315.71,631.42,WeChat Pay,Third-party,Shipped
+ORD-2023000406,2025-08-22,Customer_33,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,2,27.21,54.42,WeChat Pay,Third-party,Processing
+ORD-2023000407,2024-09-20,Customer_108,East,Nanjing,MacBook Air,Electronics,Laptops,2,1146.95,2293.9,WeChat Pay,Store,Shipped
+ORD-2023000408,2023-05-26,Customer_121,Central,Zhengzhou,Leather Boots,Clothing,Footwear,1,157.59,157.59,Alipay,Third-party,Completed
+ORD-2023000409,2023-11-05,Customer_36,West,Xi'an,Yoga Mat Premium,Sports,Yoga,4,42.44,169.76,Alipay,Store,Cancelled
+ORD-2023000410,2024-01-05,Customer_200,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,3,276.07,828.21,Credit Card,Phone,Shipped
+ORD-2023000411,2024-07-14,Customer_54,South,Guangzhou,Data Science 101,Books,Non-Fiction,1,42.56,42.56,Alipay,Third-party,Processing
+ORD-2023000412,2025-05-29,Customer_104,West,Chengdu,AirPods Pro,Electronics,Headphones,5,244.05,1220.25,Bank Transfer,Phone,Cancelled
+ORD-2023000413,2023-01-29,Customer_83,North,Beijing,Ceramic Mug Set,Home & Garden,Kitchenware,2,31.01,62.02,COD,Website,Completed
+ORD-2023000414,2024-12-06,Customer_80,North,Shenyang,Canon EOS R6,Electronics,Cameras,2,2644.09,5288.18,Alipay,App,Cancelled
+ORD-2023000415,2023-04-04,Customer_77,Central,Changsha,Yoga Mat Premium,Sports,Yoga,2,42.61,85.22,WeChat Pay,Phone,Returned
+ORD-2023000416,2023-10-02,Customer_88,Central,Changsha,Camping Tent 4P,Sports,Outdoor,4,333.8,1335.2,Bank Transfer,Store,Processing
+ORD-2023000417,2023-09-26,Customer_55,South,Guangzhou,iPhone 15,Electronics,Smartphones,2,916.38,1832.76,Credit Card,Third-party,Returned
+ORD-2023000418,2024-06-07,Customer_198,South,Shenzhen,Dumbbell Set 20kg,Sports,Fitness Equipment,1,85.67,85.67,COD,Third-party,Completed
+ORD-2023000419,2023-02-10,Customer_13,Central,Wuhan,Organic Coffee Beans,Food & Beverage,Beverages,1,20.91,20.91,Credit Card,Phone,Cancelled
+ORD-2023000420,2023-11-10,Customer_53,West,Chengdu,Ceramic Mug Set,Home & Garden,Kitchenware,3,28.78,86.34,Credit Card,Store,Cancelled
+ORD-2023000421,2023-10-08,Customer_108,North,Shenyang,Standing Desk,Home & Garden,Furniture,3,517.38,1552.14,Credit Card,Third-party,Returned
+ORD-2023000422,2024-02-14,Customer_200,North,Tianjin,ThinkPad X1,Electronics,Laptops,1,1398.05,1398.05,WeChat Pay,Third-party,Processing
+ORD-2023000423,2025-10-13,Customer_54,East,Nanjing,Silk Dress,Clothing,Women's Wear,3,115.86,347.58,Bank Transfer,Store,Processing
+ORD-2023000424,2025-10-08,Customer_39,North,Beijing,Organic Coffee Beans,Food & Beverage,Beverages,1,22.43,22.43,Credit Card,Third-party,Completed
+ORD-2023000425,2024-08-29,Customer_68,North,Tianjin,Data Science 101,Books,Non-Fiction,2,49.34,98.68,Bank Transfer,App,Completed
+ORD-2023000426,2024-10-02,Customer_110,South,Shenzhen,Yoga Mat Premium,Sports,Yoga,3,53.43,160.29,Credit Card,App,Completed
+ORD-2023000427,2025-06-15,Customer_160,North,Beijing,Organic Coffee Beans,Food & Beverage,Beverages,2,18.96,37.92,WeChat Pay,App,Shipped
+ORD-2023000428,2025-07-23,Customer_70,East,Shanghai,ThinkPad X1,Electronics,Laptops,4,1357.14,5428.56,Bank Transfer,Phone,Cancelled
+ORD-2023000429,2023-11-23,Customer_27,South,Shenzhen,AirPods Pro,Electronics,Headphones,1,284.97,284.97,Bank Transfer,Third-party,Cancelled
+ORD-2023000430,2025-01-04,Customer_157,Central,Changsha,Leather Boots,Clothing,Footwear,2,164.31,328.62,Credit Card,Website,Cancelled
+ORD-2023000431,2024-06-19,Customer_168,West,Chengdu,Silk Dress,Clothing,Women's Wear,4,111.43,445.72,WeChat Pay,App,Returned
+ORD-2023000432,2024-11-23,Customer_133,Central,Changsha,LED Floor Lamp,Home & Garden,Lighting,2,101.76,203.52,COD,Third-party,Completed
+ORD-2023000433,2025-02-27,Customer_39,West,Xi'an,Canon EOS R6,Electronics,Cameras,4,2383.36,9533.44,COD,Third-party,Completed
+ORD-2023000434,2025-10-12,Customer_43,North,Shenyang,Sony WH-1000XM5,Electronics,Headphones,5,385.52,1927.6,Credit Card,Phone,Shipped
+ORD-2023000435,2025-02-14,Customer_104,South,Guangzhou,Running Shoes Pro,Sports,Running,1,149.31,149.31,Alipay,App,Cancelled
+ORD-2023000436,2025-07-04,Customer_81,West,Xi'an,Leather Boots,Clothing,Footwear,1,176.01,176.01,Credit Card,Phone,Completed
+ORD-2023000437,2023-01-01,Customer_24,North,Tianjin,Silk Dress,Clothing,Women's Wear,1,131.21,131.21,COD,Third-party,Shipped
+ORD-2023000438,2025-01-14,Customer_14,Central,Changsha,iPad Air,Electronics,Tablets,4,679.93,2719.72,Alipay,Phone,Shipped
+ORD-2023000439,2025-01-14,Customer_184,Central,Changsha,The Great Novel,Books,Fiction,4,26.61,106.44,Bank Transfer,App,Completed
+ORD-2023000440,2024-08-20,Customer_141,South,Shenzhen,Camping Tent 4P,Sports,Outdoor,3,328.59,985.77,COD,Store,Completed
+ORD-2023000441,2025-04-18,Customer_28,North,Beijing,Wool Scarf,Clothing,Accessories,2,42.77,85.54,WeChat Pay,Third-party,Processing
+ORD-2023000442,2024-01-26,Customer_184,South,Shenzhen,Denim Jacket,Clothing,Men's Wear,2,77.98,155.96,WeChat Pay,App,Cancelled
+ORD-2023000443,2025-07-11,Customer_118,North,Shenyang,Organic Coffee Beans,Food & Beverage,Beverages,5,17.73,88.65,COD,Third-party,Processing
+ORD-2023000444,2025-06-05,Customer_150,West,Chengdu,Standing Desk,Home & Garden,Furniture,1,506.97,506.97,Bank Transfer,Third-party,Processing
+ORD-2023000445,2024-10-21,Customer_130,Central,Wuhan,AirPods Pro,Electronics,Headphones,1,240.59,240.59,Bank Transfer,Phone,Returned
+ORD-2023000446,2025-07-16,Customer_35,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,3,90.15,270.45,Alipay,Phone,Returned
+ORD-2023000447,2024-03-21,Customer_52,Central,Zhengzhou,Dark Chocolate Box,Food & Beverage,Snacks,5,16.61,83.05,Alipay,Third-party,Shipped
+ORD-2023000448,2024-10-22,Customer_182,East,Nanjing,AirPods Pro,Electronics,Headphones,2,249.29,498.58,Credit Card,Store,Returned
+ORD-2023000449,2025-12-29,Customer_74,West,Xi'an,LED Floor Lamp,Home & Garden,Lighting,4,93.65,374.6,Bank Transfer,App,Returned
+ORD-2023000450,2023-04-26,Customer_52,North,Beijing,Denim Jacket,Clothing,Men's Wear,2,68.41,136.82,WeChat Pay,Website,Shipped
+ORD-2023000451,2023-03-08,Customer_92,East,Shanghai,Galaxy S24,Electronics,Smartphones,3,819.17,2457.51,Bank Transfer,App,Returned
+ORD-2023000452,2025-11-12,Customer_179,Central,Wuhan,Data Science 101,Books,Non-Fiction,5,48.32,241.6,WeChat Pay,App,Cancelled
+ORD-2023000453,2023-04-21,Customer_4,West,Chongqing,Organic Coffee Beans,Food & Beverage,Beverages,3,22.78,68.34,WeChat Pay,Website,Returned
+ORD-2023000454,2024-02-07,Customer_199,West,Chengdu,Data Science 101,Books,Non-Fiction,3,53.82,161.46,Alipay,Store,Cancelled
+ORD-2023000455,2025-11-18,Customer_31,South,Xiamen,MacBook Air,Electronics,Laptops,2,1365.35,2730.7,Bank Transfer,App,Cancelled
+ORD-2023000456,2024-06-06,Customer_2,East,Nanjing,Running Shoes Pro,Sports,Running,2,133.84,267.68,WeChat Pay,Phone,Processing
+ORD-2023000457,2024-09-08,Customer_126,North,Beijing,Camping Tent 4P,Sports,Outdoor,5,258.71,1293.55,COD,Third-party,Shipped
+ORD-2023000458,2024-01-12,Customer_134,North,Shenyang,Camping Tent 4P,Sports,Outdoor,5,273.88,1369.4,Credit Card,Third-party,Processing
+ORD-2023000459,2024-03-29,Customer_55,West,Xi'an,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.45,101.8,WeChat Pay,Store,Shipped
+ORD-2023000460,2023-01-19,Customer_30,East,Shanghai,The Great Novel,Books,Fiction,5,24.8,124.0,WeChat Pay,Phone,Processing
+ORD-2023000461,2024-10-19,Customer_98,Central,Changsha,Canon EOS R6,Electronics,Cameras,1,2635.86,2635.86,Credit Card,Phone,Shipped
+ORD-2023000462,2025-02-06,Customer_132,Central,Changsha,Yoga Mat Premium,Sports,Yoga,1,55.05,55.05,COD,Phone,Cancelled
+ORD-2023000463,2023-06-18,Customer_25,North,Tianjin,Data Science 101,Books,Non-Fiction,2,47.3,94.6,Alipay,Third-party,Returned
+ORD-2023000464,2024-03-12,Customer_176,North,Shenyang,MacBook Air,Electronics,Laptops,2,1260.27,2520.54,Bank Transfer,App,Processing
+ORD-2023000465,2023-11-11,Customer_7,Central,Changsha,Silk Dress,Clothing,Women's Wear,1,138.55,138.55,Bank Transfer,Store,Completed
+ORD-2023000466,2023-05-25,Customer_148,North,Beijing,Galaxy S24,Electronics,Smartphones,2,978.35,1956.7,Alipay,Store,Cancelled
+ORD-2023000467,2023-02-04,Customer_100,West,Chongqing,Data Science 101,Books,Non-Fiction,4,48.99,195.96,Credit Card,Third-party,Completed
+ORD-2023000468,2023-05-29,Customer_92,Central,Wuhan,LED Floor Lamp,Home & Garden,Lighting,1,94.36,94.36,COD,App,Shipped
+ORD-2023000469,2025-06-15,Customer_98,East,Nanjing,MacBook Air,Electronics,Laptops,3,1294.42,3883.26,Bank Transfer,App,Cancelled
+ORD-2023000470,2024-08-27,Customer_163,South,Xiamen,Canon EOS R6,Electronics,Cameras,2,2683.99,5367.98,Alipay,Store,Shipped
+ORD-2023000471,2023-01-11,Customer_147,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,2,25.72,51.44,COD,Phone,Returned
+ORD-2023000472,2024-12-05,Customer_55,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,2,52.65,105.3,Bank Transfer,Third-party,Processing
+ORD-2023000473,2024-02-02,Customer_30,South,Shenzhen,Canon EOS R6,Electronics,Cameras,5,2749.96,13749.8,Alipay,Third-party,Completed
+ORD-2023000474,2023-05-18,Customer_65,Central,Zhengzhou,Data Science 101,Books,Non-Fiction,5,43.59,217.95,Credit Card,Website,Returned
+ORD-2023000475,2024-04-25,Customer_26,West,Chongqing,Dumbbell Set 20kg,Sports,Fitness Equipment,2,93.57,187.14,WeChat Pay,Third-party,Completed
+ORD-2023000476,2024-09-18,Customer_178,South,Guangzhou,Wool Scarf,Clothing,Accessories,4,36.99,147.96,COD,Website,Returned
+ORD-2023000477,2024-10-03,Customer_64,Central,Zhengzhou,Camping Tent 4P,Sports,Outdoor,4,269.28,1077.12,Alipay,Phone,Shipped
+ORD-2023000478,2025-08-05,Customer_115,East,Shanghai,Organic Coffee Beans,Food & Beverage,Beverages,3,22.26,66.78,WeChat Pay,Store,Cancelled
+ORD-2023000479,2024-07-28,Customer_36,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,5,305.23,1526.15,COD,Website,Shipped
+ORD-2023000480,2023-03-05,Customer_149,North,Shenyang,MacBook Air,Electronics,Laptops,1,1324.75,1324.75,COD,Phone,Returned
+ORD-2023000481,2025-08-24,Customer_168,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,3,29.38,88.14,Alipay,Store,Cancelled
+ORD-2023000482,2025-11-11,Customer_24,South,Xiamen,Yoga Mat Premium,Sports,Yoga,2,48.48,96.96,Bank Transfer,Store,Returned
+ORD-2023000483,2025-11-18,Customer_36,North,Shenyang,Canon EOS R6,Electronics,Cameras,5,2637.07,13185.35,Bank Transfer,Website,Processing
+ORD-2023000484,2025-09-17,Customer_92,Central,Changsha,Organic Coffee Beans,Food & Beverage,Beverages,2,21.4,42.8,Credit Card,Website,Cancelled
+ORD-2023000485,2024-02-28,Customer_133,South,Shenzhen,Running Shoes Pro,Sports,Running,3,137.11,411.33,WeChat Pay,Phone,Cancelled
+ORD-2023000486,2025-12-03,Customer_163,West,Chengdu,Galaxy S24,Electronics,Smartphones,3,791.99,2375.97,WeChat Pay,Store,Returned
+ORD-2023000487,2025-01-18,Customer_151,Central,Changsha,Sony WH-1000XM5,Electronics,Headphones,4,365.09,1460.36,Credit Card,Third-party,Shipped
+ORD-2023000488,2024-12-07,Customer_125,West,Chengdu,Standing Desk,Home & Garden,Furniture,4,476.98,1907.92,Bank Transfer,Third-party,Completed
+ORD-2023000489,2025-11-19,Customer_165,Central,Wuhan,Leather Boots,Clothing,Footwear,2,146.12,292.24,WeChat Pay,Website,Processing
+ORD-2023000490,2023-08-31,Customer_170,South,Shenzhen,Dumbbell Set 20kg,Sports,Fitness Equipment,5,94.8,474.0,Alipay,Phone,Shipped
+ORD-2023000491,2023-11-27,Customer_166,North,Tianjin,Organic Coffee Beans,Food & Beverage,Beverages,4,19.86,79.44,Bank Transfer,App,Processing
+ORD-2023000492,2025-11-15,Customer_11,North,Beijing,LED Floor Lamp,Home & Garden,Lighting,5,79.95,399.75,COD,Website,Completed
+ORD-2023000493,2023-02-08,Customer_185,South,Guangzhou,Sony WH-1000XM5,Electronics,Headphones,5,396.98,1984.9,WeChat Pay,App,Processing
+ORD-2023000494,2025-04-21,Customer_154,West,Xi'an,Wool Scarf,Clothing,Accessories,4,35.15,140.6,Alipay,Third-party,Processing
+ORD-2023000495,2024-12-02,Customer_117,Central,Changsha,Standing Desk,Home & Garden,Furniture,3,449.26,1347.78,COD,Third-party,Completed
+ORD-2023000496,2024-02-19,Customer_134,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,2,69.72,139.44,COD,Phone,Processing
+ORD-2023000497,2023-03-21,Customer_137,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,4,391.05,1564.2,COD,App,Completed
+ORD-2023000498,2023-01-03,Customer_199,West,Xi'an,AirPods Pro,Electronics,Headphones,5,251.93,1259.65,Bank Transfer,Third-party,Cancelled
+ORD-2023000499,2025-09-14,Customer_197,East,Shanghai,Dark Chocolate Box,Food & Beverage,Snacks,5,14.67,73.35,Bank Transfer,Store,Returned
+ORD-2023000500,2024-04-21,Customer_22,Central,Wuhan,Silk Dress,Clothing,Women's Wear,2,119.5,239.0,WeChat Pay,Third-party,Returned
+ORD-2023000501,2023-01-15,Customer_148,West,Chongqing,iPad Air,Electronics,Tablets,1,636.58,636.58,COD,App,Returned
+ORD-2023000502,2024-10-08,Customer_105,North,Tianjin,Data Science 101,Books,Non-Fiction,2,52.81,105.62,WeChat Pay,App,Processing
+ORD-2023000503,2025-05-17,Customer_145,West,Xi'an,LED Floor Lamp,Home & Garden,Lighting,3,82.63,247.89,WeChat Pay,Third-party,Shipped
+ORD-2023000504,2025-09-15,Customer_46,West,Chengdu,Silk Dress,Clothing,Women's Wear,5,139.98,699.9,WeChat Pay,Third-party,Returned
+ORD-2023000505,2025-03-26,Customer_189,West,Chongqing,Yoga Mat Premium,Sports,Yoga,5,46.71,233.55,Alipay,App,Processing
+ORD-2023000506,2025-03-31,Customer_87,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,1,319.1,319.1,COD,Third-party,Completed
+ORD-2023000507,2023-10-25,Customer_121,South,Guangzhou,Data Science 101,Books,Non-Fiction,1,54.55,54.55,COD,Phone,Completed
+ORD-2023000508,2023-03-19,Customer_186,North,Tianjin,Canon EOS R6,Electronics,Cameras,3,2184.16,6552.48,Bank Transfer,Phone,Returned
+ORD-2023000509,2023-12-25,Customer_164,Central,Zhengzhou,Dark Chocolate Box,Food & Beverage,Snacks,5,13.0,65.0,Bank Transfer,Phone,Completed
+ORD-2023000510,2025-11-11,Customer_133,South,Xiamen,Standing Desk,Home & Garden,Furniture,3,453.3,1359.9,Alipay,Third-party,Processing
+ORD-2023000511,2023-06-27,Customer_71,North,Tianjin,Canon EOS R6,Electronics,Cameras,1,2855.59,2855.59,Bank Transfer,Store,Cancelled
+ORD-2023000512,2023-05-21,Customer_24,West,Xi'an,iPad Air,Electronics,Tablets,5,511.91,2559.55,COD,Store,Returned
+ORD-2023000513,2024-02-03,Customer_117,Central,Zhengzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,3,81.69,245.07,Bank Transfer,Third-party,Completed
+ORD-2023000514,2023-05-29,Customer_129,East,Shanghai,Silk Dress,Clothing,Women's Wear,5,113.77,568.85,WeChat Pay,Store,Completed
+ORD-2023000515,2025-06-25,Customer_97,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,5,26.83,134.15,COD,Phone,Processing
+ORD-2023000516,2023-02-26,Customer_124,East,Hangzhou,Organic Coffee Beans,Food & Beverage,Beverages,4,22.37,89.48,Credit Card,Store,Completed
+ORD-2023000517,2025-04-24,Customer_91,West,Xi'an,Canon EOS R6,Electronics,Cameras,2,2724.03,5448.06,COD,Third-party,Completed
+ORD-2023000518,2024-12-01,Customer_20,East,Shanghai,Yoga Mat Premium,Sports,Yoga,1,47.51,47.51,COD,Website,Cancelled
+ORD-2023000519,2024-01-25,Customer_128,East,Hangzhou,iPad Air,Electronics,Tablets,5,557.5,2787.5,Alipay,Website,Processing
+ORD-2023000520,2024-12-30,Customer_40,East,Shanghai,Canon EOS R6,Electronics,Cameras,2,2750.1,5500.2,Credit Card,App,Completed
+ORD-2023000521,2025-09-14,Customer_96,West,Xi'an,iPhone 15,Electronics,Smartphones,5,1136.26,5681.3,COD,Store,Cancelled
+ORD-2023000522,2025-11-12,Customer_72,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,2,44.67,89.34,Bank Transfer,Website,Returned
+ORD-2023000523,2023-03-08,Customer_129,South,Shenzhen,Standing Desk,Home & Garden,Furniture,4,495.75,1983.0,WeChat Pay,Phone,Processing
+ORD-2023000524,2023-01-18,Customer_4,West,Chengdu,Dark Chocolate Box,Food & Beverage,Snacks,5,14.81,74.05,Alipay,Phone,Returned
+ORD-2023000525,2024-01-19,Customer_141,North,Tianjin,Dumbbell Set 20kg,Sports,Fitness Equipment,5,98.66,493.3,WeChat Pay,Website,Shipped
+ORD-2023000526,2025-05-18,Customer_54,West,Xi'an,Camping Tent 4P,Sports,Outdoor,3,270.65,811.95,Bank Transfer,Store,Shipped
+ORD-2023000527,2024-04-13,Customer_26,West,Chongqing,Leather Boots,Clothing,Footwear,2,162.41,324.82,WeChat Pay,Website,Returned
+ORD-2023000528,2023-11-03,Customer_122,West,Chongqing,iPad Air,Electronics,Tablets,2,652.92,1305.84,Credit Card,Website,Cancelled
+ORD-2023000529,2024-10-08,Customer_125,West,Chengdu,Data Science 101,Books,Non-Fiction,5,50.5,252.5,WeChat Pay,Store,Returned
+ORD-2023000530,2023-05-03,Customer_56,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,1,83.52,83.52,WeChat Pay,Phone,Completed
+ORD-2023000531,2024-06-11,Customer_89,West,Xi'an,Camping Tent 4P,Sports,Outdoor,3,286.53,859.59,Credit Card,Phone,Completed
+ORD-2023000532,2023-12-24,Customer_200,East,Nanjing,The Great Novel,Books,Fiction,2,25.57,51.14,WeChat Pay,Store,Shipped
+ORD-2023000533,2024-08-09,Customer_119,Central,Zhengzhou,Leather Boots,Clothing,Footwear,1,153.33,153.33,Alipay,Website,Shipped
+ORD-2023000534,2023-05-27,Customer_21,West,Xi'an,The Great Novel,Books,Fiction,5,24.28,121.4,Alipay,Store,Processing
+ORD-2023000535,2025-03-20,Customer_70,East,Hangzhou,Data Science 101,Books,Non-Fiction,3,53.15,159.45,Bank Transfer,Store,Returned
+ORD-2023000536,2023-02-17,Customer_33,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,2,116.77,233.54,Alipay,Store,Completed
+ORD-2023000537,2025-08-27,Customer_141,South,Shenzhen,Denim Jacket,Clothing,Men's Wear,1,69.41,69.41,Credit Card,App,Cancelled
+ORD-2023000538,2023-06-22,Customer_168,Central,Wuhan,ThinkPad X1,Electronics,Laptops,3,1448.57,4345.71,Bank Transfer,Store,Processing
+ORD-2023000539,2023-09-26,Customer_135,South,Xiamen,Yoga Mat Premium,Sports,Yoga,4,50.86,203.44,Alipay,App,Completed
+ORD-2023000540,2024-07-11,Customer_141,East,Hangzhou,Wool Scarf,Clothing,Accessories,4,44.56,178.24,Bank Transfer,Website,Returned
+ORD-2023000541,2025-06-09,Customer_135,South,Xiamen,The Great Novel,Books,Fiction,4,25.97,103.88,COD,Store,Shipped
+ORD-2023000542,2025-01-19,Customer_106,West,Xi'an,Canon EOS R6,Electronics,Cameras,1,2455.41,2455.41,WeChat Pay,Website,Shipped
+ORD-2023000543,2025-08-18,Customer_137,North,Beijing,Standing Desk,Home & Garden,Furniture,2,475.63,951.26,Credit Card,Phone,Cancelled
+ORD-2023000544,2023-01-15,Customer_141,East,Shanghai,Silk Dress,Clothing,Women's Wear,3,132.75,398.25,WeChat Pay,Website,Cancelled
+ORD-2023000545,2025-03-09,Customer_97,Central,Zhengzhou,Denim Jacket,Clothing,Men's Wear,2,71.02,142.04,Alipay,Store,Completed
+ORD-2023000546,2024-07-10,Customer_73,West,Xi'an,Canon EOS R6,Electronics,Cameras,5,2697.32,13486.6,COD,Store,Cancelled
+ORD-2023000547,2025-07-21,Customer_159,South,Shenzhen,Sony WH-1000XM5,Electronics,Headphones,2,326.97,653.94,Bank Transfer,Store,Returned
+ORD-2023000548,2025-12-31,Customer_6,West,Chengdu,Camping Tent 4P,Sports,Outdoor,1,267.8,267.8,Alipay,App,Shipped
+ORD-2023000549,2024-04-21,Customer_24,East,Shanghai,Dark Chocolate Box,Food & Beverage,Snacks,4,16.01,64.04,Alipay,App,Cancelled
+ORD-2023000550,2025-10-17,Customer_96,South,Guangzhou,Silk Dress,Clothing,Women's Wear,3,140.06,420.18,Bank Transfer,App,Shipped
+ORD-2023000551,2023-05-27,Customer_140,North,Beijing,Galaxy S24,Electronics,Smartphones,3,973.34,2920.02,Bank Transfer,Website,Processing
+ORD-2023000552,2024-05-24,Customer_99,East,Hangzhou,iPhone 15,Electronics,Smartphones,1,1141.24,1141.24,Bank Transfer,Website,Completed
+ORD-2023000553,2024-03-02,Customer_122,South,Guangzhou,ThinkPad X1,Electronics,Laptops,5,1468.67,7343.35,Bank Transfer,Store,Shipped
+ORD-2023000554,2024-06-02,Customer_124,South,Xiamen,Galaxy S24,Electronics,Smartphones,5,904.64,4523.2,WeChat Pay,Website,Shipped
+ORD-2023000555,2025-06-08,Customer_84,North,Shenyang,iPad Air,Electronics,Tablets,1,551.55,551.55,Credit Card,Website,Shipped
+ORD-2023000556,2023-03-28,Customer_149,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,2,67.36,134.72,Bank Transfer,Third-party,Processing
+ORD-2023000557,2024-11-24,Customer_195,East,Shanghai,Canon EOS R6,Electronics,Cameras,2,2498.94,4997.88,Credit Card,App,Shipped
+ORD-2023000558,2024-04-21,Customer_82,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,1,25.74,25.74,COD,Store,Cancelled
+ORD-2023000559,2023-10-03,Customer_65,South,Shenzhen,Dark Chocolate Box,Food & Beverage,Snacks,4,14.35,57.4,Credit Card,Phone,Cancelled
+ORD-2023000560,2024-01-18,Customer_140,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,26.3,105.2,WeChat Pay,Store,Cancelled
+ORD-2023000561,2023-11-14,Customer_116,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,2,25.25,50.5,WeChat Pay,Store,Returned
+ORD-2023000562,2024-01-15,Customer_5,East,Hangzhou,iPhone 15,Electronics,Smartphones,5,962.75,4813.75,COD,Store,Returned
+ORD-2023000563,2024-01-24,Customer_135,South,Guangzhou,MacBook Air,Electronics,Laptops,5,1313.76,6568.8,Bank Transfer,Third-party,Processing
+ORD-2023000564,2023-08-15,Customer_25,Central,Zhengzhou,Camping Tent 4P,Sports,Outdoor,4,311.64,1246.56,COD,App,Completed
+ORD-2023000565,2024-01-28,Customer_26,South,Shenzhen,Galaxy S24,Electronics,Smartphones,2,793.02,1586.04,Credit Card,Third-party,Cancelled
+ORD-2023000566,2025-01-20,Customer_57,West,Xi'an,The Great Novel,Books,Fiction,5,23.16,115.8,COD,App,Completed
+ORD-2023000567,2023-05-05,Customer_93,South,Xiamen,Wool Scarf,Clothing,Accessories,1,38.63,38.63,COD,Phone,Shipped
+ORD-2023000568,2023-05-25,Customer_78,North,Shenyang,Running Shoes Pro,Sports,Running,5,128.47,642.35,Credit Card,Website,Returned
+ORD-2023000569,2024-01-31,Customer_135,North,Beijing,Canon EOS R6,Electronics,Cameras,5,2413.03,12065.15,Alipay,Third-party,Processing
+ORD-2023000570,2025-01-03,Customer_173,Central,Changsha,Ceramic Mug Set,Home & Garden,Kitchenware,4,31.14,124.56,Bank Transfer,Phone,Completed
+ORD-2023000571,2023-11-20,Customer_137,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,4,29.04,116.16,COD,Phone,Shipped
+ORD-2023000572,2025-05-31,Customer_186,East,Nanjing,Camping Tent 4P,Sports,Outdoor,3,291.14,873.42,WeChat Pay,Third-party,Processing
+ORD-2023000573,2024-06-04,Customer_93,Central,Changsha,iPad Air,Electronics,Tablets,4,646.75,2587.0,Bank Transfer,Phone,Cancelled
+ORD-2023000574,2025-11-26,Customer_35,North,Shenyang,Galaxy S24,Electronics,Smartphones,3,924.83,2774.49,WeChat Pay,App,Shipped
+ORD-2023000575,2024-07-19,Customer_142,South,Shenzhen,Camping Tent 4P,Sports,Outdoor,1,323.36,323.36,COD,Third-party,Returned
+ORD-2023000576,2023-11-16,Customer_36,Central,Wuhan,ThinkPad X1,Electronics,Laptops,1,1382.37,1382.37,WeChat Pay,Store,Returned
+ORD-2023000577,2025-03-29,Customer_146,South,Shenzhen,Running Shoes Pro,Sports,Running,3,130.76,392.28,Alipay,App,Shipped
+ORD-2023000578,2023-07-15,Customer_153,West,Chengdu,Wool Scarf,Clothing,Accessories,5,42.74,213.7,WeChat Pay,App,Returned
+ORD-2023000579,2025-06-08,Customer_107,West,Chengdu,Galaxy S24,Electronics,Smartphones,3,857.99,2573.97,Credit Card,Website,Returned
+ORD-2023000580,2025-12-09,Customer_11,North,Shenyang,Data Science 101,Books,Non-Fiction,4,43.3,173.2,WeChat Pay,Third-party,Returned
+ORD-2023000581,2025-03-15,Customer_115,South,Guangzhou,Standing Desk,Home & Garden,Furniture,2,447.08,894.16,COD,Third-party,Returned
+ORD-2023000582,2023-10-31,Customer_34,North,Beijing,Silk Dress,Clothing,Women's Wear,3,140.08,420.24,WeChat Pay,App,Cancelled
+ORD-2023000583,2023-06-24,Customer_103,Central,Changsha,Galaxy S24,Electronics,Smartphones,5,871.81,4359.05,COD,Phone,Processing
+ORD-2023000584,2024-02-06,Customer_144,South,Guangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,2,28.89,57.78,COD,Third-party,Processing
+ORD-2023000585,2023-07-03,Customer_29,South,Shenzhen,Running Shoes Pro,Sports,Running,4,141.11,564.44,Bank Transfer,Phone,Shipped
+ORD-2023000586,2023-02-19,Customer_198,East,Shanghai,Camping Tent 4P,Sports,Outdoor,3,307.42,922.26,WeChat Pay,Website,Shipped
+ORD-2023000587,2024-04-23,Customer_52,Central,Zhengzhou,The Great Novel,Books,Fiction,2,24.54,49.08,WeChat Pay,Website,Completed
+ORD-2023000588,2023-10-30,Customer_74,North,Shenyang,Galaxy S24,Electronics,Smartphones,2,1020.08,2040.16,Credit Card,Store,Completed
+ORD-2023000589,2024-03-09,Customer_53,East,Hangzhou,Wool Scarf,Clothing,Accessories,1,37.03,37.03,COD,Third-party,Shipped
+ORD-2023000590,2023-02-07,Customer_97,Central,Zhengzhou,The Great Novel,Books,Fiction,2,26.45,52.9,COD,Third-party,Completed
+ORD-2023000591,2024-07-09,Customer_14,East,Shanghai,Galaxy S24,Electronics,Smartphones,3,818.28,2454.84,Bank Transfer,App,Completed
+ORD-2023000592,2023-02-09,Customer_75,West,Xi'an,Running Shoes Pro,Sports,Running,3,165.28,495.84,Bank Transfer,Website,Cancelled
+ORD-2023000593,2025-12-24,Customer_23,Central,Changsha,ThinkPad X1,Electronics,Laptops,3,1392.56,4177.68,Alipay,Website,Returned
+ORD-2023000594,2025-12-20,Customer_79,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,1,12.92,12.92,WeChat Pay,Phone,Cancelled
+ORD-2023000595,2024-09-11,Customer_61,South,Shenzhen,Dumbbell Set 20kg,Sports,Fitness Equipment,3,85.14,255.42,COD,Store,Completed
+ORD-2023000596,2024-04-06,Customer_39,East,Hangzhou,iPhone 15,Electronics,Smartphones,5,1133.6,5668.0,WeChat Pay,Phone,Processing
+ORD-2023000597,2024-04-10,Customer_107,North,Shenyang,Denim Jacket,Clothing,Men's Wear,5,89.92,449.6,Alipay,Third-party,Processing
+ORD-2023000598,2023-09-27,Customer_53,West,Chongqing,The Great Novel,Books,Fiction,3,24.61,73.83,Alipay,Third-party,Returned
+ORD-2023000599,2025-05-30,Customer_198,South,Shenzhen,Yoga Mat Premium,Sports,Yoga,5,55.02,275.1,Alipay,Third-party,Processing
+ORD-2023000600,2023-08-31,Customer_48,East,Shanghai,Ceramic Mug Set,Home & Garden,Kitchenware,5,32.9,164.5,WeChat Pay,Website,Completed
+ORD-2023000601,2024-07-14,Customer_39,East,Hangzhou,Silk Dress,Clothing,Women's Wear,3,126.79,380.37,Alipay,App,Processing
+ORD-2023000602,2024-04-17,Customer_153,South,Shenzhen,The Great Novel,Books,Fiction,5,23.24,116.2,Alipay,Website,Completed
+ORD-2023000603,2025-08-18,Customer_183,East,Shanghai,Dark Chocolate Box,Food & Beverage,Snacks,4,13.34,53.36,WeChat Pay,Website,Cancelled
+ORD-2023000604,2023-03-08,Customer_105,West,Chongqing,AirPods Pro,Electronics,Headphones,2,226.09,452.18,Credit Card,Store,Cancelled
+ORD-2023000605,2023-05-16,Customer_46,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,2,21.54,43.08,Bank Transfer,Third-party,Cancelled
+ORD-2023000606,2023-03-27,Customer_156,East,Hangzhou,Canon EOS R6,Electronics,Cameras,4,2427.68,9710.72,Bank Transfer,Store,Cancelled
+ORD-2023000607,2023-03-20,Customer_134,Central,Changsha,LED Floor Lamp,Home & Garden,Lighting,5,89.97,449.85,Credit Card,Phone,Cancelled
+ORD-2023000608,2023-03-22,Customer_143,North,Beijing,Standing Desk,Home & Garden,Furniture,5,483.37,2416.85,Bank Transfer,Third-party,Completed
+ORD-2023000609,2024-08-08,Customer_119,South,Guangzhou,Leather Boots,Clothing,Footwear,4,177.34,709.36,Alipay,Phone,Shipped
+ORD-2023000610,2025-08-07,Customer_166,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,5,16.81,84.05,Bank Transfer,App,Returned
+ORD-2023000611,2025-04-26,Customer_83,North,Beijing,LED Floor Lamp,Home & Garden,Lighting,5,79.26,396.3,Bank Transfer,App,Processing
+ORD-2023000612,2023-07-04,Customer_65,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,2,16.71,33.42,WeChat Pay,Website,Completed
+ORD-2023000613,2023-06-24,Customer_135,North,Beijing,Dark Chocolate Box,Food & Beverage,Snacks,4,15.59,62.36,Bank Transfer,Third-party,Returned
+ORD-2023000614,2023-12-16,Customer_86,South,Guangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.03,100.12,COD,Website,Processing
+ORD-2023000615,2024-09-25,Customer_187,South,Shenzhen,Dark Chocolate Box,Food & Beverage,Snacks,1,14.63,14.63,Bank Transfer,Store,Processing
+ORD-2023000616,2024-06-02,Customer_4,North,Beijing,iPad Air,Electronics,Tablets,1,621.02,621.02,Bank Transfer,Phone,Cancelled
+ORD-2023000617,2025-09-01,Customer_117,Central,Wuhan,The Great Novel,Books,Fiction,4,23.02,92.08,Bank Transfer,Phone,Completed
+ORD-2023000618,2024-07-23,Customer_159,Central,Changsha,iPhone 15,Electronics,Smartphones,2,1113.54,2227.08,COD,Website,Completed
+ORD-2023000619,2023-03-08,Customer_171,South,Shenzhen,Galaxy S24,Electronics,Smartphones,3,774.05,2322.15,COD,Third-party,Shipped
+ORD-2023000620,2024-01-01,Customer_42,East,Shanghai,Galaxy S24,Electronics,Smartphones,1,876.6,876.6,WeChat Pay,Third-party,Returned
+ORD-2023000621,2025-01-07,Customer_10,Central,Changsha,Sony WH-1000XM5,Electronics,Headphones,4,375.11,1500.44,Credit Card,Store,Shipped
+ORD-2023000622,2023-05-13,Customer_75,East,Hangzhou,MacBook Air,Electronics,Laptops,4,1322.49,5289.96,Bank Transfer,Website,Completed
+ORD-2023000623,2024-03-04,Customer_157,East,Hangzhou,Standing Desk,Home & Garden,Furniture,4,502.69,2010.76,Credit Card,App,Returned
+ORD-2023000624,2024-08-11,Customer_110,Central,Wuhan,Wool Scarf,Clothing,Accessories,5,44.08,220.4,COD,Store,Shipped
+ORD-2023000625,2025-10-13,Customer_134,Central,Changsha,The Great Novel,Books,Fiction,3,28.19,84.57,Bank Transfer,Phone,Processing
+ORD-2023000626,2023-01-04,Customer_31,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,3,17.15,51.45,Credit Card,Phone,Completed
+ORD-2023000627,2024-12-17,Customer_144,South,Xiamen,Silk Dress,Clothing,Women's Wear,4,111.41,445.64,Alipay,App,Processing
+ORD-2023000628,2024-10-25,Customer_197,East,Hangzhou,MacBook Air,Electronics,Laptops,3,1127.16,3381.48,Credit Card,App,Shipped
+ORD-2023000629,2023-12-26,Customer_50,East,Hangzhou,LED Floor Lamp,Home & Garden,Lighting,5,101.29,506.45,WeChat Pay,Store,Cancelled
+ORD-2023000630,2025-08-01,Customer_138,West,Chengdu,Data Science 101,Books,Non-Fiction,2,49.71,99.42,WeChat Pay,Phone,Cancelled
+ORD-2023000631,2024-10-08,Customer_143,North,Shenyang,Yoga Mat Premium,Sports,Yoga,5,52.31,261.55,COD,App,Processing
+ORD-2023000632,2023-11-02,Customer_72,Central,Changsha,Camping Tent 4P,Sports,Outdoor,3,260.09,780.27,Credit Card,Store,Cancelled
+ORD-2023000633,2023-08-28,Customer_193,Central,Wuhan,LED Floor Lamp,Home & Garden,Lighting,5,86.05,430.25,WeChat Pay,Store,Completed
+ORD-2023000634,2025-01-31,Customer_116,East,Hangzhou,MacBook Air,Electronics,Laptops,4,1334.62,5338.48,WeChat Pay,Website,Returned
+ORD-2023000635,2024-02-18,Customer_24,East,Shanghai,ThinkPad X1,Electronics,Laptops,3,1518.59,4555.77,Bank Transfer,Third-party,Completed
+ORD-2023000636,2025-09-17,Customer_188,West,Xi'an,AirPods Pro,Electronics,Headphones,2,237.06,474.12,COD,Store,Shipped
+ORD-2023000637,2023-03-16,Customer_118,South,Shenzhen,Standing Desk,Home & Garden,Furniture,2,454.87,909.74,Bank Transfer,Third-party,Completed
+ORD-2023000638,2024-11-13,Customer_120,North,Tianjin,Galaxy S24,Electronics,Smartphones,5,999.29,4996.45,Credit Card,App,Returned
+ORD-2023000639,2024-03-05,Customer_83,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,3,92.71,278.13,Alipay,Website,Shipped
+ORD-2023000640,2024-07-12,Customer_39,East,Nanjing,Camping Tent 4P,Sports,Outdoor,4,314.35,1257.4,Alipay,Store,Completed
+ORD-2023000641,2024-12-18,Customer_141,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,5,25.54,127.7,WeChat Pay,Store,Processing
+ORD-2023000642,2024-11-24,Customer_139,East,Nanjing,Canon EOS R6,Electronics,Cameras,2,2177.56,4355.12,Bank Transfer,App,Processing
+ORD-2023000643,2023-04-21,Customer_23,North,Tianjin,Organic Coffee Beans,Food & Beverage,Beverages,1,17.63,17.63,Bank Transfer,Phone,Processing
+ORD-2023000644,2024-10-01,Customer_86,Central,Changsha,Data Science 101,Books,Non-Fiction,4,51.73,206.92,Alipay,Third-party,Completed
+ORD-2023000645,2025-08-17,Customer_25,West,Xi'an,AirPods Pro,Electronics,Headphones,1,272.37,272.37,Bank Transfer,Store,Cancelled
+ORD-2023000646,2024-06-12,Customer_94,West,Chengdu,Canon EOS R6,Electronics,Cameras,2,2769.71,5539.42,Bank Transfer,Website,Shipped
+ORD-2023000647,2023-08-20,Customer_90,East,Hangzhou,Wool Scarf,Clothing,Accessories,1,33.91,33.91,Bank Transfer,Phone,Processing
+ORD-2023000648,2023-07-30,Customer_104,East,Hangzhou,The Great Novel,Books,Fiction,5,22.2,111.0,Credit Card,Store,Returned
+ORD-2023000649,2025-04-26,Customer_62,North,Tianjin,Ceramic Mug Set,Home & Garden,Kitchenware,4,28.14,112.56,COD,Website,Returned
+ORD-2023000650,2025-06-01,Customer_112,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,1,75.22,75.22,COD,Store,Returned
+ORD-2023000651,2025-09-23,Customer_30,South,Shenzhen,Organic Coffee Beans,Food & Beverage,Beverages,1,21.43,21.43,COD,Third-party,Cancelled
+ORD-2023000652,2025-04-11,Customer_18,East,Nanjing,ThinkPad X1,Electronics,Laptops,4,1263.09,5052.36,COD,App,Returned
+ORD-2023000653,2023-10-12,Customer_149,West,Chongqing,Wool Scarf,Clothing,Accessories,1,34.21,34.21,Credit Card,Website,Processing
+ORD-2023000654,2025-07-04,Customer_51,West,Xi'an,Yoga Mat Premium,Sports,Yoga,4,50.7,202.8,Alipay,Store,Shipped
+ORD-2023000655,2024-12-06,Customer_23,Central,Changsha,Yoga Mat Premium,Sports,Yoga,4,52.2,208.8,COD,App,Returned
+ORD-2023000656,2023-04-19,Customer_1,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,3,216.31,648.93,COD,Store,Completed
+ORD-2023000657,2025-03-18,Customer_161,East,Shanghai,Canon EOS R6,Electronics,Cameras,4,2650.61,10602.44,WeChat Pay,Phone,Cancelled
+ORD-2023000658,2025-08-30,Customer_36,West,Chongqing,Ceramic Mug Set,Home & Garden,Kitchenware,2,30.41,60.82,Alipay,Third-party,Cancelled
+ORD-2023000659,2023-09-15,Customer_35,East,Hangzhou,AirPods Pro,Electronics,Headphones,3,286.16,858.48,Credit Card,App,Completed
+ORD-2023000660,2023-10-06,Customer_22,South,Xiamen,Wool Scarf,Clothing,Accessories,4,44.56,178.24,Alipay,Phone,Cancelled
+ORD-2023000661,2025-05-18,Customer_142,Central,Zhengzhou,The Great Novel,Books,Fiction,2,24.65,49.3,Bank Transfer,Phone,Shipped
+ORD-2023000662,2025-10-17,Customer_188,South,Shenzhen,Silk Dress,Clothing,Women's Wear,5,109.94,549.7,Alipay,Third-party,Shipped
+ORD-2023000663,2023-03-19,Customer_146,West,Xi'an,LED Floor Lamp,Home & Garden,Lighting,3,76.54,229.62,Bank Transfer,Store,Completed
+ORD-2023000664,2025-12-14,Customer_193,Central,Zhengzhou,Dark Chocolate Box,Food & Beverage,Snacks,1,13.38,13.38,WeChat Pay,Phone,Returned
+ORD-2023000665,2023-06-09,Customer_176,North,Shenyang,The Great Novel,Books,Fiction,1,23.08,23.08,COD,Third-party,Shipped
+ORD-2023000666,2025-08-18,Customer_117,Central,Wuhan,Camping Tent 4P,Sports,Outdoor,5,323.98,1619.9,COD,Phone,Returned
+ORD-2023000667,2023-03-14,Customer_178,East,Hangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,3,83.37,250.11,COD,Store,Returned
+ORD-2023000668,2023-04-16,Customer_169,East,Shanghai,Data Science 101,Books,Non-Fiction,4,51.16,204.64,WeChat Pay,Third-party,Completed
+ORD-2023000669,2024-07-23,Customer_65,East,Hangzhou,MacBook Air,Electronics,Laptops,2,1201.01,2402.02,Alipay,Third-party,Shipped
+ORD-2023000670,2023-11-06,Customer_169,East,Hangzhou,iPhone 15,Electronics,Smartphones,1,1030.12,1030.12,Bank Transfer,Store,Processing
+ORD-2023000671,2025-12-16,Customer_9,East,Nanjing,Canon EOS R6,Electronics,Cameras,4,2259.7,9038.8,WeChat Pay,App,Processing
+ORD-2023000672,2024-05-02,Customer_170,Central,Wuhan,Wool Scarf,Clothing,Accessories,4,42.16,168.64,Bank Transfer,Website,Processing
+ORD-2023000673,2023-08-26,Customer_14,Central,Changsha,Dumbbell Set 20kg,Sports,Fitness Equipment,1,92.8,92.8,Alipay,Phone,Cancelled
+ORD-2023000674,2025-03-09,Customer_122,West,Chongqing,Wool Scarf,Clothing,Accessories,5,35.88,179.4,WeChat Pay,Website,Returned
+ORD-2023000675,2024-10-08,Customer_136,West,Chengdu,Yoga Mat Premium,Sports,Yoga,4,47.27,189.08,Credit Card,App,Returned
+ORD-2023000676,2024-06-30,Customer_26,East,Hangzhou,The Great Novel,Books,Fiction,3,23.75,71.25,WeChat Pay,Third-party,Cancelled
+ORD-2023000677,2025-11-30,Customer_87,West,Xi'an,Canon EOS R6,Electronics,Cameras,5,2701.79,13508.95,Alipay,Store,Returned
+ORD-2023000678,2023-07-20,Customer_135,North,Shenyang,iPhone 15,Electronics,Smartphones,1,852.73,852.73,Credit Card,Phone,Shipped
+ORD-2023000679,2023-02-18,Customer_159,South,Xiamen,Yoga Mat Premium,Sports,Yoga,3,44.49,133.47,Credit Card,App,Returned
+ORD-2023000680,2023-09-03,Customer_23,South,Xiamen,Data Science 101,Books,Non-Fiction,1,53.11,53.11,COD,Website,Cancelled
+ORD-2023000681,2025-08-14,Customer_170,Central,Wuhan,ThinkPad X1,Electronics,Laptops,2,1295.48,2590.96,Credit Card,Phone,Shipped
+ORD-2023000682,2023-06-01,Customer_71,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,3,18.53,55.59,Credit Card,Phone,Cancelled
+ORD-2023000683,2023-05-23,Customer_126,East,Shanghai,Running Shoes Pro,Sports,Running,3,134.6,403.8,Alipay,Third-party,Cancelled
+ORD-2023000684,2025-06-02,Customer_56,South,Xiamen,Wool Scarf,Clothing,Accessories,1,34.83,34.83,COD,App,Cancelled
+ORD-2023000685,2024-05-28,Customer_199,East,Shanghai,Galaxy S24,Electronics,Smartphones,1,783.14,783.14,Bank Transfer,App,Cancelled
+ORD-2023000686,2025-03-10,Customer_69,South,Xiamen,Data Science 101,Books,Non-Fiction,1,56.48,56.48,Alipay,Store,Cancelled
+ORD-2023000687,2025-04-07,Customer_187,Central,Wuhan,Standing Desk,Home & Garden,Furniture,4,495.73,1982.92,Credit Card,Third-party,Processing
+ORD-2023000688,2025-01-05,Customer_86,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,4,13.29,53.16,WeChat Pay,Phone,Completed
+ORD-2023000689,2025-07-30,Customer_195,North,Tianjin,Ceramic Mug Set,Home & Garden,Kitchenware,3,25.35,76.05,WeChat Pay,Website,Processing
+ORD-2023000690,2025-03-09,Customer_28,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,2,74.23,148.46,WeChat Pay,Phone,Completed
+ORD-2023000691,2023-02-21,Customer_185,West,Xi'an,iPad Air,Electronics,Tablets,2,515.56,1031.12,COD,Website,Cancelled
+ORD-2023000692,2025-07-09,Customer_5,West,Chengdu,Ceramic Mug Set,Home & Garden,Kitchenware,3,29.0,87.0,Credit Card,Store,Completed
+ORD-2023000693,2025-12-07,Customer_118,East,Nanjing,Galaxy S24,Electronics,Smartphones,4,796.03,3184.12,COD,Website,Returned
+ORD-2023000694,2023-02-09,Customer_121,South,Shenzhen,Galaxy S24,Electronics,Smartphones,2,896.0,1792.0,COD,App,Processing
+ORD-2023000695,2023-07-19,Customer_117,South,Shenzhen,Sony WH-1000XM5,Electronics,Headphones,1,391.37,391.37,COD,Website,Returned
+ORD-2023000696,2024-03-27,Customer_17,North,Beijing,ThinkPad X1,Electronics,Laptops,4,1438.86,5755.44,Alipay,Phone,Shipped
+ORD-2023000697,2024-10-20,Customer_55,West,Chongqing,ThinkPad X1,Electronics,Laptops,5,1418.26,7091.3,Credit Card,Third-party,Processing
+ORD-2023000698,2025-04-30,Customer_44,East,Shanghai,ThinkPad X1,Electronics,Laptops,3,1248.43,3745.29,WeChat Pay,Third-party,Processing
+ORD-2023000699,2025-02-09,Customer_200,West,Chengdu,LED Floor Lamp,Home & Garden,Lighting,1,79.21,79.21,Alipay,App,Cancelled
+ORD-2023000700,2024-08-04,Customer_107,North,Beijing,iPhone 15,Electronics,Smartphones,2,1126.71,2253.42,Bank Transfer,Website,Processing
+ORD-2023000701,2024-05-04,Customer_45,South,Xiamen,Running Shoes Pro,Sports,Running,5,146.78,733.9,COD,App,Returned
+ORD-2023000702,2024-09-08,Customer_90,South,Xiamen,Wool Scarf,Clothing,Accessories,5,44.27,221.35,Bank Transfer,App,Returned
+ORD-2023000703,2025-01-11,Customer_195,South,Shenzhen,ThinkPad X1,Electronics,Laptops,5,1599.11,7995.55,COD,Third-party,Processing
+ORD-2023000704,2024-02-01,Customer_29,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,2,18.65,37.3,Alipay,Phone,Cancelled
+ORD-2023000705,2025-01-15,Customer_73,South,Shenzhen,Organic Coffee Beans,Food & Beverage,Beverages,1,17.32,17.32,Alipay,Phone,Shipped
+ORD-2023000706,2023-04-18,Customer_138,East,Nanjing,Leather Boots,Clothing,Footwear,1,140.13,140.13,Alipay,Website,Completed
+ORD-2023000707,2025-06-29,Customer_152,West,Xi'an,ThinkPad X1,Electronics,Laptops,1,1564.81,1564.81,COD,Store,Cancelled
+ORD-2023000708,2023-08-14,Customer_84,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,3,18.37,55.11,Alipay,App,Processing
+ORD-2023000709,2025-09-19,Customer_14,West,Chengdu,Denim Jacket,Clothing,Men's Wear,2,68.89,137.78,Bank Transfer,Website,Processing
+ORD-2023000710,2025-07-26,Customer_185,Central,Zhengzhou,Sony WH-1000XM5,Electronics,Headphones,4,335.75,1343.0,Alipay,Store,Shipped
+ORD-2023000711,2023-05-03,Customer_72,South,Guangzhou,AirPods Pro,Electronics,Headphones,1,263.36,263.36,Alipay,App,Cancelled
+ORD-2023000712,2024-08-27,Customer_155,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,3,319.67,959.01,Alipay,Third-party,Processing
+ORD-2023000713,2025-12-04,Customer_126,Central,Changsha,Canon EOS R6,Electronics,Cameras,1,2432.8,2432.8,Alipay,Third-party,Cancelled
+ORD-2023000714,2024-05-20,Customer_64,West,Chongqing,iPhone 15,Electronics,Smartphones,4,1069.78,4279.12,WeChat Pay,Phone,Returned
+ORD-2023000715,2025-05-05,Customer_12,South,Xiamen,AirPods Pro,Electronics,Headphones,5,278.75,1393.75,Credit Card,Phone,Returned
+ORD-2023000716,2023-07-20,Customer_116,North,Tianjin,Standing Desk,Home & Garden,Furniture,4,495.9,1983.6,Bank Transfer,Website,Completed
+ORD-2023000717,2023-09-29,Customer_92,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,4,17.01,68.04,WeChat Pay,Website,Completed
+ORD-2023000718,2025-07-29,Customer_147,North,Tianjin,Organic Coffee Beans,Food & Beverage,Beverages,3,17.96,53.88,COD,App,Cancelled
+ORD-2023000719,2025-01-28,Customer_161,West,Chengdu,Dark Chocolate Box,Food & Beverage,Snacks,4,13.57,54.28,Bank Transfer,App,Completed
+ORD-2023000720,2025-05-22,Customer_193,West,Xi'an,Camping Tent 4P,Sports,Outdoor,5,257.08,1285.4,WeChat Pay,Third-party,Returned
+ORD-2023000721,2024-11-18,Customer_189,Central,Wuhan,Organic Coffee Beans,Food & Beverage,Beverages,1,20.71,20.71,Credit Card,Third-party,Shipped
+ORD-2023000722,2023-03-25,Customer_94,North,Beijing,Denim Jacket,Clothing,Men's Wear,3,78.18,234.54,WeChat Pay,Website,Returned
+ORD-2023000723,2024-11-16,Customer_62,North,Shenyang,Dark Chocolate Box,Food & Beverage,Snacks,2,13.36,26.72,COD,App,Cancelled
+ORD-2023000724,2024-07-01,Customer_129,Central,Changsha,iPad Air,Electronics,Tablets,2,566.74,1133.48,Bank Transfer,Store,Completed
+ORD-2023000725,2025-12-14,Customer_32,North,Tianjin,Dumbbell Set 20kg,Sports,Fitness Equipment,4,88.63,354.52,Bank Transfer,Third-party,Returned
+ORD-2023000726,2023-05-15,Customer_49,East,Hangzhou,The Great Novel,Books,Fiction,3,27.24,81.72,Bank Transfer,App,Completed
+ORD-2023000727,2024-07-19,Customer_29,West,Chengdu,Yoga Mat Premium,Sports,Yoga,1,43.26,43.26,Alipay,Phone,Processing
+ORD-2023000728,2023-09-28,Customer_122,South,Xiamen,Data Science 101,Books,Non-Fiction,1,46.89,46.89,WeChat Pay,Phone,Cancelled
+ORD-2023000729,2024-04-20,Customer_134,North,Tianjin,iPad Air,Electronics,Tablets,1,513.11,513.11,WeChat Pay,Phone,Returned
+ORD-2023000730,2025-12-21,Customer_141,East,Nanjing,Data Science 101,Books,Non-Fiction,3,49.78,149.34,Bank Transfer,Phone,Shipped
+ORD-2023000731,2024-04-09,Customer_124,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,2,53.25,106.5,WeChat Pay,Store,Completed
+ORD-2023000732,2023-11-26,Customer_183,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,4,55.71,222.84,COD,Store,Processing
+ORD-2023000733,2023-08-28,Customer_11,South,Xiamen,Dark Chocolate Box,Food & Beverage,Snacks,2,13.47,26.94,WeChat Pay,Third-party,Processing
+ORD-2023000734,2023-03-13,Customer_171,West,Chongqing,Dumbbell Set 20kg,Sports,Fitness Equipment,2,81.13,162.26,WeChat Pay,Store,Processing
+ORD-2023000735,2023-09-06,Customer_7,East,Hangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,2,29.29,58.58,Bank Transfer,Phone,Processing
+ORD-2023000736,2025-11-05,Customer_85,West,Chongqing,AirPods Pro,Electronics,Headphones,1,284.12,284.12,WeChat Pay,Phone,Shipped
+ORD-2023000737,2025-06-24,Customer_87,Central,Changsha,AirPods Pro,Electronics,Headphones,5,266.07,1330.35,Credit Card,Phone,Completed
+ORD-2023000738,2025-04-02,Customer_159,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,1,27.33,27.33,Alipay,Phone,Shipped
+ORD-2023000739,2025-12-14,Customer_57,North,Tianjin,Galaxy S24,Electronics,Smartphones,5,937.11,4685.55,WeChat Pay,Website,Completed
+ORD-2023000740,2025-03-18,Customer_50,North,Shenyang,Leather Boots,Clothing,Footwear,1,181.7,181.7,Bank Transfer,Store,Returned
+ORD-2023000741,2025-05-25,Customer_95,Central,Changsha,Galaxy S24,Electronics,Smartphones,3,871.37,2614.11,Bank Transfer,Store,Completed
+ORD-2023000742,2023-06-29,Customer_56,East,Hangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,3,101.75,305.25,Bank Transfer,Phone,Cancelled
+ORD-2023000743,2023-06-26,Customer_37,East,Shanghai,Silk Dress,Clothing,Women's Wear,4,115.05,460.2,Alipay,Store,Cancelled
+ORD-2023000744,2023-07-01,Customer_2,Central,Zhengzhou,MacBook Air,Electronics,Laptops,5,1291.12,6455.6,Bank Transfer,Store,Cancelled
+ORD-2023000745,2023-10-08,Customer_52,South,Xiamen,Leather Boots,Clothing,Footwear,5,171.18,855.9,Alipay,Phone,Shipped
+ORD-2023000746,2024-09-14,Customer_127,Central,Zhengzhou,Galaxy S24,Electronics,Smartphones,3,989.24,2967.72,COD,Phone,Processing
+ORD-2023000747,2025-08-25,Customer_32,North,Beijing,AirPods Pro,Electronics,Headphones,3,234.07,702.21,WeChat Pay,Phone,Processing
+ORD-2023000748,2024-07-21,Customer_127,West,Xi'an,Data Science 101,Books,Non-Fiction,2,42.92,85.84,Credit Card,Third-party,Shipped
+ORD-2023000749,2025-09-01,Customer_178,Central,Zhengzhou,LED Floor Lamp,Home & Garden,Lighting,4,98.83,395.32,Credit Card,Store,Returned
+ORD-2023000750,2023-10-27,Customer_82,Central,Wuhan,Running Shoes Pro,Sports,Running,2,152.65,305.3,Bank Transfer,Website,Shipped
+ORD-2023000751,2024-12-30,Customer_13,South,Shenzhen,Running Shoes Pro,Sports,Running,3,145.4,436.2,WeChat Pay,Store,Returned
+ORD-2023000752,2023-12-09,Customer_140,North,Shenyang,iPad Air,Electronics,Tablets,2,646.56,1293.12,WeChat Pay,Store,Shipped
+ORD-2023000753,2024-12-21,Customer_37,East,Nanjing,Dark Chocolate Box,Food & Beverage,Snacks,3,13.17,39.51,Credit Card,Website,Returned
+ORD-2023000754,2023-11-30,Customer_27,East,Hangzhou,Wool Scarf,Clothing,Accessories,4,37.13,148.52,Alipay,Website,Returned
+ORD-2023000755,2025-12-12,Customer_137,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,5,30.65,153.25,COD,App,Cancelled
+ORD-2023000756,2025-09-09,Customer_90,West,Chengdu,ThinkPad X1,Electronics,Laptops,2,1576.71,3153.42,WeChat Pay,Store,Processing
+ORD-2023000757,2024-09-15,Customer_8,West,Xi'an,Standing Desk,Home & Garden,Furniture,3,449.93,1349.79,Credit Card,Website,Processing
+ORD-2023000758,2023-09-24,Customer_21,South,Xiamen,Canon EOS R6,Electronics,Cameras,3,2218.12,6654.36,Bank Transfer,App,Completed
+ORD-2023000759,2023-03-09,Customer_169,North,Tianjin,Silk Dress,Clothing,Women's Wear,1,117.25,117.25,COD,Third-party,Completed
+ORD-2023000760,2023-01-22,Customer_194,West,Chengdu,Running Shoes Pro,Sports,Running,1,129.61,129.61,Credit Card,App,Returned
+ORD-2023000761,2023-03-01,Customer_24,South,Xiamen,iPad Air,Electronics,Tablets,2,629.66,1259.32,Alipay,Store,Returned
+ORD-2023000762,2024-05-10,Customer_130,East,Hangzhou,Sony WH-1000XM5,Electronics,Headphones,5,378.4,1892.0,COD,App,Completed
+ORD-2023000763,2024-07-31,Customer_44,Central,Wuhan,Standing Desk,Home & Garden,Furniture,2,531.31,1062.62,COD,App,Completed
+ORD-2023000764,2024-01-15,Customer_113,South,Xiamen,Dark Chocolate Box,Food & Beverage,Snacks,4,14.39,57.56,Credit Card,Website,Shipped
+ORD-2023000765,2023-08-20,Customer_195,West,Chongqing,iPad Air,Electronics,Tablets,5,550.04,2750.2,WeChat Pay,App,Cancelled
+ORD-2023000766,2024-08-13,Customer_143,North,Shenyang,AirPods Pro,Electronics,Headphones,4,268.59,1074.36,Credit Card,App,Shipped
+ORD-2023000767,2024-09-30,Customer_176,West,Chengdu,Denim Jacket,Clothing,Men's Wear,3,77.98,233.94,Bank Transfer,Website,Returned
+ORD-2023000768,2025-09-01,Customer_174,West,Chongqing,Silk Dress,Clothing,Women's Wear,2,142.81,285.62,WeChat Pay,Website,Completed
+ORD-2023000769,2023-06-24,Customer_31,West,Xi'an,ThinkPad X1,Electronics,Laptops,4,1373.0,5492.0,Alipay,Phone,Cancelled
+ORD-2023000770,2024-02-12,Customer_87,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,1,334.73,334.73,Alipay,Third-party,Cancelled
+ORD-2023000771,2024-07-13,Customer_194,North,Beijing,Silk Dress,Clothing,Women's Wear,4,120.43,481.72,Bank Transfer,Store,Cancelled
+ORD-2023000772,2025-07-20,Customer_28,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,5,36.41,182.05,Credit Card,Store,Cancelled
+ORD-2023000773,2023-04-19,Customer_18,West,Chengdu,Data Science 101,Books,Non-Fiction,2,42.94,85.88,Bank Transfer,App,Processing
+ORD-2023000774,2023-07-17,Customer_195,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,3,17.91,53.73,Credit Card,Third-party,Cancelled
+ORD-2023000775,2024-06-19,Customer_139,West,Chengdu,Yoga Mat Premium,Sports,Yoga,4,48.86,195.44,WeChat Pay,Third-party,Returned
+ORD-2023000776,2024-10-06,Customer_97,North,Beijing,Silk Dress,Clothing,Women's Wear,1,124.5,124.5,Bank Transfer,Phone,Completed
+ORD-2023000777,2023-12-03,Customer_126,North,Beijing,Ceramic Mug Set,Home & Garden,Kitchenware,3,32.35,97.05,Bank Transfer,Website,Shipped
+ORD-2023000778,2025-08-20,Customer_122,West,Chongqing,ThinkPad X1,Electronics,Laptops,5,1472.46,7362.3,COD,Website,Returned
+ORD-2023000779,2025-02-12,Customer_158,North,Tianjin,Running Shoes Pro,Sports,Running,4,153.07,612.28,WeChat Pay,Store,Shipped
+ORD-2023000780,2025-01-20,Customer_90,North,Beijing,LED Floor Lamp,Home & Garden,Lighting,1,79.07,79.07,COD,App,Shipped
+ORD-2023000781,2025-04-23,Customer_90,West,Chengdu,Silk Dress,Clothing,Women's Wear,3,148.04,444.12,Credit Card,Website,Processing
+ORD-2023000782,2023-05-15,Customer_79,South,Xiamen,Yoga Mat Premium,Sports,Yoga,5,42.9,214.5,Credit Card,Store,Processing
+ORD-2023000783,2025-05-15,Customer_146,North,Shenyang,Camping Tent 4P,Sports,Outdoor,1,295.49,295.49,COD,Phone,Shipped
+ORD-2023000784,2024-10-10,Customer_97,North,Shenyang,Wool Scarf,Clothing,Accessories,5,33.41,167.05,COD,Phone,Shipped
+ORD-2023000785,2024-02-26,Customer_87,Central,Wuhan,Wool Scarf,Clothing,Accessories,1,41.23,41.23,Bank Transfer,Third-party,Shipped
+ORD-2023000786,2024-02-18,Customer_128,South,Xiamen,Yoga Mat Premium,Sports,Yoga,3,55.9,167.7,Credit Card,Third-party,Processing
+ORD-2023000787,2025-04-03,Customer_58,East,Hangzhou,Galaxy S24,Electronics,Smartphones,3,1032.83,3098.49,COD,App,Returned
+ORD-2023000788,2025-12-23,Customer_122,North,Shenyang,Camping Tent 4P,Sports,Outdoor,3,260.18,780.54,Bank Transfer,Website,Shipped
+ORD-2023000789,2025-06-05,Customer_170,North,Shenyang,Yoga Mat Premium,Sports,Yoga,5,53.47,267.35,COD,Store,Processing
+ORD-2023000790,2024-01-05,Customer_5,West,Chongqing,Running Shoes Pro,Sports,Running,5,149.69,748.45,COD,Website,Returned
+ORD-2023000791,2025-12-27,Customer_158,West,Chengdu,Organic Coffee Beans,Food & Beverage,Beverages,4,18.6,74.4,Bank Transfer,Third-party,Completed
+ORD-2023000792,2023-11-05,Customer_192,Central,Wuhan,Dumbbell Set 20kg,Sports,Fitness Equipment,4,79.59,318.36,WeChat Pay,Phone,Cancelled
+ORD-2023000793,2024-06-30,Customer_74,East,Shanghai,Data Science 101,Books,Non-Fiction,2,55.18,110.36,Alipay,Store,Returned
+ORD-2023000794,2023-02-26,Customer_63,South,Guangzhou,Canon EOS R6,Electronics,Cameras,1,2236.58,2236.58,WeChat Pay,Phone,Cancelled
+ORD-2023000795,2024-07-12,Customer_35,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,1,117.47,117.47,Credit Card,Store,Shipped
+ORD-2023000796,2025-09-22,Customer_6,Central,Wuhan,Data Science 101,Books,Non-Fiction,1,56.95,56.95,Credit Card,App,Shipped
+ORD-2023000797,2023-07-04,Customer_102,Central,Zhengzhou,MacBook Air,Electronics,Laptops,4,1341.72,5366.88,Alipay,Website,Completed
+ORD-2023000798,2025-12-11,Customer_65,Central,Changsha,Standing Desk,Home & Garden,Furniture,1,502.29,502.29,Bank Transfer,App,Processing
+ORD-2023000799,2025-03-09,Customer_192,Central,Wuhan,Camping Tent 4P,Sports,Outdoor,3,328.81,986.43,Alipay,Phone,Processing
+ORD-2023000800,2025-06-19,Customer_105,South,Shenzhen,Sony WH-1000XM5,Electronics,Headphones,2,398.2,796.4,WeChat Pay,Third-party,Completed
+ORD-2023000801,2025-05-17,Customer_122,West,Xi'an,Dumbbell Set 20kg,Sports,Fitness Equipment,1,84.1,84.1,Alipay,Store,Processing
+ORD-2023000802,2023-02-13,Customer_166,East,Hangzhou,Dark Chocolate Box,Food & Beverage,Snacks,3,16.44,49.32,COD,App,Completed
+ORD-2023000803,2025-01-13,Customer_176,South,Guangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,27.34,109.36,Credit Card,Third-party,Processing
+ORD-2023000804,2024-06-07,Customer_78,West,Chongqing,iPhone 15,Electronics,Smartphones,4,1127.12,4508.48,Credit Card,Website,Shipped
+ORD-2023000805,2025-04-12,Customer_9,South,Shenzhen,Leather Boots,Clothing,Footwear,3,177.1,531.3,WeChat Pay,App,Cancelled
+ORD-2023000806,2023-07-25,Customer_42,West,Xi'an,Silk Dress,Clothing,Women's Wear,3,137.41,412.23,WeChat Pay,Third-party,Completed
+ORD-2023000807,2025-07-17,Customer_178,East,Hangzhou,The Great Novel,Books,Fiction,5,26.77,133.85,Credit Card,App,Processing
+ORD-2023000808,2024-09-17,Customer_81,West,Xi'an,AirPods Pro,Electronics,Headphones,1,241.58,241.58,COD,App,Completed
+ORD-2023000809,2025-04-20,Customer_82,South,Shenzhen,Standing Desk,Home & Garden,Furniture,2,550.94,1101.88,Bank Transfer,Phone,Processing
+ORD-2023000810,2024-07-31,Customer_51,East,Shanghai,Organic Coffee Beans,Food & Beverage,Beverages,5,21.95,109.75,Credit Card,Phone,Shipped
+ORD-2023000811,2023-02-17,Customer_143,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,5,72.47,362.35,COD,Website,Completed
+ORD-2023000812,2025-05-28,Customer_154,West,Chengdu,Running Shoes Pro,Sports,Running,2,128.88,257.76,WeChat Pay,Website,Completed
+ORD-2023000813,2025-12-12,Customer_112,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,1,76.03,76.03,Bank Transfer,Phone,Completed
+ORD-2023000814,2024-06-29,Customer_74,South,Xiamen,iPad Air,Electronics,Tablets,2,679.16,1358.32,Bank Transfer,Phone,Processing
+ORD-2023000815,2024-08-02,Customer_187,West,Chengdu,The Great Novel,Books,Fiction,2,28.7,57.4,Alipay,Phone,Processing
+ORD-2023000816,2024-04-27,Customer_159,West,Chengdu,iPhone 15,Electronics,Smartphones,3,1141.7,3425.1,Bank Transfer,Website,Shipped
+ORD-2023000817,2025-08-18,Customer_35,Central,Changsha,Data Science 101,Books,Non-Fiction,4,43.78,175.12,WeChat Pay,Phone,Processing
+ORD-2023000818,2023-07-15,Customer_143,West,Xi'an,Silk Dress,Clothing,Women's Wear,5,119.57,597.85,Credit Card,App,Shipped
+ORD-2023000819,2023-04-04,Customer_2,South,Guangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,5,100.73,503.65,WeChat Pay,Third-party,Returned
+ORD-2023000820,2023-03-26,Customer_149,West,Chongqing,Denim Jacket,Clothing,Men's Wear,3,70.28,210.84,Alipay,Store,Processing
+ORD-2023000821,2024-10-11,Customer_182,Central,Zhengzhou,Camping Tent 4P,Sports,Outdoor,4,265.98,1063.92,COD,Phone,Processing
+ORD-2023000822,2025-10-19,Customer_72,East,Shanghai,Camping Tent 4P,Sports,Outdoor,1,341.92,341.92,WeChat Pay,Phone,Shipped
+ORD-2023000823,2023-12-04,Customer_81,East,Nanjing,Running Shoes Pro,Sports,Running,5,140.64,703.2,Bank Transfer,Website,Returned
+ORD-2023000824,2024-01-11,Customer_10,West,Chengdu,iPad Air,Electronics,Tablets,2,518.96,1037.92,Bank Transfer,Store,Processing
+ORD-2023000825,2024-12-31,Customer_182,West,Chongqing,ThinkPad X1,Electronics,Laptops,4,1206.27,4825.08,COD,Phone,Cancelled
+ORD-2023000826,2024-02-22,Customer_73,West,Chengdu,AirPods Pro,Electronics,Headphones,1,237.77,237.77,Alipay,Website,Returned
+ORD-2023000827,2023-01-09,Customer_135,East,Nanjing,Organic Coffee Beans,Food & Beverage,Beverages,5,18.27,91.35,COD,Website,Cancelled
+ORD-2023000828,2023-02-23,Customer_73,North,Beijing,Wool Scarf,Clothing,Accessories,1,43.53,43.53,Credit Card,Phone,Shipped
+ORD-2023000829,2025-07-31,Customer_182,Central,Wuhan,Camping Tent 4P,Sports,Outdoor,2,256.74,513.48,Bank Transfer,Phone,Shipped
+ORD-2023000830,2025-07-16,Customer_84,Central,Changsha,iPhone 15,Electronics,Smartphones,3,1139.79,3419.37,COD,Website,Processing
+ORD-2023000831,2023-05-25,Customer_141,North,Shenyang,Yoga Mat Premium,Sports,Yoga,3,53.38,160.14,COD,Phone,Completed
+ORD-2023000832,2025-03-27,Customer_23,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,2,397.69,795.38,Credit Card,Website,Processing
+ORD-2023000833,2025-10-02,Customer_111,West,Chongqing,Yoga Mat Premium,Sports,Yoga,2,43.42,86.84,WeChat Pay,Third-party,Processing
+ORD-2023000834,2025-09-29,Customer_115,East,Nanjing,ThinkPad X1,Electronics,Laptops,3,1404.31,4212.93,Bank Transfer,Phone,Shipped
+ORD-2023000835,2025-01-24,Customer_158,Central,Changsha,Silk Dress,Clothing,Women's Wear,1,138.93,138.93,Alipay,Phone,Cancelled
+ORD-2023000836,2024-04-04,Customer_166,North,Beijing,Standing Desk,Home & Garden,Furniture,3,569.85,1709.55,Alipay,Phone,Returned
+ORD-2023000837,2025-09-05,Customer_77,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,4,48.08,192.32,Alipay,Website,Shipped
+ORD-2023000838,2023-06-06,Customer_12,South,Xiamen,Silk Dress,Clothing,Women's Wear,3,131.65,394.95,COD,App,Returned
+ORD-2023000839,2024-06-02,Customer_91,West,Chongqing,ThinkPad X1,Electronics,Laptops,4,1466.51,5866.04,WeChat Pay,Third-party,Completed
+ORD-2023000840,2024-01-09,Customer_101,Central,Wuhan,ThinkPad X1,Electronics,Laptops,4,1264.51,5058.04,Credit Card,App,Cancelled
+ORD-2023000841,2025-07-10,Customer_160,East,Hangzhou,LED Floor Lamp,Home & Garden,Lighting,4,95.87,383.48,WeChat Pay,Store,Processing
+ORD-2023000842,2023-08-06,Customer_112,South,Shenzhen,MacBook Air,Electronics,Laptops,5,1112.43,5562.15,COD,App,Completed
+ORD-2023000843,2025-07-31,Customer_178,West,Chengdu,iPhone 15,Electronics,Smartphones,2,1045.69,2091.38,Bank Transfer,Third-party,Cancelled
+ORD-2023000844,2025-03-19,Customer_78,East,Nanjing,The Great Novel,Books,Fiction,3,26.42,79.26,Credit Card,Website,Processing
+ORD-2023000845,2024-01-21,Customer_7,North,Beijing,ThinkPad X1,Electronics,Laptops,1,1481.27,1481.27,Alipay,Phone,Processing
+ORD-2023000846,2024-09-08,Customer_198,South,Guangzhou,Data Science 101,Books,Non-Fiction,5,45.35,226.75,Bank Transfer,Website,Cancelled
+ORD-2023000847,2025-06-30,Customer_125,West,Chengdu,ThinkPad X1,Electronics,Laptops,2,1567.89,3135.78,Bank Transfer,App,Cancelled
+ORD-2023000848,2025-03-13,Customer_14,Central,Wuhan,iPad Air,Electronics,Tablets,3,611.48,1834.44,WeChat Pay,App,Completed
+ORD-2023000849,2024-08-18,Customer_10,West,Chongqing,Wool Scarf,Clothing,Accessories,5,40.12,200.6,Bank Transfer,Phone,Cancelled
+ORD-2023000850,2023-05-05,Customer_136,Central,Changsha,The Great Novel,Books,Fiction,4,22.98,91.92,Credit Card,Phone,Returned
+ORD-2023000851,2025-05-04,Customer_122,East,Nanjing,MacBook Air,Electronics,Laptops,3,1340.32,4020.96,Credit Card,Phone,Returned
+ORD-2023000852,2024-08-12,Customer_186,East,Hangzhou,Dark Chocolate Box,Food & Beverage,Snacks,4,12.84,51.36,Alipay,Phone,Shipped
+ORD-2023000853,2024-11-25,Customer_155,West,Chengdu,Standing Desk,Home & Garden,Furniture,2,512.12,1024.24,Bank Transfer,Website,Shipped
+ORD-2023000854,2023-11-28,Customer_160,West,Chongqing,Organic Coffee Beans,Food & Beverage,Beverages,3,21.76,65.28,Alipay,Store,Completed
+ORD-2023000855,2025-10-04,Customer_26,West,Chengdu,Sony WH-1000XM5,Electronics,Headphones,2,313.02,626.04,Bank Transfer,Phone,Shipped
+ORD-2023000856,2025-01-04,Customer_67,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,1,33.34,33.34,WeChat Pay,Website,Processing
+ORD-2023000857,2024-04-09,Customer_31,Central,Wuhan,MacBook Air,Electronics,Laptops,3,1174.04,3522.12,COD,Website,Cancelled
+ORD-2023000858,2024-07-01,Customer_39,East,Hangzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,1,96.21,96.21,COD,Third-party,Completed
+ORD-2023000859,2023-07-28,Customer_144,North,Tianjin,Leather Boots,Clothing,Footwear,1,181.64,181.64,Credit Card,Third-party,Completed
+ORD-2023000860,2023-11-18,Customer_187,South,Xiamen,ThinkPad X1,Electronics,Laptops,2,1571.49,3142.98,WeChat Pay,Phone,Returned
+ORD-2023000861,2024-11-16,Customer_36,West,Xi'an,ThinkPad X1,Electronics,Laptops,2,1460.73,2921.46,Credit Card,Website,Cancelled
+ORD-2023000862,2025-10-31,Customer_44,West,Chengdu,Canon EOS R6,Electronics,Cameras,4,2380.04,9520.16,Credit Card,Store,Shipped
+ORD-2023000863,2025-12-20,Customer_108,West,Chongqing,Data Science 101,Books,Non-Fiction,2,44.77,89.54,Alipay,Website,Cancelled
+ORD-2023000864,2025-01-10,Customer_8,West,Chongqing,Leather Boots,Clothing,Footwear,5,173.05,865.25,Bank Transfer,Website,Completed
+ORD-2023000865,2023-12-03,Customer_112,Central,Wuhan,MacBook Air,Electronics,Laptops,3,1132.39,3397.17,Credit Card,Phone,Completed
+ORD-2023000866,2025-05-08,Customer_103,South,Xiamen,Galaxy S24,Electronics,Smartphones,5,1026.48,5132.4,COD,Store,Shipped
+ORD-2023000867,2023-10-28,Customer_180,East,Shanghai,Running Shoes Pro,Sports,Running,5,153.93,769.65,Bank Transfer,Phone,Processing
+ORD-2023000868,2025-04-08,Customer_199,Central,Changsha,The Great Novel,Books,Fiction,4,26.47,105.88,Alipay,Store,Completed
+ORD-2023000869,2023-09-16,Customer_134,North,Shenyang,Camping Tent 4P,Sports,Outdoor,4,319.19,1276.76,COD,Store,Processing
+ORD-2023000870,2023-11-24,Customer_6,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,3,29.19,87.57,Credit Card,Third-party,Returned
+ORD-2023000871,2023-08-15,Customer_188,East,Shanghai,Yoga Mat Premium,Sports,Yoga,4,56.16,224.64,Credit Card,Store,Shipped
+ORD-2023000872,2023-09-13,Customer_115,Central,Zhengzhou,ThinkPad X1,Electronics,Laptops,1,1506.68,1506.68,WeChat Pay,Third-party,Completed
+ORD-2023000873,2025-12-28,Customer_153,West,Chongqing,Canon EOS R6,Electronics,Cameras,5,2548.18,12740.9,Alipay,Store,Shipped
+ORD-2023000874,2025-02-12,Customer_134,East,Nanjing,Dark Chocolate Box,Food & Beverage,Snacks,5,15.77,78.85,Alipay,App,Shipped
+ORD-2023000875,2023-10-28,Customer_183,Central,Changsha,iPad Air,Electronics,Tablets,3,590.79,1772.37,Bank Transfer,Phone,Completed
+ORD-2023000876,2025-07-02,Customer_20,North,Beijing,Silk Dress,Clothing,Women's Wear,2,128.08,256.16,WeChat Pay,Third-party,Cancelled
+ORD-2023000877,2025-10-18,Customer_163,Central,Changsha,Standing Desk,Home & Garden,Furniture,4,554.69,2218.76,Bank Transfer,Phone,Cancelled
+ORD-2023000878,2025-07-26,Customer_34,West,Chengdu,AirPods Pro,Electronics,Headphones,5,221.15,1105.75,COD,Third-party,Completed
+ORD-2023000879,2025-01-26,Customer_31,South,Guangzhou,Wool Scarf,Clothing,Accessories,1,41.88,41.88,COD,Phone,Completed
+ORD-2023000880,2023-11-10,Customer_31,North,Tianjin,LED Floor Lamp,Home & Garden,Lighting,3,76.73,230.19,WeChat Pay,Store,Shipped
+ORD-2023000881,2023-10-19,Customer_151,East,Hangzhou,Wool Scarf,Clothing,Accessories,1,42.41,42.41,Bank Transfer,App,Shipped
+ORD-2023000882,2024-12-15,Customer_18,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,4,296.87,1187.48,Credit Card,Phone,Cancelled
+ORD-2023000883,2025-02-11,Customer_122,Central,Zhengzhou,LED Floor Lamp,Home & Garden,Lighting,4,99.69,398.76,COD,Website,Processing
+ORD-2023000884,2023-11-02,Customer_187,Central,Changsha,Leather Boots,Clothing,Footwear,4,166.98,667.92,WeChat Pay,App,Returned
+ORD-2023000885,2024-11-25,Customer_139,Central,Zhengzhou,Denim Jacket,Clothing,Men's Wear,2,88.49,176.98,Credit Card,Phone,Shipped
+ORD-2023000886,2024-09-24,Customer_144,North,Beijing,Dark Chocolate Box,Food & Beverage,Snacks,1,15.31,15.31,Credit Card,Third-party,Completed
+ORD-2023000887,2025-12-04,Customer_49,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,5,31.24,156.2,Bank Transfer,Third-party,Completed
+ORD-2023000888,2024-07-17,Customer_53,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,2,33.02,66.04,Alipay,Third-party,Cancelled
+ORD-2023000889,2023-04-03,Customer_126,North,Shenyang,The Great Novel,Books,Fiction,3,24.25,72.75,Credit Card,Store,Cancelled
+ORD-2023000890,2024-06-10,Customer_24,South,Guangzhou,iPhone 15,Electronics,Smartphones,5,944.27,4721.35,Credit Card,App,Returned
+ORD-2023000891,2023-07-03,Customer_40,South,Guangzhou,AirPods Pro,Electronics,Headphones,2,230.74,461.48,WeChat Pay,Phone,Processing
+ORD-2023000892,2023-04-30,Customer_77,North,Shenyang,Camping Tent 4P,Sports,Outdoor,2,256.59,513.18,Bank Transfer,App,Shipped
+ORD-2023000893,2023-09-05,Customer_14,South,Guangzhou,Camping Tent 4P,Sports,Outdoor,3,287.83,863.49,Alipay,Website,Returned
+ORD-2023000894,2025-02-27,Customer_30,Central,Wuhan,Wool Scarf,Clothing,Accessories,5,41.95,209.75,WeChat Pay,App,Shipped
+ORD-2023000895,2025-04-14,Customer_163,West,Xi'an,Silk Dress,Clothing,Women's Wear,1,128.39,128.39,Alipay,App,Shipped
+ORD-2023000896,2023-09-15,Customer_78,Central,Changsha,Organic Coffee Beans,Food & Beverage,Beverages,1,18.47,18.47,COD,Phone,Cancelled
+ORD-2023000897,2023-10-19,Customer_96,North,Shenyang,Standing Desk,Home & Garden,Furniture,2,541.35,1082.7,COD,Website,Processing
+ORD-2023000898,2025-08-09,Customer_159,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.01,100.04,WeChat Pay,Website,Completed
+ORD-2023000899,2025-02-17,Customer_90,North,Tianjin,Running Shoes Pro,Sports,Running,5,137.86,689.3,Alipay,Third-party,Returned
+ORD-2023000900,2024-09-07,Customer_23,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,5,355.6,1778.0,Bank Transfer,App,Processing
+ORD-2023000901,2024-10-13,Customer_175,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,2,133.27,266.54,WeChat Pay,Store,Cancelled
+ORD-2023000902,2025-07-30,Customer_154,East,Shanghai,Organic Coffee Beans,Food & Beverage,Beverages,3,19.04,57.12,WeChat Pay,App,Processing
+ORD-2023000903,2023-12-22,Customer_106,North,Shenyang,Wool Scarf,Clothing,Accessories,1,43.7,43.7,COD,Phone,Cancelled
+ORD-2023000904,2025-06-30,Customer_173,Central,Wuhan,Data Science 101,Books,Non-Fiction,1,50.57,50.57,Credit Card,Store,Cancelled
+ORD-2023000905,2023-01-18,Customer_32,Central,Zhengzhou,Denim Jacket,Clothing,Men's Wear,2,87.04,174.08,Bank Transfer,Store,Processing
+ORD-2023000906,2025-01-02,Customer_50,West,Chengdu,Canon EOS R6,Electronics,Cameras,1,2692.74,2692.74,Credit Card,Third-party,Shipped
+ORD-2023000907,2025-10-06,Customer_181,South,Shenzhen,Wool Scarf,Clothing,Accessories,3,33.58,100.74,COD,Website,Completed
+ORD-2023000908,2025-10-21,Customer_127,South,Xiamen,Denim Jacket,Clothing,Men's Wear,1,87.77,87.77,Alipay,Third-party,Processing
+ORD-2023000909,2023-05-14,Customer_151,Central,Changsha,Organic Coffee Beans,Food & Beverage,Beverages,5,20.38,101.9,Alipay,App,Processing
+ORD-2023000910,2024-07-15,Customer_50,East,Nanjing,Canon EOS R6,Electronics,Cameras,5,2670.61,13353.05,Credit Card,Third-party,Returned
+ORD-2023000911,2025-05-24,Customer_165,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,24.67,98.68,Credit Card,Store,Cancelled
+ORD-2023000912,2025-01-10,Customer_133,West,Chongqing,ThinkPad X1,Electronics,Laptops,5,1384.98,6924.9,Credit Card,Website,Completed
+ORD-2023000913,2025-03-13,Customer_50,East,Hangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,27.4,109.6,WeChat Pay,App,Returned
+ORD-2023000914,2024-05-26,Customer_51,North,Shenyang,Canon EOS R6,Electronics,Cameras,4,2842.19,11368.76,Alipay,Store,Shipped
+ORD-2023000915,2025-06-03,Customer_7,North,Shenyang,Data Science 101,Books,Non-Fiction,1,42.91,42.91,COD,Store,Shipped
+ORD-2023000916,2023-04-22,Customer_86,South,Shenzhen,Wool Scarf,Clothing,Accessories,2,44.37,88.74,COD,Website,Completed
+ORD-2023000917,2023-09-13,Customer_22,Central,Changsha,Leather Boots,Clothing,Footwear,1,164.98,164.98,Credit Card,App,Cancelled
+ORD-2023000918,2025-06-24,Customer_15,East,Nanjing,MacBook Air,Electronics,Laptops,2,1041.45,2082.9,WeChat Pay,Third-party,Cancelled
+ORD-2023000919,2024-08-26,Customer_98,North,Beijing,Organic Coffee Beans,Food & Beverage,Beverages,1,20.35,20.35,Bank Transfer,App,Returned
+ORD-2023000920,2025-02-25,Customer_119,West,Chengdu,The Great Novel,Books,Fiction,5,21.32,106.6,Bank Transfer,Third-party,Returned
+ORD-2023000921,2024-11-03,Customer_151,North,Tianjin,Data Science 101,Books,Non-Fiction,1,49.3,49.3,Alipay,App,Completed
+ORD-2023000922,2024-02-01,Customer_147,North,Shenyang,Dark Chocolate Box,Food & Beverage,Snacks,1,15.41,15.41,Alipay,Third-party,Shipped
+ORD-2023000923,2024-05-12,Customer_36,East,Hangzhou,Wool Scarf,Clothing,Accessories,5,38.35,191.75,Credit Card,App,Processing
+ORD-2023000924,2025-01-02,Customer_80,East,Nanjing,Silk Dress,Clothing,Women's Wear,5,146.79,733.95,COD,Third-party,Processing
+ORD-2023000925,2025-01-25,Customer_3,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,5,46.69,233.45,COD,Third-party,Processing
+ORD-2023000926,2025-05-14,Customer_89,North,Beijing,Standing Desk,Home & Garden,Furniture,5,552.7,2763.5,Alipay,Website,Processing
+ORD-2023000927,2025-08-15,Customer_154,North,Tianjin,iPad Air,Electronics,Tablets,4,634.0,2536.0,WeChat Pay,Third-party,Returned
+ORD-2023000928,2023-08-03,Customer_117,East,Nanjing,Yoga Mat Premium,Sports,Yoga,4,46.48,185.92,Credit Card,Phone,Processing
+ORD-2023000929,2024-03-12,Customer_62,North,Shenyang,Canon EOS R6,Electronics,Cameras,2,2473.91,4947.82,Bank Transfer,Store,Cancelled
+ORD-2023000930,2023-06-01,Customer_92,South,Guangzhou,Sony WH-1000XM5,Electronics,Headphones,1,334.64,334.64,Credit Card,Third-party,Completed
+ORD-2023000931,2025-01-07,Customer_12,South,Guangzhou,Leather Boots,Clothing,Footwear,2,165.26,330.52,Credit Card,Website,Processing
+ORD-2023000932,2024-11-26,Customer_142,East,Shanghai,Canon EOS R6,Electronics,Cameras,3,2663.06,7989.18,Alipay,Website,Processing
+ORD-2023000933,2023-10-09,Customer_98,North,Beijing,Running Shoes Pro,Sports,Running,1,127.59,127.59,Credit Card,Store,Processing
+ORD-2023000934,2023-12-17,Customer_135,East,Hangzhou,Canon EOS R6,Electronics,Cameras,3,2731.02,8193.06,COD,Phone,Completed
+ORD-2023000935,2025-02-13,Customer_178,North,Beijing,AirPods Pro,Electronics,Headphones,2,225.97,451.94,WeChat Pay,Store,Returned
+ORD-2023000936,2024-01-23,Customer_138,West,Xi'an,Canon EOS R6,Electronics,Cameras,1,2696.23,2696.23,WeChat Pay,Website,Shipped
+ORD-2023000937,2025-11-06,Customer_150,South,Shenzhen,Data Science 101,Books,Non-Fiction,3,55.58,166.74,Bank Transfer,Website,Completed
+ORD-2023000938,2025-03-05,Customer_193,West,Xi'an,The Great Novel,Books,Fiction,1,22.5,22.5,COD,Store,Cancelled
+ORD-2023000939,2025-12-12,Customer_178,Central,Zhengzhou,Sony WH-1000XM5,Electronics,Headphones,3,371.25,1113.75,Bank Transfer,Phone,Cancelled
+ORD-2023000940,2024-02-29,Customer_57,East,Nanjing,Denim Jacket,Clothing,Men's Wear,5,82.55,412.75,Alipay,Phone,Processing
+ORD-2023000941,2023-11-18,Customer_96,West,Chengdu,Yoga Mat Premium,Sports,Yoga,4,54.71,218.84,WeChat Pay,Third-party,Completed
+ORD-2023000942,2024-04-16,Customer_150,South,Shenzhen,Yoga Mat Premium,Sports,Yoga,4,49.28,197.12,Credit Card,Phone,Returned
+ORD-2023000943,2025-04-17,Customer_95,Central,Zhengzhou,Silk Dress,Clothing,Women's Wear,4,127.74,510.96,Bank Transfer,Store,Shipped
+ORD-2023000944,2023-06-05,Customer_92,West,Chengdu,Sony WH-1000XM5,Electronics,Headphones,4,321.13,1284.52,Credit Card,Store,Returned
+ORD-2023000945,2024-04-11,Customer_26,Central,Changsha,Data Science 101,Books,Non-Fiction,1,54.28,54.28,Credit Card,App,Shipped
+ORD-2023000946,2024-11-05,Customer_65,North,Shenyang,iPad Air,Electronics,Tablets,3,544.49,1633.47,WeChat Pay,Store,Processing
+ORD-2023000947,2023-01-18,Customer_198,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,5,16.84,84.2,WeChat Pay,Store,Shipped
+ORD-2023000948,2025-11-15,Customer_195,West,Chongqing,LED Floor Lamp,Home & Garden,Lighting,1,88.25,88.25,Alipay,Phone,Processing
+ORD-2023000949,2025-08-17,Customer_185,South,Xiamen,iPad Air,Electronics,Tablets,4,551.15,2204.6,Bank Transfer,Store,Completed
+ORD-2023000950,2025-07-10,Customer_143,East,Shanghai,Silk Dress,Clothing,Women's Wear,4,117.76,471.04,Credit Card,Store,Processing
+ORD-2023000951,2024-12-27,Customer_87,Central,Wuhan,Yoga Mat Premium,Sports,Yoga,1,49.0,49.0,Alipay,Phone,Cancelled
+ORD-2023000952,2023-02-17,Customer_146,West,Xi'an,Ceramic Mug Set,Home & Garden,Kitchenware,3,27.49,82.47,Credit Card,Website,Processing
+ORD-2023000953,2025-03-11,Customer_98,East,Nanjing,Data Science 101,Books,Non-Fiction,5,56.2,281.0,Alipay,Phone,Completed
+ORD-2023000954,2025-07-13,Customer_164,Central,Zhengzhou,iPad Air,Electronics,Tablets,4,528.67,2114.68,WeChat Pay,App,Processing
+ORD-2023000955,2025-09-27,Customer_7,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,2,24.93,49.86,Alipay,Website,Completed
+ORD-2023000956,2025-12-09,Customer_18,West,Chongqing,iPad Air,Electronics,Tablets,2,561.46,1122.92,Bank Transfer,App,Shipped
+ORD-2023000957,2025-04-21,Customer_101,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,3,386.66,1159.98,Alipay,App,Processing
+ORD-2023000958,2024-02-27,Customer_34,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,1,37.7,37.7,Alipay,Store,Cancelled
+ORD-2023000959,2024-02-20,Customer_129,West,Chengdu,The Great Novel,Books,Fiction,5,28.28,141.4,Bank Transfer,Store,Processing
+ORD-2023000960,2024-05-20,Customer_135,North,Beijing,Leather Boots,Clothing,Footwear,1,174.48,174.48,WeChat Pay,Third-party,Cancelled
+ORD-2023000961,2024-08-12,Customer_166,West,Chongqing,LED Floor Lamp,Home & Garden,Lighting,1,95.34,95.34,Bank Transfer,Store,Shipped
+ORD-2023000962,2025-06-03,Customer_118,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,4,322.73,1290.92,Bank Transfer,Website,Returned
+ORD-2023000963,2023-11-20,Customer_71,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,1,13.82,13.82,COD,Store,Completed
+ORD-2023000964,2025-01-25,Customer_20,South,Guangzhou,Silk Dress,Clothing,Women's Wear,5,114.34,571.7,Credit Card,Third-party,Shipped
+ORD-2023000965,2023-04-02,Customer_119,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,3,318.36,955.08,Credit Card,App,Cancelled
+ORD-2023000966,2023-01-22,Customer_65,West,Chongqing,Denim Jacket,Clothing,Men's Wear,2,76.55,153.1,Credit Card,Website,Shipped
+ORD-2023000967,2024-05-11,Customer_183,West,Chongqing,Leather Boots,Clothing,Footwear,1,139.09,139.09,Bank Transfer,Website,Cancelled
+ORD-2023000968,2023-12-29,Customer_76,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,1,360.2,360.2,Credit Card,Third-party,Cancelled
+ORD-2023000969,2023-11-11,Customer_113,South,Shenzhen,Organic Coffee Beans,Food & Beverage,Beverages,1,21.05,21.05,WeChat Pay,Website,Processing
+ORD-2023000970,2023-04-08,Customer_163,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,2,28.5,57.0,COD,App,Cancelled
+ORD-2023000971,2025-02-11,Customer_197,East,Hangzhou,Galaxy S24,Electronics,Smartphones,5,765.41,3827.05,Alipay,Website,Shipped
+ORD-2023000972,2023-01-30,Customer_87,South,Shenzhen,MacBook Air,Electronics,Laptops,1,1170.83,1170.83,Alipay,App,Processing
+ORD-2023000973,2025-11-15,Customer_28,North,Shenyang,Sony WH-1000XM5,Electronics,Headphones,2,301.26,602.52,WeChat Pay,Store,Returned
+ORD-2023000974,2025-05-26,Customer_31,South,Xiamen,iPad Air,Electronics,Tablets,5,580.14,2900.7,Alipay,Website,Completed
+ORD-2023000975,2024-10-09,Customer_4,East,Hangzhou,Sony WH-1000XM5,Electronics,Headphones,1,338.75,338.75,Bank Transfer,Website,Cancelled
+ORD-2023000976,2025-01-25,Customer_12,South,Shenzhen,Organic Coffee Beans,Food & Beverage,Beverages,3,20.89,62.67,Credit Card,Website,Cancelled
+ORD-2023000977,2023-12-18,Customer_65,East,Nanjing,Wool Scarf,Clothing,Accessories,1,41.49,41.49,Credit Card,Third-party,Shipped
+ORD-2023000978,2024-10-13,Customer_171,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,2,14.23,28.46,Bank Transfer,App,Shipped
+ORD-2023000979,2024-04-21,Customer_129,North,Shenyang,LED Floor Lamp,Home & Garden,Lighting,4,85.86,343.44,COD,App,Processing
+ORD-2023000980,2025-05-27,Customer_194,North,Shenyang,ThinkPad X1,Electronics,Laptops,3,1288.37,3865.11,Alipay,Third-party,Completed
+ORD-2023000981,2023-11-07,Customer_97,North,Beijing,Dumbbell Set 20kg,Sports,Fitness Equipment,4,83.57,334.28,Alipay,App,Processing
+ORD-2023000982,2023-03-23,Customer_134,Central,Zhengzhou,Camping Tent 4P,Sports,Outdoor,2,279.1,558.2,Bank Transfer,Store,Completed
+ORD-2023000983,2023-04-21,Customer_171,South,Xiamen,Camping Tent 4P,Sports,Outdoor,3,275.88,827.64,Alipay,Website,Returned
+ORD-2023000984,2023-01-13,Customer_17,West,Xi'an,Camping Tent 4P,Sports,Outdoor,2,293.83,587.66,Bank Transfer,App,Processing
+ORD-2023000985,2023-12-22,Customer_152,North,Shenyang,AirPods Pro,Electronics,Headphones,2,221.03,442.06,COD,Website,Processing
+ORD-2023000986,2024-02-09,Customer_63,Central,Wuhan,Silk Dress,Clothing,Women's Wear,4,121.7,486.8,Bank Transfer,Website,Returned
+ORD-2023000987,2024-02-17,Customer_70,South,Guangzhou,Yoga Mat Premium,Sports,Yoga,5,48.24,241.2,Bank Transfer,App,Shipped
+ORD-2023000988,2025-10-31,Customer_157,West,Chongqing,Sony WH-1000XM5,Electronics,Headphones,4,342.86,1371.44,Bank Transfer,Website,Cancelled
+ORD-2023000989,2024-09-06,Customer_153,North,Tianjin,Silk Dress,Clothing,Women's Wear,1,139.02,139.02,COD,Website,Returned
+ORD-2023000990,2024-08-03,Customer_97,South,Guangzhou,Denim Jacket,Clothing,Men's Wear,4,74.4,297.6,COD,Third-party,Cancelled
+ORD-2023000991,2024-01-24,Customer_2,North,Tianjin,AirPods Pro,Electronics,Headphones,4,226.27,905.08,Credit Card,Third-party,Shipped
+ORD-2023000992,2025-02-03,Customer_99,West,Chongqing,Silk Dress,Clothing,Women's Wear,4,147.21,588.84,Bank Transfer,Store,Returned
+ORD-2023000993,2023-11-29,Customer_50,North,Tianjin,Galaxy S24,Electronics,Smartphones,1,867.94,867.94,Bank Transfer,Store,Shipped
+ORD-2023000994,2025-02-28,Customer_109,Central,Changsha,Wool Scarf,Clothing,Accessories,3,41.3,123.9,Alipay,Website,Cancelled
+ORD-2023000995,2023-10-30,Customer_67,North,Tianjin,Data Science 101,Books,Non-Fiction,1,52.95,52.95,COD,Phone,Processing
+ORD-2023000996,2023-11-27,Customer_4,East,Shanghai,The Great Novel,Books,Fiction,5,28.38,141.9,Credit Card,App,Cancelled
+ORD-2023000997,2024-01-22,Customer_109,West,Xi'an,LED Floor Lamp,Home & Garden,Lighting,1,89.49,89.49,Alipay,Phone,Shipped
+ORD-2023000998,2025-04-22,Customer_193,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,29.75,119.0,Credit Card,App,Returned
+ORD-2023000999,2025-03-26,Customer_179,East,Shanghai,Running Shoes Pro,Sports,Running,2,168.22,336.44,WeChat Pay,App,Processing
+ORD-2023001000,2025-05-05,Customer_135,West,Chengdu,ThinkPad X1,Electronics,Laptops,1,1513.89,1513.89,Bank Transfer,Store,Cancelled
+ORD-2023001001,2024-02-10,Customer_125,South,Shenzhen,Dumbbell Set 20kg,Sports,Fitness Equipment,2,94.45,188.9,Alipay,Third-party,Completed
+ORD-2023001002,2024-01-10,Customer_195,West,Xi'an,iPad Air,Electronics,Tablets,2,545.26,1090.52,Alipay,Store,Cancelled
+ORD-2023001003,2023-12-07,Customer_21,West,Xi'an,The Great Novel,Books,Fiction,1,27.75,27.75,WeChat Pay,App,Cancelled
+ORD-2023001004,2024-04-25,Customer_123,North,Tianjin,MacBook Air,Electronics,Laptops,3,1029.82,3089.46,Bank Transfer,App,Completed
+ORD-2023001005,2023-03-27,Customer_25,North,Tianjin,iPhone 15,Electronics,Smartphones,5,1085.68,5428.4,Alipay,Third-party,Completed
+ORD-2023001006,2025-08-27,Customer_194,West,Xi'an,Standing Desk,Home & Garden,Furniture,3,563.69,1691.07,WeChat Pay,Third-party,Cancelled
+ORD-2023001007,2024-05-05,Customer_93,East,Hangzhou,Organic Coffee Beans,Food & Beverage,Beverages,3,22.99,68.97,Bank Transfer,Phone,Returned
+ORD-2023001008,2025-04-02,Customer_186,North,Tianjin,Camping Tent 4P,Sports,Outdoor,1,254.43,254.43,Alipay,App,Returned
+ORD-2023001009,2025-08-31,Customer_132,North,Shenyang,Running Shoes Pro,Sports,Running,2,143.12,286.24,Bank Transfer,Website,Completed
+ORD-2023001010,2024-10-28,Customer_174,East,Shanghai,Data Science 101,Books,Non-Fiction,3,55.59,166.77,Bank Transfer,Website,Returned
+ORD-2023001011,2025-09-02,Customer_169,West,Chongqing,The Great Novel,Books,Fiction,1,23.85,23.85,Credit Card,Phone,Shipped
+ORD-2023001012,2025-10-30,Customer_9,Central,Wuhan,Dark Chocolate Box,Food & Beverage,Snacks,2,16.65,33.3,Alipay,Phone,Completed
+ORD-2023001013,2025-07-02,Customer_30,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,26.11,104.44,Bank Transfer,Third-party,Processing
+ORD-2023001014,2023-03-01,Customer_42,South,Shenzhen,Sony WH-1000XM5,Electronics,Headphones,1,307.69,307.69,WeChat Pay,Phone,Shipped
+ORD-2023001015,2023-09-10,Customer_171,South,Xiamen,Running Shoes Pro,Sports,Running,4,169.18,676.72,Alipay,Third-party,Cancelled
+ORD-2023001016,2023-05-13,Customer_165,North,Shenyang,Camping Tent 4P,Sports,Outdoor,2,337.73,675.46,WeChat Pay,Phone,Cancelled
+ORD-2023001017,2024-08-18,Customer_23,Central,Zhengzhou,Canon EOS R6,Electronics,Cameras,2,2318.39,4636.78,Credit Card,App,Shipped
+ORD-2023001018,2024-10-03,Customer_98,Central,Wuhan,ThinkPad X1,Electronics,Laptops,5,1343.49,6717.45,COD,App,Shipped
+ORD-2023001019,2025-05-17,Customer_82,North,Shenyang,Ceramic Mug Set,Home & Garden,Kitchenware,2,32.02,64.04,WeChat Pay,Website,Returned
+ORD-2023001020,2025-08-01,Customer_81,Central,Changsha,Canon EOS R6,Electronics,Cameras,1,2420.52,2420.52,Alipay,Store,Processing
+ORD-2023001021,2023-10-26,Customer_192,West,Xi'an,Leather Boots,Clothing,Footwear,2,163.84,327.68,Credit Card,Third-party,Shipped
+ORD-2023001022,2025-09-06,Customer_162,East,Nanjing,Dark Chocolate Box,Food & Beverage,Snacks,1,13.97,13.97,Alipay,Phone,Shipped
+ORD-2023001023,2024-03-07,Customer_188,West,Chengdu,Camping Tent 4P,Sports,Outdoor,2,328.41,656.82,Alipay,App,Processing
+ORD-2023001024,2023-11-23,Customer_6,West,Xi'an,Denim Jacket,Clothing,Men's Wear,3,90.48,271.44,COD,Phone,Shipped
+ORD-2023001025,2025-03-11,Customer_19,West,Xi'an,Wool Scarf,Clothing,Accessories,3,42.02,126.06,COD,Store,Shipped
+ORD-2023001026,2024-10-24,Customer_193,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.5,102.0,COD,App,Shipped
+ORD-2023001027,2025-09-15,Customer_75,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,5,311.05,1555.25,Alipay,Website,Processing
+ORD-2023001028,2023-07-28,Customer_174,South,Xiamen,Data Science 101,Books,Non-Fiction,1,47.92,47.92,Alipay,Phone,Cancelled
+ORD-2023001029,2024-01-03,Customer_14,South,Shenzhen,ThinkPad X1,Electronics,Laptops,3,1598.0,4794.0,Credit Card,Third-party,Shipped
+ORD-2023001030,2023-09-01,Customer_62,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,4,229.95,919.8,Bank Transfer,Phone,Shipped
+ORD-2023001031,2023-07-03,Customer_200,Central,Wuhan,Data Science 101,Books,Non-Fiction,4,54.13,216.52,Bank Transfer,Phone,Shipped
+ORD-2023001032,2023-09-07,Customer_126,West,Chongqing,iPhone 15,Electronics,Smartphones,1,884.1,884.1,COD,Website,Completed
+ORD-2023001033,2023-07-13,Customer_152,Central,Changsha,LED Floor Lamp,Home & Garden,Lighting,4,82.96,331.84,Alipay,Phone,Cancelled
+ORD-2023001034,2023-05-11,Customer_183,West,Chongqing,LED Floor Lamp,Home & Garden,Lighting,2,78.31,156.62,COD,Website,Cancelled
+ORD-2023001035,2025-12-21,Customer_126,North,Tianjin,Ceramic Mug Set,Home & Garden,Kitchenware,5,31.47,157.35,Credit Card,Third-party,Returned
+ORD-2023001036,2024-02-29,Customer_169,Central,Changsha,Data Science 101,Books,Non-Fiction,1,53.79,53.79,Credit Card,Website,Returned
+ORD-2023001037,2023-09-09,Customer_11,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,4,31.61,126.44,Alipay,Third-party,Processing
+ORD-2023001038,2023-03-13,Customer_22,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,3,32.06,96.18,Credit Card,Third-party,Shipped
+ORD-2023001039,2023-01-01,Customer_64,East,Nanjing,Sony WH-1000XM5,Electronics,Headphones,4,398.95,1595.8,WeChat Pay,App,Returned
+ORD-2023001040,2025-10-01,Customer_178,East,Nanjing,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.87,103.48,WeChat Pay,Third-party,Shipped
+ORD-2023001041,2023-04-02,Customer_61,Central,Changsha,Standing Desk,Home & Garden,Furniture,2,527.13,1054.26,Credit Card,Website,Processing
+ORD-2023001042,2025-01-05,Customer_72,East,Shanghai,AirPods Pro,Electronics,Headphones,5,252.89,1264.45,Alipay,Third-party,Cancelled
+ORD-2023001043,2023-12-01,Customer_103,North,Shenyang,Running Shoes Pro,Sports,Running,3,143.72,431.16,Bank Transfer,App,Shipped
+ORD-2023001044,2024-07-05,Customer_163,West,Xi'an,AirPods Pro,Electronics,Headphones,5,226.87,1134.35,Alipay,Store,Returned
+ORD-2023001045,2024-10-09,Customer_112,Central,Changsha,Sony WH-1000XM5,Electronics,Headphones,4,382.67,1530.68,Bank Transfer,App,Returned
+ORD-2023001046,2025-04-13,Customer_17,South,Shenzhen,Running Shoes Pro,Sports,Running,1,150.41,150.41,WeChat Pay,App,Shipped
+ORD-2023001047,2023-07-20,Customer_97,East,Hangzhou,AirPods Pro,Electronics,Headphones,2,232.09,464.18,Alipay,Phone,Completed
+ORD-2023001048,2025-09-29,Customer_25,North,Beijing,Standing Desk,Home & Garden,Furniture,3,512.3,1536.9,COD,Store,Returned
+ORD-2023001049,2023-04-09,Customer_44,East,Nanjing,Running Shoes Pro,Sports,Running,5,131.08,655.4,WeChat Pay,Phone,Processing
+ORD-2023001050,2025-04-04,Customer_123,East,Nanjing,Organic Coffee Beans,Food & Beverage,Beverages,5,20.3,101.5,COD,Website,Shipped
+ORD-2023001051,2023-10-20,Customer_97,North,Shenyang,Standing Desk,Home & Garden,Furniture,2,522.59,1045.18,COD,Store,Completed
+ORD-2023001052,2025-07-26,Customer_47,East,Nanjing,Canon EOS R6,Electronics,Cameras,5,2437.71,12188.55,Bank Transfer,Store,Cancelled
+ORD-2023001053,2024-04-13,Customer_79,Central,Zhengzhou,Running Shoes Pro,Sports,Running,4,149.92,599.68,Credit Card,Store,Cancelled
+ORD-2023001054,2024-05-06,Customer_24,East,Shanghai,Data Science 101,Books,Non-Fiction,1,43.64,43.64,Alipay,Third-party,Completed
+ORD-2023001055,2023-01-22,Customer_109,North,Shenyang,Yoga Mat Premium,Sports,Yoga,5,55.31,276.55,COD,Website,Cancelled
+ORD-2023001056,2025-04-10,Customer_4,West,Xi'an,Organic Coffee Beans,Food & Beverage,Beverages,5,21.18,105.9,COD,Website,Completed
+ORD-2023001057,2025-12-17,Customer_176,West,Xi'an,Ceramic Mug Set,Home & Garden,Kitchenware,3,26.77,80.31,COD,App,Returned
+ORD-2023001058,2023-12-25,Customer_20,West,Chengdu,Organic Coffee Beans,Food & Beverage,Beverages,5,22.41,112.05,WeChat Pay,Website,Returned
+ORD-2023001059,2025-02-03,Customer_29,East,Shanghai,Silk Dress,Clothing,Women's Wear,4,124.32,497.28,WeChat Pay,Website,Returned
+ORD-2023001060,2024-03-12,Customer_1,North,Tianjin,Yoga Mat Premium,Sports,Yoga,4,45.97,183.88,COD,Phone,Processing
+ORD-2023001061,2025-09-26,Customer_15,East,Nanjing,Standing Desk,Home & Garden,Furniture,1,564.18,564.18,WeChat Pay,App,Returned
+ORD-2023001062,2024-12-17,Customer_185,West,Chongqing,Yoga Mat Premium,Sports,Yoga,3,43.23,129.69,Alipay,Phone,Shipped
+ORD-2023001063,2025-12-19,Customer_132,North,Beijing,Silk Dress,Clothing,Women's Wear,4,117.29,469.16,Alipay,Phone,Completed
+ORD-2023001064,2025-03-20,Customer_96,West,Chengdu,AirPods Pro,Electronics,Headphones,3,228.54,685.62,WeChat Pay,Store,Cancelled
+ORD-2023001065,2025-06-18,Customer_42,South,Xiamen,Running Shoes Pro,Sports,Running,1,170.87,170.87,Alipay,Store,Cancelled
+ORD-2023001066,2024-08-06,Customer_11,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,2,13.24,26.48,Alipay,Phone,Cancelled
+ORD-2023001067,2024-06-28,Customer_31,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,2,395.94,791.88,Bank Transfer,Phone,Returned
+ORD-2023001068,2025-03-29,Customer_129,West,Xi'an,Dark Chocolate Box,Food & Beverage,Snacks,2,14.2,28.4,Bank Transfer,Website,Completed
+ORD-2023001069,2023-01-28,Customer_197,North,Beijing,AirPods Pro,Electronics,Headphones,2,237.36,474.72,Alipay,App,Shipped
+ORD-2023001070,2024-07-31,Customer_125,West,Xi'an,iPhone 15,Electronics,Smartphones,4,993.06,3972.24,Credit Card,Phone,Processing
+ORD-2023001071,2023-08-24,Customer_68,Central,Wuhan,Standing Desk,Home & Garden,Furniture,2,461.5,923.0,Alipay,Phone,Processing
+ORD-2023001072,2024-01-22,Customer_152,West,Xi'an,ThinkPad X1,Electronics,Laptops,5,1445.63,7228.15,Alipay,Website,Completed
+ORD-2023001073,2023-10-27,Customer_110,South,Guangzhou,Galaxy S24,Electronics,Smartphones,3,1031.26,3093.78,Credit Card,Third-party,Processing
+ORD-2023001074,2024-04-18,Customer_57,North,Beijing,Denim Jacket,Clothing,Men's Wear,4,79.59,318.36,WeChat Pay,Phone,Cancelled
+ORD-2023001075,2024-07-05,Customer_94,North,Shenyang,Silk Dress,Clothing,Women's Wear,1,121.43,121.43,WeChat Pay,Store,Cancelled
+ORD-2023001076,2023-04-17,Customer_170,South,Guangzhou,Galaxy S24,Electronics,Smartphones,2,775.18,1550.36,WeChat Pay,Website,Shipped
+ORD-2023001077,2024-05-31,Customer_126,West,Chongqing,The Great Novel,Books,Fiction,1,24.47,24.47,WeChat Pay,Store,Shipped
+ORD-2023001078,2023-09-24,Customer_85,North,Beijing,Organic Coffee Beans,Food & Beverage,Beverages,1,21.09,21.09,WeChat Pay,Store,Returned
+ORD-2023001079,2024-03-06,Customer_150,Central,Changsha,Dumbbell Set 20kg,Sports,Fitness Equipment,2,93.01,186.02,Bank Transfer,App,Completed
+ORD-2023001080,2024-01-26,Customer_50,South,Xiamen,The Great Novel,Books,Fiction,1,21.55,21.55,Bank Transfer,App,Completed
+ORD-2023001081,2024-02-18,Customer_137,Central,Changsha,Camping Tent 4P,Sports,Outdoor,3,319.21,957.63,Alipay,App,Processing
+ORD-2023001082,2024-12-12,Customer_94,South,Guangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,3,32.41,97.23,Bank Transfer,App,Cancelled
+ORD-2023001083,2025-10-28,Customer_6,North,Tianjin,Silk Dress,Clothing,Women's Wear,5,145.69,728.45,Alipay,Third-party,Shipped
+ORD-2023001084,2024-01-25,Customer_190,South,Guangzhou,Galaxy S24,Electronics,Smartphones,5,780.55,3902.75,Bank Transfer,Phone,Returned
+ORD-2023001085,2025-02-25,Customer_144,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,4,375.25,1501.0,Bank Transfer,Phone,Returned
+ORD-2023001086,2024-03-22,Customer_152,East,Shanghai,Sony WH-1000XM5,Electronics,Headphones,1,313.4,313.4,Credit Card,Third-party,Cancelled
+ORD-2023001087,2024-03-27,Customer_76,Central,Changsha,Standing Desk,Home & Garden,Furniture,3,469.57,1408.71,WeChat Pay,Third-party,Completed
+ORD-2023001088,2023-03-22,Customer_164,South,Shenzhen,Galaxy S24,Electronics,Smartphones,5,828.4,4142.0,Alipay,Store,Processing
+ORD-2023001089,2024-03-06,Customer_137,East,Shanghai,Data Science 101,Books,Non-Fiction,2,57.33,114.66,Credit Card,App,Shipped
+ORD-2023001090,2024-06-24,Customer_185,Central,Zhengzhou,Camping Tent 4P,Sports,Outdoor,1,339.04,339.04,Alipay,Phone,Returned
+ORD-2023001091,2024-03-25,Customer_188,East,Hangzhou,Galaxy S24,Electronics,Smartphones,1,986.36,986.36,WeChat Pay,Website,Shipped
+ORD-2023001092,2025-02-21,Customer_168,North,Shenyang,Organic Coffee Beans,Food & Beverage,Beverages,5,17.63,88.15,WeChat Pay,Third-party,Returned
+ORD-2023001093,2025-03-20,Customer_40,South,Guangzhou,Canon EOS R6,Electronics,Cameras,3,2325.66,6976.98,Bank Transfer,Website,Cancelled
+ORD-2023001094,2025-07-29,Customer_48,East,Shanghai,Wool Scarf,Clothing,Accessories,1,38.95,38.95,Alipay,Website,Returned
+ORD-2023001095,2023-11-30,Customer_46,West,Xi'an,Sony WH-1000XM5,Electronics,Headphones,3,298.85,896.55,Bank Transfer,Third-party,Processing
+ORD-2023001096,2025-04-04,Customer_26,North,Beijing,MacBook Air,Electronics,Laptops,4,1107.37,4429.48,COD,Website,Completed
+ORD-2023001097,2023-01-28,Customer_196,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,4,67.64,270.56,Credit Card,Website,Processing
+ORD-2023001098,2023-01-20,Customer_28,North,Tianjin,AirPods Pro,Electronics,Headphones,5,212.66,1063.3,COD,Store,Completed
+ORD-2023001099,2023-12-01,Customer_79,South,Shenzhen,Wool Scarf,Clothing,Accessories,5,43.59,217.95,WeChat Pay,Phone,Processing
+ORD-2023001100,2023-09-10,Customer_6,South,Shenzhen,Ceramic Mug Set,Home & Garden,Kitchenware,3,30.11,90.33,Credit Card,App,Returned
+ORD-2023001101,2024-04-04,Customer_7,East,Shanghai,Standing Desk,Home & Garden,Furniture,4,445.38,1781.52,Alipay,Phone,Cancelled
+ORD-2023001102,2025-02-26,Customer_176,South,Guangzhou,Data Science 101,Books,Non-Fiction,3,45.88,137.64,Credit Card,Phone,Processing
+ORD-2023001103,2024-11-14,Customer_31,North,Beijing,ThinkPad X1,Electronics,Laptops,3,1339.11,4017.33,WeChat Pay,App,Completed
+ORD-2023001104,2024-01-07,Customer_174,Central,Wuhan,Sony WH-1000XM5,Electronics,Headphones,4,352.19,1408.76,Bank Transfer,Website,Shipped
+ORD-2023001105,2025-10-19,Customer_170,Central,Zhengzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,1,82.89,82.89,WeChat Pay,Store,Completed
+ORD-2023001106,2025-03-10,Customer_115,North,Beijing,Data Science 101,Books,Non-Fiction,2,47.29,94.58,Bank Transfer,App,Completed
+ORD-2023001107,2023-09-19,Customer_47,Central,Zhengzhou,Running Shoes Pro,Sports,Running,2,130.69,261.38,Bank Transfer,Store,Shipped
+ORD-2023001108,2024-11-13,Customer_36,West,Chongqing,Wool Scarf,Clothing,Accessories,4,40.19,160.76,Alipay,Phone,Cancelled
+ORD-2023001109,2024-04-16,Customer_99,Central,Zhengzhou,Ceramic Mug Set,Home & Garden,Kitchenware,5,28.94,144.7,Credit Card,Third-party,Cancelled
+ORD-2023001110,2024-04-26,Customer_93,Central,Changsha,Dark Chocolate Box,Food & Beverage,Snacks,2,15.9,31.8,Credit Card,Website,Completed
+ORD-2023001111,2023-05-03,Customer_90,East,Nanjing,Wool Scarf,Clothing,Accessories,2,43.92,87.84,WeChat Pay,Website,Shipped
+ORD-2023001112,2024-04-04,Customer_15,West,Chengdu,Ceramic Mug Set,Home & Garden,Kitchenware,4,26.76,107.04,Alipay,App,Processing
+ORD-2023001113,2023-08-06,Customer_170,West,Xi'an,iPhone 15,Electronics,Smartphones,4,960.54,3842.16,COD,App,Cancelled
+ORD-2023001114,2023-06-11,Customer_63,Central,Wuhan,iPhone 15,Electronics,Smartphones,2,958.61,1917.22,Credit Card,App,Returned
+ORD-2023001115,2025-12-16,Customer_179,West,Chengdu,Sony WH-1000XM5,Electronics,Headphones,4,374.5,1498.0,WeChat Pay,Phone,Cancelled
+ORD-2023001116,2023-11-16,Customer_16,East,Hangzhou,Data Science 101,Books,Non-Fiction,1,46.79,46.79,Credit Card,Third-party,Processing
+ORD-2023001117,2025-07-19,Customer_142,Central,Wuhan,iPhone 15,Electronics,Smartphones,4,1098.7,4394.8,WeChat Pay,Third-party,Returned
+ORD-2023001118,2024-07-10,Customer_24,East,Nanjing,Canon EOS R6,Electronics,Cameras,4,2822.46,11289.84,COD,Phone,Processing
+ORD-2023001119,2024-01-12,Customer_191,South,Guangzhou,The Great Novel,Books,Fiction,1,22.88,22.88,COD,Third-party,Completed
+ORD-2023001120,2023-12-04,Customer_14,West,Chongqing,Camping Tent 4P,Sports,Outdoor,4,328.35,1313.4,WeChat Pay,Phone,Processing
+ORD-2023001121,2024-11-18,Customer_8,East,Shanghai,ThinkPad X1,Electronics,Laptops,1,1341.38,1341.38,Alipay,Store,Processing
+ORD-2023001122,2024-09-25,Customer_49,Central,Wuhan,MacBook Air,Electronics,Laptops,2,1233.93,2467.86,COD,Website,Completed
+ORD-2023001123,2025-09-17,Customer_12,South,Guangzhou,MacBook Air,Electronics,Laptops,5,1222.31,6111.55,Credit Card,Store,Completed
+ORD-2023001124,2025-10-21,Customer_50,East,Shanghai,Dumbbell Set 20kg,Sports,Fitness Equipment,3,101.25,303.75,WeChat Pay,Phone,Shipped
+ORD-2023001125,2025-10-28,Customer_26,South,Xiamen,Organic Coffee Beans,Food & Beverage,Beverages,1,18.98,18.98,COD,Website,Completed
+ORD-2023001126,2023-03-18,Customer_75,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,5,43.32,216.6,Alipay,Website,Cancelled
+ORD-2023001127,2023-10-16,Customer_197,North,Shenyang,MacBook Air,Electronics,Laptops,2,1337.27,2674.54,Alipay,Third-party,Returned
+ORD-2023001128,2023-09-26,Customer_87,Central,Changsha,Standing Desk,Home & Garden,Furniture,3,491.14,1473.42,WeChat Pay,Store,Returned
+ORD-2023001129,2023-06-03,Customer_40,West,Chengdu,Dark Chocolate Box,Food & Beverage,Snacks,4,13.82,55.28,COD,Phone,Completed
+ORD-2023001130,2023-06-28,Customer_128,North,Beijing,Yoga Mat Premium,Sports,Yoga,5,54.4,272.0,Credit Card,Phone,Shipped
+ORD-2023001131,2025-01-14,Customer_91,South,Guangzhou,Sony WH-1000XM5,Electronics,Headphones,1,325.98,325.98,Credit Card,App,Processing
+ORD-2023001132,2025-06-24,Customer_167,West,Chongqing,Wool Scarf,Clothing,Accessories,3,42.08,126.24,Alipay,App,Returned
+ORD-2023001133,2023-09-22,Customer_113,West,Chengdu,Dumbbell Set 20kg,Sports,Fitness Equipment,3,86.36,259.08,WeChat Pay,Third-party,Returned
+ORD-2023001134,2024-06-22,Customer_175,East,Hangzhou,MacBook Air,Electronics,Laptops,4,1201.14,4804.56,Credit Card,Third-party,Completed
+ORD-2023001135,2023-08-04,Customer_75,South,Xiamen,Ceramic Mug Set,Home & Garden,Kitchenware,1,25.99,25.99,Bank Transfer,Website,Returned
+ORD-2023001136,2023-07-11,Customer_90,West,Chengdu,Canon EOS R6,Electronics,Cameras,4,2779.51,11118.04,Bank Transfer,Phone,Returned
+ORD-2023001137,2025-03-23,Customer_197,West,Chengdu,MacBook Air,Electronics,Laptops,2,1282.37,2564.74,Bank Transfer,Website,Cancelled
+ORD-2023001138,2025-09-22,Customer_55,East,Shanghai,Camping Tent 4P,Sports,Outdoor,3,343.53,1030.59,Bank Transfer,App,Shipped
+ORD-2023001139,2023-10-26,Customer_164,West,Chengdu,Ceramic Mug Set,Home & Garden,Kitchenware,2,32.9,65.8,Alipay,Store,Returned
+ORD-2023001140,2025-01-10,Customer_111,North,Shenyang,Denim Jacket,Clothing,Men's Wear,1,89.34,89.34,Bank Transfer,Website,Completed
+ORD-2023001141,2023-12-27,Customer_22,South,Shenzhen,Organic Coffee Beans,Food & Beverage,Beverages,4,18.61,74.44,Alipay,App,Shipped
+ORD-2023001142,2025-12-10,Customer_55,West,Chengdu,Yoga Mat Premium,Sports,Yoga,4,54.46,217.84,WeChat Pay,Website,Completed
+ORD-2023001143,2024-12-16,Customer_108,North,Tianjin,Camping Tent 4P,Sports,Outdoor,3,268.91,806.73,Bank Transfer,Phone,Returned
+ORD-2023001144,2025-03-07,Customer_3,South,Xiamen,Silk Dress,Clothing,Women's Wear,3,144.97,434.91,COD,Third-party,Processing
+ORD-2023001145,2024-10-25,Customer_171,North,Shenyang,Organic Coffee Beans,Food & Beverage,Beverages,5,20.69,103.45,WeChat Pay,App,Processing
+ORD-2023001146,2025-04-12,Customer_68,West,Chengdu,Wool Scarf,Clothing,Accessories,3,34.48,103.44,COD,App,Cancelled
+ORD-2023001147,2024-03-23,Customer_191,South,Xiamen,Leather Boots,Clothing,Footwear,5,139.8,699.0,Alipay,Phone,Returned
+ORD-2023001148,2024-01-27,Customer_174,South,Xiamen,Denim Jacket,Clothing,Men's Wear,2,75.4,150.8,COD,App,Shipped
+ORD-2023001149,2023-09-13,Customer_180,East,Shanghai,Yoga Mat Premium,Sports,Yoga,3,49.03,147.09,Bank Transfer,Phone,Cancelled
+ORD-2023001150,2024-11-18,Customer_30,West,Chongqing,Dumbbell Set 20kg,Sports,Fitness Equipment,5,87.02,435.1,Alipay,Phone,Cancelled
+ORD-2023001151,2025-06-11,Customer_98,East,Shanghai,Ceramic Mug Set,Home & Garden,Kitchenware,5,26.07,130.35,WeChat Pay,Phone,Shipped
+ORD-2023001152,2023-02-03,Customer_158,Central,Wuhan,MacBook Air,Electronics,Laptops,1,1051.39,1051.39,Bank Transfer,App,Cancelled
+ORD-2023001153,2023-03-08,Customer_171,Central,Changsha,ThinkPad X1,Electronics,Laptops,4,1400.41,5601.64,WeChat Pay,Phone,Processing
+ORD-2023001154,2025-08-19,Customer_32,South,Guangzhou,Ceramic Mug Set,Home & Garden,Kitchenware,4,25.65,102.6,WeChat Pay,Phone,Cancelled
+ORD-2023001155,2024-07-02,Customer_169,West,Chengdu,Dumbbell Set 20kg,Sports,Fitness Equipment,2,89.2,178.4,WeChat Pay,Store,Cancelled
+ORD-2023001156,2023-11-11,Customer_96,South,Shenzhen,Silk Dress,Clothing,Women's Wear,1,110.25,110.25,COD,Third-party,Shipped
+ORD-2023001157,2025-03-12,Customer_50,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,4,82.11,328.44,COD,Phone,Completed
+ORD-2023001158,2023-12-22,Customer_104,Central,Zhengzhou,AirPods Pro,Electronics,Headphones,4,284.66,1138.64,WeChat Pay,Third-party,Processing
+ORD-2023001159,2025-03-13,Customer_196,West,Chengdu,ThinkPad X1,Electronics,Laptops,2,1400.79,2801.58,WeChat Pay,Third-party,Processing
+ORD-2023001160,2023-01-24,Customer_161,East,Shanghai,MacBook Air,Electronics,Laptops,1,1028.37,1028.37,COD,Website,Completed
+ORD-2023001161,2023-02-21,Customer_191,Central,Changsha,Ceramic Mug Set,Home & Garden,Kitchenware,1,29.62,29.62,Alipay,Phone,Shipped
+ORD-2023001162,2024-05-17,Customer_186,South,Shenzhen,Data Science 101,Books,Non-Fiction,2,46.94,93.88,Bank Transfer,Store,Completed
+ORD-2023001163,2023-07-31,Customer_29,East,Shanghai,AirPods Pro,Electronics,Headphones,1,259.34,259.34,Bank Transfer,Third-party,Completed
+ORD-2023001164,2023-07-10,Customer_20,North,Beijing,Yoga Mat Premium,Sports,Yoga,3,54.8,164.4,Bank Transfer,Store,Processing
+ORD-2023001165,2025-09-23,Customer_161,West,Chengdu,Wool Scarf,Clothing,Accessories,1,37.99,37.99,Credit Card,Website,Cancelled
+ORD-2023001166,2024-01-04,Customer_77,West,Chongqing,Data Science 101,Books,Non-Fiction,4,54.62,218.48,Credit Card,Website,Returned
+ORD-2023001167,2025-09-18,Customer_158,Central,Wuhan,ThinkPad X1,Electronics,Laptops,3,1606.22,4818.66,COD,Third-party,Completed
+ORD-2023001168,2023-03-02,Customer_138,South,Xiamen,Running Shoes Pro,Sports,Running,1,135.27,135.27,Credit Card,Third-party,Returned
+ORD-2023001169,2023-03-02,Customer_84,South,Shenzhen,Dumbbell Set 20kg,Sports,Fitness Equipment,1,99.64,99.64,Alipay,Website,Completed
+ORD-2023001170,2023-07-08,Customer_90,South,Guangzhou,Running Shoes Pro,Sports,Running,4,135.56,542.24,COD,Store,Cancelled
+ORD-2023001171,2024-05-27,Customer_45,West,Chongqing,Standing Desk,Home & Garden,Furniture,4,562.23,2248.92,Alipay,Store,Cancelled
+ORD-2023001172,2024-02-26,Customer_185,North,Shenyang,LED Floor Lamp,Home & Garden,Lighting,3,80.07,240.21,Bank Transfer,Phone,Cancelled
+ORD-2023001173,2025-02-23,Customer_110,West,Xi'an,Running Shoes Pro,Sports,Running,3,154.49,463.47,Alipay,Third-party,Shipped
+ORD-2023001174,2023-03-11,Customer_131,East,Nanjing,MacBook Air,Electronics,Laptops,4,1079.31,4317.24,WeChat Pay,Third-party,Cancelled
+ORD-2023001175,2023-03-03,Customer_30,East,Nanjing,Data Science 101,Books,Non-Fiction,5,47.77,238.85,Alipay,Store,Cancelled
+ORD-2023001176,2025-01-31,Customer_96,South,Guangzhou,Canon EOS R6,Electronics,Cameras,1,2285.47,2285.47,Alipay,Store,Completed
+ORD-2023001177,2024-03-13,Customer_120,North,Tianjin,Dark Chocolate Box,Food & Beverage,Snacks,1,15.96,15.96,COD,Store,Processing
+ORD-2023001178,2025-12-15,Customer_56,Central,Wuhan,Denim Jacket,Clothing,Men's Wear,3,81.41,244.23,Credit Card,Third-party,Shipped
+ORD-2023001179,2025-05-13,Customer_175,Central,Changsha,MacBook Air,Electronics,Laptops,5,1340.24,6701.2,Bank Transfer,Store,Shipped
+ORD-2023001180,2024-07-16,Customer_108,South,Shenzhen,Galaxy S24,Electronics,Smartphones,4,898.64,3594.56,Credit Card,App,Cancelled
+ORD-2023001181,2023-02-13,Customer_73,South,Xiamen,Camping Tent 4P,Sports,Outdoor,5,288.49,1442.45,Credit Card,Third-party,Completed
+ORD-2023001182,2025-12-28,Customer_136,West,Chongqing,AirPods Pro,Electronics,Headphones,4,214.41,857.64,Credit Card,Store,Completed
+ORD-2023001183,2024-07-16,Customer_82,North,Tianjin,ThinkPad X1,Electronics,Laptops,4,1492.7,5970.8,WeChat Pay,Phone,Completed
+ORD-2023001184,2024-09-03,Customer_179,Central,Zhengzhou,Wool Scarf,Clothing,Accessories,5,33.7,168.5,Bank Transfer,Phone,Completed
+ORD-2023001185,2023-01-22,Customer_36,East,Nanjing,ThinkPad X1,Electronics,Laptops,1,1283.17,1283.17,Credit Card,Store,Cancelled
+ORD-2023001186,2025-01-25,Customer_138,South,Shenzhen,MacBook Air,Electronics,Laptops,2,1279.61,2559.22,Credit Card,App,Shipped
+ORD-2023001187,2024-11-05,Customer_177,North,Beijing,Galaxy S24,Electronics,Smartphones,3,784.39,2353.17,COD,Phone,Shipped
+ORD-2023001188,2024-10-15,Customer_38,South,Shenzhen,LED Floor Lamp,Home & Garden,Lighting,4,78.85,315.4,COD,Phone,Cancelled
+ORD-2023001189,2025-09-30,Customer_72,North,Shenyang,Standing Desk,Home & Garden,Furniture,2,510.66,1021.32,WeChat Pay,Phone,Processing
+ORD-2023001190,2024-05-11,Customer_169,North,Tianjin,Yoga Mat Premium,Sports,Yoga,1,46.84,46.84,Alipay,App,Completed
+ORD-2023001191,2025-08-16,Customer_99,West,Chengdu,iPad Air,Electronics,Tablets,1,629.64,629.64,Alipay,Phone,Completed
+ORD-2023001192,2024-10-03,Customer_195,East,Shanghai,LED Floor Lamp,Home & Garden,Lighting,5,89.37,446.85,WeChat Pay,Phone,Processing
+ORD-2023001193,2025-02-28,Customer_116,Central,Wuhan,AirPods Pro,Electronics,Headphones,2,280.13,560.26,COD,Third-party,Processing
+ORD-2023001194,2024-09-21,Customer_148,West,Chengdu,MacBook Air,Electronics,Laptops,3,1171.34,3514.02,Credit Card,Website,Cancelled
+ORD-2023001195,2025-08-01,Customer_48,North,Shenyang,ThinkPad X1,Electronics,Laptops,2,1196.11,2392.22,WeChat Pay,App,Cancelled
+ORD-2023001196,2023-06-22,Customer_91,Central,Zhengzhou,Dumbbell Set 20kg,Sports,Fitness Equipment,3,78.81,236.43,Bank Transfer,Website,Processing
+ORD-2023001197,2025-06-22,Customer_70,West,Xi'an,Silk Dress,Clothing,Women's Wear,5,122.57,612.85,WeChat Pay,App,Completed
+ORD-2023001198,2025-04-04,Customer_46,West,Xi'an,Silk Dress,Clothing,Women's Wear,2,121.03,242.06,COD,Store,Returned
+ORD-2023001199,2023-04-13,Customer_166,Central,Zhengzhou,Standing Desk,Home & Garden,Furniture,4,440.49,1761.96,Alipay,App,Processing
+ORD-2023001200,2023-05-15,Customer_137,North,Beijing,Galaxy S24,Electronics,Smartphones,5,835.94,4179.7,Credit Card,Store,Processing

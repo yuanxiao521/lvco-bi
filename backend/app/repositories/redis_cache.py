@@ -1,0 +1,113 @@
+"""Redis cache repository implementation."""
+from __future__ import annotations
+
+import logging
+
+from redis import Redis, ConnectionError as RedisConnectionError
+
+from app.config import settings
+
+logger = logging.getLogger("lvco.repositories.redis_cache")
+
+
+class RedisCacheRepository:
+    """Redis 缓存实现。"""
+
+    KEY_PREFIX = "lvco:"
+
+    def __init__(self, redis_client: Redis | None = None) -> None:
+        if redis_client is not None:
+            self._redis = redis_client
+        else:
+            self._redis = self._connect()
+
+    def _connect(self) -> Redis | None:
+        try:
+            r = Redis.from_url(
+                settings.redis_url,
+                socket_connect_timeout=3,
+                decode_responses=True,
+            )
+            r.ping()
+            logger.info("redis_connected url=%s", settings.redis_url)
+            return r
+        except (RedisConnectionError, Exception) as e:
+            logger.warning("redis_unavailable error=%s", e)
+            return None
+
+    def _full_key(self, key: str) -> str:
+        return f"{self.KEY_PREFIX}{key}"
+
+    def get(self, key: str) -> str | None:
+        if not self._redis:
+            return None
+        try:
+            return self._redis.get(self._full_key(key))
+        except Exception as e:
+            logger.warning("redis_get_failed key=%s error=%s", key, e)
+            return None
+
+    def set(self, key: str, value: str, ttl: int | None = None) -> None:
+        if not self._redis:
+            return
+        expire = ttl if ttl is not None else settings.redis_ttl
+        try:
+            self._redis.setex(self._full_key(key), expire, value)
+        except Exception as e:
+            logger.warning("redis_set_failed key=%s error=%s", key, e)
+
+    def set_nx(self, key: str, value: str, ttl: int | None = None) -> bool | None:
+        """SET NX EX：仅在 key 不存在时写入（并发锁的原子抢锁）。
+
+        Returns:
+            True 抢到 / False 已被占用 / None Redis 不可用（由调用方决定降级策略）
+        """
+        if not self._redis:
+            return None
+        expire = ttl if ttl is not None else settings.redis_ttl
+        try:
+            return bool(self._redis.set(self._full_key(key), value, nx=True, ex=expire))
+        except Exception as e:
+            logger.warning("redis_set_nx_failed key=%s error=%s", key, e)
+            return None
+
+    def delete(self, key: str) -> None:
+        if not self._redis:
+            return
+        try:
+            self._redis.delete(self._full_key(key))
+        except Exception as e:
+            logger.warning("redis_delete_failed key=%s error=%s", key, e)
+
+    def delete_by_prefix(self, prefix: str) -> int:
+        """按前缀清除 Redis 缓存（数据源变更/手动刷新时用）。
+
+        使用 SCAN 避免 KEYS 阻塞。
+        Returns:
+            实际删除的 key 数。
+        """
+        if not self._redis:
+            return 0
+        full_prefix = self._full_key(prefix)
+        deleted = 0
+        try:
+            for batch in self._redis.scan_iter(match=f"{full_prefix}*", count=200):
+                # batch 是 key 列表
+                if isinstance(batch, (list, tuple)):
+                    n = self._redis.delete(*batch)
+                    deleted += int(n) if n else 0
+                else:
+                    n = self._redis.delete(batch)
+                    deleted += int(n) if n else 0
+        except Exception as e:
+            logger.warning("redis_delete_by_prefix_failed prefix=%s error=%s", prefix, e)
+        return deleted
+
+    def exists(self, key: str) -> bool:
+        if not self._redis:
+            return False
+        try:
+            return bool(self._redis.exists(self._full_key(key)))
+        except Exception as e:
+            logger.warning("redis_exists_failed key=%s error=%s", key, e)
+            return False
