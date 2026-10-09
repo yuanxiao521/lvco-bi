@@ -89,11 +89,13 @@ class Settings(BaseSettings):
     # 开关用于 AB 实验：True 给执行 LLM 补全局视野，False 保持纯单步工单
     AGENT_PLAN_INJECTION_ENABLED: bool = True
 
-    # 主导 Agent（LeadAgent）Feature Flag
-    # True: 两个入口（/chat/stream、/canvas/chat）先经 LeadAgent 做意图识别 → 决策 → 调度，
-    #       编排器/ReAct 降级为「被调用工具」，不再直接对用户说话
-    # False: 保持旧双路径（路由分类器 → simple 走 ReAct / complex 走 AgentOrchestrator）
-    LEAD_AGENT_ENABLED: bool = False
+    # 主导 Agent（LeadAgent）Feature Flag —— 【已退役】
+    # 主导 Agent 现在是唯一执行路径（旧双路径已整体移除），此字段不再被任何代码读取。
+    # 之所以保留而非删除：Settings 的 extra 策略是 forbid，直接删字段会让 .env / 部署环境里
+    # 残留的 LEAD_AGENT_ENABLED 变成"多余输入"，导致服务启动直接失败。彻底移除需先同步
+    # 清理 .env 与部署配置。
+    LEAD_AGENT_ENABLED: bool = True
+
     # 意图识别超时（秒）：超时降级为规则意图，不阻塞主链路。
     # 8s 实测偏紧（真机探针一轮合并调用 2.2s 正常，但深思考模型尖峰可到 9-10s），
     # 超时降级的代价是关键词兜底误判意图（"清空画布"被判 chat → 答非所问），故放宽。
