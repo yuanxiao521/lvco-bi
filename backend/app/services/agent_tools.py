@@ -4,7 +4,6 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from enum import Enum
 
 from app.config import settings
 from app.core.duckdb_client import duckdb_client
@@ -45,90 +44,16 @@ def _resolve_time_filters(raw_filters) -> list:
     return apply_to_filters(raw_filters)
 
 
-# ==================== 对话阶段状态机 ====================
+# ==================== 工具可见性治理 ====================
 
-class ConversationPhase(str, Enum):
-    """对话阶段枚举：控制每个阶段可用的工具，防止跨阶段调用。
-
-    枚举值：
-        SELECTING：选数据源阶段，只暴露 list_datasources 工具
-        ANALYZING：查数据阶段，暴露 query_sql 和 list_datasources（查询失败时自纠错需要）
-        GENERATING：生图表阶段，只暴露 render_chart 工具
-        REPORTING：出报告阶段，无工具可用，纯文本输出
-    """
-    SELECTING = "selecting"      # 选数据源 → 只暴露 list_datasources
-    ANALYZING = "analyzing"      # 查数据   → 只暴露 query_sql
-    GENERATING = "generating"    # 生图表   → 只暴露 render_chart
-    REPORTING = "reporting"      # 出报告   → 无工具，纯文本
-
-
-# 各阶段可用工具集合（按职责映射，提升 Agent 协作能力）
-# SELECTING:  只暴露数据源浏览
-# ANALYZING:  查数据(list_fields取列 + query/query_engine) + 数据质量 + 洞察 + 清洗建议
-# GENERATING: 图表生成(render) + 图表自校验(validate) + 类型推荐(recommend)
-# REPORTING:  报告润色
 # 不暴露给 Agent 的工具（集中清单）：属 UI 交互能力或未启用能力——
 # 注册表保留（前端按钮/独立端点仍可用、可一行恢复），但一律不进 LLM schema、
-# 不进阶段白名单、不进编排器/执行器白名单。
+# 不进入口白名单、不进编排器/执行器白名单。
 # 判据：能力在 UI 已有调用路径 + agent 路径实测 0 调用。见《工具审计（20 工具）》。
 AGENT_HIDDEN_TOOLS = frozenset({
     "insight", "clean_suggest", "polish_text", "recommend_charts",
     "validate_chart", "data_quality",
 })
-
-_PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
-    ConversationPhase.SELECTING: {"list_datasources", "list_metrics"},
-    ConversationPhase.ANALYZING: {
-        "list_datasources",
-        "list_fields",
-        "list_metrics",
-        "query_sql",
-        "query_engine",
-        "stats_analyzer",
-        "add_chart_block",
-        "add_text_block",
-        "update_chart_block",
-        "remove_block",
-        "clear_canvas",
-        "arrange_layout",
-        "get_canvas_layout",
-    },
-    ConversationPhase.GENERATING: {
-        "render_chart",
-        "add_chart_block",
-        "add_text_block",
-        "update_chart_block",
-        "remove_block",
-        "clear_canvas",
-        "arrange_layout",
-        "get_canvas_layout",
-    },
-    ConversationPhase.REPORTING: {
-        "add_text_block",
-        "add_chart_block",
-        "update_chart_block",
-        "remove_block",
-        "clear_canvas",
-        "get_canvas_layout",
-    },
-}
-
-
-def get_tools_for_phase(phase: ConversationPhase, all_schemas: list[dict]) -> list[dict]:
-    """根据当前对话阶段过滤可用工具。
-
-    根据传入的对话阶段（phase），从全部工具 schema 列表中筛选出当前阶段允许使用的工具。
-
-    参数：
-        phase: 当前对话阶段（ConversationPhase 枚举值）
-        all_schemas: 全部工具 schema 列表，每项包含 function name 等信息
-
-    返回：
-        过滤后的工具 schema 列表；REPORTING 阶段仅保留 polish_text
-    """
-    allowed = _PHASE_TOOLS.get(phase, set())
-    return [s for s in all_schemas if s["function"]["name"] in allowed]
-
 
 # ==================== AI 推荐图表 ECharts option 构建 ====================
 # 镜像前端 buildMultiMeasureOption（echartsUtils.ts），保证双Y轴/图例/水平条形等

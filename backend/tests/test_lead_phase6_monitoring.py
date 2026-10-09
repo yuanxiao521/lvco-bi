@@ -350,21 +350,6 @@ def test_get_canvas_layout_registered_in_whitelist_and_registry():
     assert "canvas_id" in schemas["function"]["parameters"]["properties"]
 
 
-def test_canvas_tools_are_reachable_in_every_work_phase():
-    """画布落块/感知类工具必须至少在一个对话阶段可用。
-
-    回归：get_canvas_layout 曾不在 _PHASE_TOOLS 任何阶段里，画布入口走 react 内核时
-    必被"当前阶段不允许调用工具"拦下 → 连续两次无效调用触发强制收尾，白跑一轮（blocks_added=0）。
-    """
-    from app.services.agent_tools import _PHASE_TOOLS
-
-    phase_tool_union: set[str] = set()
-    for tools in _PHASE_TOOLS.values():
-        phase_tool_union |= tools
-    missing = sorted(CANVAS_TOOL_NAMES - phase_tool_union)
-    assert not missing, f"以下画布工具在任何阶段都不可用（会被 react 内核拦掉）: {missing}"
-
-
 def test_canvas_layout_labels_cover_all_blocks():
     """编号覆盖所有块（不只图表）：前端角标与 LLM 上下文必须逐块对齐。
 

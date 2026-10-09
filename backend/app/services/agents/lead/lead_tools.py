@@ -733,15 +733,10 @@ async def run_analysis(
                 try:
                     react = ReactGraphAgent(llm, _build_react_tools(extra_plannable_tools),
                                     agent_trace=trace, is_canvas=is_canvas)
-                    # 画布入口（含简单任务）强制 analyzing：该阶段工具集已含 add_text_block/
-                    # add_chart_block 等落块工具；否则画布简单任务（无 datasource_id）会落入
-                    # selecting 阶段只暴露 list_datasources，调不了落块工具。
-                    initial_phase = "analyzing" if (args.datasource_id or args.entry == "canvas") else "selecting"
                     await react.run(
                         messages=messages,
                         user_id=user_id,
                         db_session=db_session,
-                        initial_phase=initial_phase,
                         emit=_emit,
                         canvas_id=canvas_id,
                     )

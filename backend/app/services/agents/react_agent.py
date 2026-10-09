@@ -1,15 +1,17 @@
 """ReactGraphAgent：ReAct 循环的图化实现（LangGraph 模式，零依赖）。
 
 图结构：
-    reason（LLM 推理：流式调用 + 按 phase 过滤工具 schema）
+    reason（LLM 推理：流式调用；工具集由调用方给定的入口白名单决定，
+            仅当查询次数达上限时动态屏蔽查询工具）
       ├─ 条件: 有 tool_calls 且未超迭代上限 → execute_tools
       └─ 条件: 无 tool_calls（最终文本回复/无输出）→ done
-    execute_tools（执行工具：emit 事件 + 熔断 + phase 流转 + follow_up 注入）
+    execute_tools（执行工具：emit 事件 + 熔断 + 查询计数 + follow_up 注入）
       ├─ 条件: 熔断触发 → done
       └─ 无条件 → reason（循环边）
     done 为终结点
 
-与 agent_stream 原 ReAct 循环行为等价，但以图引擎表达（节点/边/条件路由/共享 State）。
+工具可见性只由两处决定：① 调用方传入的 all_tools（入口白名单）；
+② 查询次数达 MAX_QUERY_CALLS 后动态屏蔽查询工具。已无"对话阶段"概念。
 """
 import asyncio
 import json
@@ -18,11 +20,6 @@ import re
 from typing import Any
 
 from app.services.agents.graph import Graph
-from app.services.agent_tools import (
-    ConversationPhase,
-    _PHASE_TOOLS,
-    get_tools_for_phase,
-)
 from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
 from app.services.context_utils import compact_result_json
 
@@ -35,9 +32,8 @@ MAX_CONSECUTIVE_FAILURES = 5  # 连续查询失败熔断阈值
 MAX_PARALLEL_TOOL_CALLS = 3   # 单轮并发工具调用上限（防止 LLM 一次性并发大量查询）
 MAX_QUERY_CALLS = 5           # 单任务累计查询（query_sql/query_engine）次数上限，超限强制收尾出报告
 
-# 阶段流转触发工具（与 agent_stream 原逻辑一致）
-_ANALYZING_TRIGGERS = ("query_sql", "query_engine")
-_GENERATING_TRIGGERS = ("render_chart",)
+# 查询类工具：累计调用次数达 MAX_QUERY_CALLS 后动态屏蔽，防止无限逐项查询烧 token
+_QUERY_TOOLS = ("query_sql", "query_engine")
 
 
 class ReactGraphAgent:
@@ -60,12 +56,25 @@ class ReactGraphAgent:
         g.set_finish_point("done")
         return g
 
+    def _tools_for_state(self, state: dict) -> list[dict]:
+        """当前可用工具 schema：入口白名单；查询次数达上限后屏蔽查询工具。
+
+        取代旧的 phase 收窄——phase 会在"第一次查询成功"后就把查询工具收走，
+        与"一次分析常需多次查询"冲突（旧代码因此还要额外打补丁容忍越权调用）。
+        """
+        if state.get("query_call_count", 0) >= MAX_QUERY_CALLS:
+            return [
+                t for t in self.all_tools
+                if isinstance(t, dict) and isinstance(t.get("function"), dict)
+                and t["function"].get("name") not in _QUERY_TOOLS
+            ]
+        return self.all_tools
+
     async def run(
         self,
         messages: list[dict],
         user_id: str,
         db_session,
-        initial_phase: str = "selecting",
         emit=None,
         canvas_id: str = "",
     ) -> dict:
@@ -86,7 +95,6 @@ class ReactGraphAgent:
                 "messages": messages,
                 "user_id": user_id,
                 "canvas_id": canvas_id,
-                "phase": ConversationPhase(initial_phase) if isinstance(initial_phase, str) else initial_phase,
                 "executed_tool_names": [],
                 "consecutive_query_failures": 0,
                 "query_call_count": 0,
@@ -104,7 +112,6 @@ class ReactGraphAgent:
                 "executed_tool_names": final_state.get("executed_tool_names") or [],
                 "consecutive_query_failures": final_state.get("consecutive_query_failures", 0),
                 "done_reason": final_state.get("done_reason") or "final_answer",
-                "final_phase": getattr(final_state.get("phase"), "value", str(final_state.get("phase", ""))),
             })
         return final_state
 
@@ -112,9 +119,8 @@ class ReactGraphAgent:
     async def _reason_node(self, state: dict, **shared) -> dict:
         emit = shared["emit"]
         messages = state["messages"]
-        phase = state["phase"]
         iteration = state.get("iteration", 0)
-        phase_tools = get_tools_for_phase(phase, self.all_tools)
+        tools = self._tools_for_state(state)
 
         # 观测：agent_trace 存在时走 Langfuse generation（同 Lead/Planner 口径，
         # 带真实模型与 token；无 trace 退化为纯本地 span）。
@@ -131,7 +137,7 @@ class ReactGraphAgent:
             llm_span = cm.__enter__()
             llm_span.input = {
                 "iteration": iteration,
-                "phase": getattr(phase, "value", phase),
+                "tools_count": len(tools),
                 "messages_count": len(messages),
             }
         else:
@@ -142,7 +148,7 @@ class ReactGraphAgent:
         has_text_output = False
         try:
             async for event in self.llm.stream_chat_with_tools(
-                messages, phase_tools, temperature=0.3, max_tokens=3000,
+                messages, tools, temperature=0.3, max_tokens=3000,
             ):
                 if event["type"] == "text":
                     has_text_output = True
@@ -245,7 +251,6 @@ class ReactGraphAgent:
         user_id = state["user_id"]
         messages = state["messages"]
         tool_calls = state.get("tool_calls") or []
-        phase = state["phase"]
         executed_tool_names = list(state.get("executed_tool_names") or [])
         consecutive_query_failures = state.get("consecutive_query_failures", 0)
         query_call_count = state.get("query_call_count", 0)
@@ -264,14 +269,16 @@ class ReactGraphAgent:
                 f"本轮执行 {MAX_PARALLEL_TOOL_CALLS} 个，顺延 {len(dropped_tool_calls)} 个"
             )
 
-        # 执行层白名单：LLM 可能无视 schema 约束编造当前阶段外的工具调用
-        # （如 GENERATING 阶段仍返回 query_sql）。schema 层的过滤只影响 LLM 可见性，
-        # 执行层必须在执行前再校验一次，命中白名单外的工具直接剔除。
-        phase_allowed = _PHASE_TOOLS.get(phase, set())
-        blocked = [tc.get("name") for tc in tool_calls if tc.get("name") not in phase_allowed]
+        # 执行层白名单：LLM 可能无视 schema 约束编造工具调用（工具名不存在，或查询
+        # 已超限仍凭记忆重提 query）。schema 层过滤只影响可见性，执行层必须再校验一次。
+        allowed_names = {
+            t["function"]["name"] for t in self._tools_for_state(state)
+            if isinstance(t, dict) and isinstance(t.get("function"), dict)
+        }
+        blocked = [tc.get("name") for tc in tool_calls if tc.get("name") not in allowed_names]
         if blocked:
-            logger.warning(f"[react] blocked_tools_out_of_phase phase={getattr(phase, 'value', phase)} blocked={blocked}")
-        tool_calls = [tc for tc in tool_calls if tc.get("name") in phase_allowed]
+            logger.warning(f"[react] blocked_tools_not_allowed blocked={blocked}")
+        tool_calls = [tc for tc in tool_calls if tc.get("name") in allowed_names]
         if not tool_calls:
             # 本轮全部调用都不属于当前阶段 → 不执行任何工具：
             # 先补全 assistant tool_call + tool 拒绝结果（保证消息配对），
@@ -284,7 +291,7 @@ class ReactGraphAgent:
                     "role": "tool",
                     "tool_call_id": tc.get("id", f"call_{len(messages)}"),
                     "content": json.dumps(
-                        {"error": f"工具 {tc.get('name')} 在当前阶段不可用"},
+                        {"error": f"工具 {tc.get('name')} 不可用（不在本次可用工具列表中）"},
                         ensure_ascii=False,
                     ),
                 })
@@ -298,7 +305,6 @@ class ReactGraphAgent:
                     await emit({"type": "text", "content": "很抱歉，工具执行后未能生成有效的分析结果，请换一种问法重试。"})
                 return {
                     "messages": messages,
-                    "phase": phase,
                     "executed_tool_names": executed_tool_names,
                     "consecutive_query_failures": consecutive_query_failures,
                     "query_call_count": query_call_count,
@@ -308,15 +314,13 @@ class ReactGraphAgent:
             messages.append({
                 "role": "system",
                 "content": (
-                    f"当前阶段不允许调用工具 {blocked}。"
-                    "请：1) 若已完成数据查询，直接输出中文分析报告并调用 render_chart 生成图表；"
-                    "2) 不要重复调用查询工具。"
+                    f"以下工具本次不可用：{blocked}。"
+                    "请只使用本次提供的工具；若数据已经足够，直接输出中文分析报告，不要重复查询。"
                 ),
             })
-            logger.info(f"[react] no_allowed_tools phase={getattr(phase, 'value', phase)} 本轮无有效工具 streak={invalid_tool_streak}")
+            logger.info(f"[react] no_allowed_tools 本轮无有效工具 streak={invalid_tool_streak}")
             return {
                 "messages": messages,
-                "phase": phase,
                 "executed_tool_names": executed_tool_names,
                 "consecutive_query_failures": consecutive_query_failures,
                 "query_call_count": query_call_count,
@@ -410,37 +414,19 @@ class ReactGraphAgent:
             )})
             return {
                 "messages": messages,
-                "phase": phase,
                 "executed_tool_names": executed_tool_names,
                 "consecutive_query_failures": consecutive_query_failures,
                 "done_reason": "circuit_breaker",
             }
 
-        # Phase 状态流转（与 agent_stream 原逻辑一致）
-        new_phase = phase
-        if phase == ConversationPhase.SELECTING and not has_error:
-            if "list_datasources" in executed_tool_names:
-                new_phase = ConversationPhase.ANALYZING
-                logger.info("[react] phase_transition SELECTING→ANALYZING")
-        elif phase == ConversationPhase.ANALYZING and not has_error:
-            if any(n in _ANALYZING_TRIGGERS for n in executed_tool_names):
-                new_phase = ConversationPhase.GENERATING
-                logger.info("[react] phase_transition ANALYZING→GENERATING")
-        elif phase == ConversationPhase.GENERATING:
-            if any(n in _GENERATING_TRIGGERS for n in executed_tool_names):
-                new_phase = ConversationPhase.REPORTING
-                logger.info("[react] phase_transition GENERATING→REPORTING")
-
-        # 累计查询次数上限：query_sql/query_engine 调用 ≥ MAX_QUERY_CALLS 后，
-        # 强制收走查询工具（流转到 GENERATING）并提示开始汇总，防止无限逐项查询烧 token。
-        # 判定不再依赖 phase（可能已流转 GENERATING，但 LLM 绕过滤限制仍在尝试查询）。
-        query_used = sum(1 for n in tool_calls if n in _ANALYZING_TRIGGERS)
+        # 累计查询次数上限：query_sql/query_engine 累计达 MAX_QUERY_CALLS 后，
+        # 由 _tools_for_state 在后续轮次屏蔽查询工具，并在此提示 LLM 开始汇总，
+        # 防止无限逐项查询烧 token。
+        query_used = sum(1 for n in tool_calls if n in _QUERY_TOOLS)
         query_call_count += query_used
         query_exhausted = query_call_count >= MAX_QUERY_CALLS and query_used > 0
-        if query_exhausted and new_phase == ConversationPhase.ANALYZING:
-            new_phase = ConversationPhase.GENERATING
-            logger.info(f"[react] query_limit_reached count={query_call_count} force_generating")
         if query_exhausted:
+            logger.info(f"[react] query_limit_reached count={query_call_count}")
             await emit({"type": "status", "message": f"已到达本任务查询上限（{MAX_QUERY_CALLS} 次），开始汇总出报告"})
 
         # follow_up 注入：引导 LLM 下一轮输出（不重复塞工具结果，role:tool 已携带完整数据）
@@ -460,7 +446,6 @@ class ReactGraphAgent:
 
         return {
             "messages": messages,
-            "phase": new_phase,
             "executed_tool_names": executed_tool_names,
             "consecutive_query_failures": consecutive_query_failures,
             "query_call_count": query_call_count,
@@ -471,8 +456,8 @@ class ReactGraphAgent:
         return "done" if state.get("done_reason") in ("circuit_breaker", "invalid_tool_wrapup") else "loop"
 
     # ── follow_up 构建：只告诉 LLM"要干什么"，不出现工具名 ──
-    # 工具由当前阶段 tools 参数动态提供，硬编码工具名会让 LLM 在阶段收走工具后
-    # 仍"凭记忆"编造调用（如 GENERATING 阶段伪造 query_sql）。
+    # 工具由调用方的 all_tools 提供（查询超限时会动态屏蔽），硬编码工具名会让
+    # LLM 在工具被屏蔽后仍"凭记忆"编造调用。
     def _build_follow_up(self, executed_tool_names: list[str], has_error: bool, consecutive_query_failures: int) -> str:
         # 画布入口：最终交付是"在画布上落块"，不是纯文本回复。
         # 明确引导落块、远离纯文本图（render_chart），并把"查→落块→叙事"变成显式一步。
