@@ -26,18 +26,11 @@ from app.services.agents.lead.lead_decider import (
     decide_action,
     decide_action_merged,
 )
+from app.services.agents.lead.lead_dispatch import run_worker
 from app.services.agents.lead.lead_intent import IntentResult, IntentType
+from app.services.agents.lead.lead_worker import resolve_worker
 from app.services.lead_session_state import lead_session_state, read_phase
-from app.services.agents.lead.lead_perception import StepProgress, render_progress_text
-from app.services.agents.lead.lead_tools import (
-    RunAnalysisArgs,
-    RunAnalysisResult,
-    _load_available_datasources,
-    _load_canvas_narrative,
-    _load_canvas_snapshot,
-    assess_subtask,
-    run_analysis,
-)
+from app.services.agents.lead.lead_tools import _load_available_datasources
 
 logger = logging.getLogger("lvco.lead.agent")
 
@@ -552,8 +545,17 @@ class LeadAgent:
                     break
                 if decision.action == ActionType.CALL_ANALYSIS:
                     had_analysis = True
-                    async for ev in self._run_analysis_branch(
-                        user_msg, decision, ctx, db_session, available_datasources,
+                    # 派发目标由「入口 × 复杂度」表解析（lead_worker）；显式 constraints.mode 优先
+                    worker = resolve_worker(
+                        ctx.entry,
+                        getattr(decision, "complexity", "complex"),
+                        ((decision.tool_args or {}).get("constraints") or {}).get("mode"),
+                    )
+                    async for ev in run_worker(
+                        user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
+                        db_session=db_session, available_datasources=available_datasources,
+                        llm=self.llm, memo=self._memo, memo_lock=self._memo_lock,
+                        extra_plannable_tools=self.extra_plannable_tools,
                         round_idx=rnd, degradation=degradation, trace=trace,
                     ):
                         yield ev
@@ -603,245 +605,11 @@ class LeadAgent:
                 except Exception:  # noqa: BLE001
                     pass
 
-    # ── 执行器选择（确定性，不经额外 LLM 判断，省一次调用）──
-    async def _resolve_subtask_mode(
-        self,
-        entry: str,
-        decision: Decision,
-        constraints: dict,
-    ) -> str:
-        """确定 run_analysis 的执行内核 mode。
 
-        分工：
-        - 显式策略参数优先（调用方可强制 react / orchestrator / canvas）；
-        - 画布入口（entry=canvas）→ mode=canvas（CanvasOrchestrator），
-          因为对话页的工具白名单不含画布工具、画布页的记忆与上下文都绑定 canvas；
-        - 对话入口 → 由 Supervisor 决策顺带输出的 `decision.complexity` 决定：
-          complex → orchestrator（AgentOrchestrator），simple → react（ReactGraphAgent）。
-          复杂度不再单独调用旧路由分类器，避免每轮多一次 LLM 调用。
-        """
-        explicit = (constraints or {}).get("mode")
-        if explicit:
-            return str(explicit)
-        if entry == "canvas":
-            # 画布页也复用 Supervisor 顺带输出的 complexity（零新增 LLM 调用）：
-            # simple → react（轻量单目标，可带画布工具），complex → canvas（CanvasOrchestrator）
-            return "canvas" if getattr(decision, "complexity", "complex") == "complex" else "react"
-        return "orchestrator" if getattr(decision, "complexity", "complex") == "complex" else "react"
 
-    @staticmethod
-    def _build_execution_summary(
-        result: RunAnalysisResult,
-        canvas_layout: str = "",
-    ) -> str:
-        """把一次 run_analysis 的执行产物组装成结构化摘要，供 Supervisor 决策参考。
 
-        三块信息（业界 subagents 模式的 worker 回传口径，但不带完整 SQL/全量结果）：
-          1. 子任务完成了什么（成败 + 产物数 + 规划）
-          2. 执行链路（tool_chain：工具名 + 参数摘要 + 行数 + 成败）
-          3. 证据与报告（数值校验结果 + 报告全文，避免 240 字截断导致 Lead 无法判断"达没达成"）
-        canvas_layout：子任务落块后数据库里已落盘的画布布局快照（画布入口传入），
-        让 Supervisor 连"画布上现在到底有什么、是什么图表"都一目了然。
-        """
-        lines: list[str] = ["[子任务执行记录]"]
-        # 1. 概况
-        if result.success:
-            if result.blocks_added > 0:
-                lines.append(f"  动作：分析完成，在画布上新增 {result.blocks_added} 个内容块。")
-            else:
-                lines.append("  动作：分析完成，结果已生成。")
-        else:
-            lines.append(f"  动作：分析未完成。原因：{result.error or '未知'}。")
-        # 2. 规划步骤（若有）
-        if result.steps:
-            plan_text = " → ".join(
-                str(s.get("title") or s.get("content") or s.get("objective") or "步骤")[:40]
-                for s in result.steps[:6]
-            )
-            lines.append(f"  规划[{len(result.steps)}步]：{plan_text}")
-        # 3. 执行链路（工具 + 参数摘要 + 行数 + 成败）
-        if result.tool_chain:
-            chain_parts: list[str] = []
-            for tc in result.tool_chain[:12]:
-                ok_mark = "✓" if tc.get("ok") else "✗"
-                rows = f",{tc['rows']}行" if tc.get("rows") is not None else ""
-                args = f"({tc.get('args', '')})" if tc.get("args") else ""
-                chain_parts.append(f"{tc.get('name','?')}{args}{rows}{ok_mark}")
-            lines.append(f"  工具链：{' → '.join(chain_parts)}")
-        # 4. 数值证据 + 校验结果
-        if result.tool_chain:
-            verified_mark = "已验证" if result.verified else "⚠️部分数字未经查询结果证实"
-            lines.append(f"  数值：{len(result.tool_chain)} 次工具调用，报告数字 {verified_mark}。")
-        # 5. 画布现状（已落盘的真实效果：有多少块、是什么图表/文本、布局）
-        if canvas_layout:
-            one_line = canvas_layout.replace("\n", "；")
-            lines.append(f"  画布现状：{one_line[:400]}")
-        if result.error:
-            lines.append(f"  错误：{result.error[:200]}")
-        summary = "\n".join(lines)
-        # 6. 报告全文（truncate 1500，不再砍到 240）
-        if result.report:
-            report_excerpt = result.report[:1500]
-            summary += f"\n[子任务产出报告]\n{report_excerpt}"
-        return summary
 
-    # ── 分支：调用 run_analysis（透传 + 旁路感知）──
-    async def _run_analysis_branch(
-        self,
-        user_msg: str,
-        decision: Decision,
-        ctx: LeadContext,
-        db_session,
-        available_datasources: list[dict],
-        round_idx: int = 0,
-        degradation: list[str] | None = None,
-        trace=None,
-    ) -> AsyncIterator[dict]:
-        tool_args = decision.tool_args or {}
-        goal = str(tool_args.get("goal") or user_msg)
-        constraints = dict(tool_args.get("constraints") or {})
-        # 执行器选择（确定性函数，不经额外 LLM 判断）：
-        # - 显式策略参数优先（调用方可强制 react/orchestrator/canvas）
-        # - 画布入口 → canvas 编排（CanvasOrchestrator）
-        # - 对话入口 → 用 Supervisor 决策顺带输出的 complexity（省一次分类调用）
-        mode = await self._resolve_subtask_mode(ctx.entry, decision, constraints)
-        args = RunAnalysisArgs(
-            goal=goal,
-            datasource_id=ctx.datasource_id,
-            canvas_id=ctx.canvas_id,
-            entry=ctx.entry,
-            constraints={"mode": mode, **constraints},
-        )
-        yield {"type": "tool_call", "name": "run_analysis", "round": round_idx, "args": {
-            "goal": goal, "entry": ctx.entry, "mode": mode,
-        }}
 
-        out_q: asyncio.Queue = asyncio.Queue()
-        holder: dict = {}
-
-        async def _forward(ev: dict) -> None:
-            # 子执行器（CanvasOrchestrator / AgentOrchestrator / legacy）结束时也会 emit
-            # {"type":"done"}，那是"子任务结束"的内部标记，不能透传给客户端：
-            # 否则前端会在子任务落块完就把流标记完成（解锁输入、清 streaming 状态），
-            # 而外层 Lead 还在继续收尾（决策 stop / 记忆回流），出现"一次请求两个 done"。
-            if isinstance(ev, dict) and ev.get("type") == "done":
-                return
-            await out_q.put(ev)
-
-        async def _on_progress(p: StepProgress) -> None:
-            # progress 事件只供 ActivityFeed 展示，不 emit text 到主气泡
-            # （主气泡只保留最终总结，工具执行细节由工作台卡片承载）
-            await out_q.put({
-                "type": "progress",
-                "round": round_idx,
-                "index": p.index,
-                "total": p.total,
-                "title": p.title,
-                "status": p.status,
-                "note": p.note,
-                "tool": p.tool,
-            })
-            # 仅失败时额外 emit 一条 text 到主气泡（错误提示）
-            if p.status == "fail":
-                text = render_progress_text(p)
-                ctx.turn_summaries.append(text)
-                await out_q.put({"type": "text", "content": text})
-
-        async def _runner() -> None:
-            try:
-                async with self._memo_lock:
-                    holder["result"] = await run_analysis(
-                        args,
-                        db_session=db_session,
-                        emit=_forward,
-                        llm=self.llm,
-                        trace=trace,
-                        lead_ctx=ctx,
-                        extra_plannable_tools=self.extra_plannable_tools,
-                        on_progress=_on_progress,
-                        memo=self._memo,
-                        available_datasources=available_datasources,
-                        worker_guidance=getattr(decision, "guidance", "") or "",
-                    )
-            except Exception as e:  # noqa: BLE001
-                logger.exception(f"[lead_agent] run_analysis_failed: {e}")
-                holder["error"] = e
-            finally:
-                await out_q.put(None)
-
-        runner = asyncio.create_task(_runner())
-        while True:
-            ev = await out_q.get()
-            if ev is None:
-                break
-            yield ev
-        await runner
-
-        result: RunAnalysisResult | None = holder.get("result")
-        if result is None:
-            err = holder.get("error")
-            yield {
-                "type": "tool_result",
-                "name": "run_analysis",
-                "result": json_dumps({"error": f"分析执行失败: {err}"}),
-                "ok": False,
-            }
-            yield {"type": "text", "content": "分析执行失败，请稍后重试或换一种问法。"}
-            return
-
-        yield {
-            "type": "tool_result",
-            "name": "run_analysis",
-            "result": json_dumps({
-                "ok": result.success,
-                "steps": len(result.steps),
-                "blocks_added": result.blocks_added,
-                "elapsed_ms": result.elapsed_ms,
-                "error": result.error,
-            }),
-            "ok": result.success,
-        }
-        # 主导 Agent 对话感：分析完成后给出一句自然语言总结（不是工具记录，是"人话"）
-        # 同时把结构化执行摘要回写 turn_summaries，供 Supervisor 下一轮决策参考
-        # （含工具链/规划/数值证据/报告全文，避免 240 字截断导致 Lead 不知道"做了什么、效果如何"）
-        # 先做确定性评估（成功/失败都要评），写入 turn_summaries 供决策器单独注入。
-        assessment = assess_subtask(result, entry=ctx.entry, user_goal=goal)
-        ctx.turn_summaries.append(assessment)
-        # 画布叙事要点（结论在文本块里，模板句不含要点）：提前取出，
-        # 既用于收尾话术，也让记忆存储的是"FreshFoods 8,640万居首"这类要点而非空模板句。
-        canvas_highlight = ""
-        if result.success and ctx.canvas_state is not None:
-            try:
-                canvas_highlight = await ctx.canvas_state.narrative() or ""
-            except Exception:  # noqa: BLE001
-                canvas_highlight = ""
-        if result.success:
-            blocks = result.blocks_added
-            # 落块后前端已实时保存到 DB → force=True 强制重读，让 Supervisor 看到"落的到底是什么"
-            # （provider 有请求级缓存，这里必须绕过缓存，否则拿到的是本轮开始前的旧布局）
-            canvas_now = (
-                await ctx.canvas_state.layout(force=True) if ctx.canvas_state is not None else ""
-            )
-            ctx.turn_summaries.append(self._build_execution_summary(result, canvas_layout=canvas_now))
-            if blocks > 0:
-                if canvas_highlight:
-                    summary = f"分析完成，已生成 {blocks} 个内容块。要点：{canvas_highlight}（详见画布）"
-                else:
-                    summary = f"分析完成，已在画布上添加了 {blocks} 个内容块，你可以直接查看和调整。"
-            else:
-                summary = "分析完成，结果已生成，请查看上方内容。"
-            yield {"type": "text", "content": summary}
-        if result.report:
-            yield {"type": "report", "content": result.report, "source": result.report_source}
-            # 记忆落点：画布路径存要点（真实结论），对话路径存 report（已是浓缩分析文本）。
-            # 两者都避免把"分析完成，添加了 N 个块"这类空模板句写进会话记忆。
-            memory_text = result.report
-            if canvas_highlight:
-                memory_text = (f"分析完成，已生成 {result.blocks_added} 个内容块（画布）。"
-                               f"要点：{canvas_highlight}")
-            ctx.add_turn("assistant", memory_text)
-        elif result.error:
-            yield {"type": "status", "message": f"本次分析未产出报告：{result.error}"}
 
     # ── 分支：直接回答（decision 已给文本则直出，否则轻量 LLM 生成）──
     async def _answer_branch(
@@ -1071,8 +839,3 @@ class LeadAgent:
             "covered_rounds": next_covered,
             "last_merged_message_id": last_id,
         }
-
-
-def json_dumps(obj) -> str:
-    import json
-    return json.dumps(obj, ensure_ascii=False, default=str)
