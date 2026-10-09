@@ -454,6 +454,7 @@ class LeadAgent:
             if _guard is None:
                 merged = await decide_action_merged(
                     user_msg,
+                    entry=ctx.entry,
                     history_summary=ctx.digest(),
                     datasources=available_datasources,
                     subtask_summaries=ctx.turn_summaries,
