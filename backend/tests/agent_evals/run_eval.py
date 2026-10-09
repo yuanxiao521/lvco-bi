@@ -117,17 +117,15 @@ async def _ensure_preset_canvas(db, question: dict[str, Any], user_id: str):
 async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108-b721-d8448db678e4", mode: str = "real", entry: str = "chat", selected_datasource_id: str | None = None) -> AttemptTrace:
     """运行一次 Agent，返回完整轨迹。
 
-    默认使用真实 AIService，通过 --user-id 指定评测账号（数据源归属于该账号）。
+    默认使用真实主导 Agent，通过 --user-id 指定评测账号（数据源归属于该账号）。
     如要离线测试，可 patch 为 mock 实现。
     mode: "real" 单 Agent ReAct, "orchestrator" 多 Agent 编排模式
     entry: "chat" 对话入口（AgentOrchestrator）、"canvas" 画布入口（CanvasOrchestrator）
 
-    当 `settings.LEAD_AGENT_ENABLED=True` 时，改走主导 Agent（LeadAgent）统一入口，
-    与 `api/v1/ai.py` 的接线保持一致（构造 LeadContext + extra_plannable_tools）。
+    统一走主导 Agent（LeadAgent）入口，与 `api/v1/ai.py` 的接线保持一致
+    （构造 LeadContext + extra_plannable_tools）。
     """
-    from app.config import settings
     from app.core.database import async_session_factory
-    from app.services.ai_service import AIService
     from app.services.llm_client import LLMClient
 
     attempt = AttemptTrace(
@@ -135,8 +133,6 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
         user_msg=question["query"],
     )
 
-    # Orchestrator 模式需要 initial_phase="selecting" 且消息长度 > 20
-    initial_phase = "selecting" if mode == "orchestrator" else "analyzing"
     # Orchestrator 模式要求消息长度 > 20，给问题加上前缀
     user_msg = question["query"]
     if mode == "orchestrator" and len(user_msg) <= 20:
@@ -165,38 +161,24 @@ async def run_agent(question: dict[str, Any], user_id: str = "21bee02f-dcb3-4108
         events: list[dict[str, Any]] = []
         # db_session 必须真实：list_datasources / query_sql 都要查库
         async with async_session_factory() as db:
-            if settings.LEAD_AGENT_ENABLED:
-                from app.services.agents.lead import LeadAgent, LeadContext
-                from app.services.observability import get_observer
+            from app.services.agents.lead import LeadAgent, LeadContext
+            from app.services.observability import get_observer
 
-                canvas_id = await _ensure_preset_canvas(db, question, user_id)
-                ctx = LeadContext(
-                    user_id=user_id,
-                    session_id=f"eval-{question['id']}",
-                    entry=entry,
-                    datasource_id=selected_datasource_id,
-                    canvas_id=canvas_id,
-                )
-                agent = LeadAgent(
-                    llm=LLMClient(),
-                    observer=get_observer(),
-                    extra_plannable_tools=extra_plannable_tools,
-                )
-                async for ev in agent.stream(user_msg, ctx=ctx, db_session=db):
-                    _track(events, ev)
-            else:
-                ai = AIService(LLMClient())
-                async for ev in ai.agent_stream(
-                    user_id=user_id,
-                    user_msg=user_msg,
-                    history=[],
-                    db_session=db,
-                    initial_phase=initial_phase,
-                    entry=entry,
-                    extra_plannable_tools=extra_plannable_tools,
-                    selected_datasource_id=selected_datasource_id,
-                ):
-                    _track(events, ev)
+            canvas_id = await _ensure_preset_canvas(db, question, user_id)
+            ctx = LeadContext(
+                user_id=user_id,
+                session_id=f"eval-{question['id']}",
+                entry=entry,
+                datasource_id=selected_datasource_id,
+                canvas_id=canvas_id,
+            )
+            agent = LeadAgent(
+                llm=LLMClient(),
+                observer=get_observer(),
+                extra_plannable_tools=extra_plannable_tools,
+            )
+            async for ev in agent.stream(user_msg, ctx=ctx, db_session=db):
+                _track(events, ev)
         attempt.events = events
     except Exception as e:
         attempt.error = str(e)
