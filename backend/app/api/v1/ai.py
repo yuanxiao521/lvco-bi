@@ -42,7 +42,7 @@ from app.schemas import (
     SuccessResponse,
 )
 from app.services.ai_service import AIService, VALID_CHART_TYPES
-from app.services.ai_prompts import CANVAS_AGENT_SYSTEM, CANVAS_SYSTEM
+from app.services.ai_prompts import CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
 from app.services.session_lock import acquire_session_lock, release_session_lock
 from app.services.chat_stream_registry import ChatStreamRegistry
@@ -142,12 +142,11 @@ def _build_chart_summary_note(prior_msgs, budget: int) -> str:
 
 
 async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
-    """持久化记忆合并事件（消费 agent_stream 的 compressed_history 事件）。
+    """持久化记忆合并事件（消费主导 Agent 的 compressed_history 事件）。
 
-    **来源守卫**（修 legacy 覆盖累积记忆）：Lead 路径的事件带 `source="lead"`，按消息级
-    水位记账；legacy 路径（LEAD_AGENT_ENABLED=false 或 Lead 降级兜底）带 `source="legacy"`，
-    其摘要是"按当前窗口重算"的产物、covered_rounds 也是另一套语义（距上次压缩轮数）。
-    Lead 启用时不允许 legacy 覆盖累积记忆——否则一次降级就把长期记忆冲回旧逻辑的结果。
+    **来源守卫**：主导 Agent 路径的事件带 `source="lead"`，按消息级水位记账。
+    非 lead 来源一律拒绝写入——防止任何旁路把累积长期记忆冲回旧语义（历史遗留的
+    第二套 covered_rounds 口径已随旧路径一并移除，此守卫保留作防御）。
 
     三类事件：
     - 正常合并：写摘要 + 覆盖进度 + 推进水位 + 成功计数 +1、失败计数清零；
@@ -160,7 +159,7 @@ async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
         from app.repositories.ai_session_repository import SQLAlchemyAIMemoryRepository
         repo = SQLAlchemyAIMemoryRepository(db)
 
-        if settings.LEAD_AGENT_ENABLED and event.get("source") != "lead":
+        if event.get("source") != "lead":
             _log.info("skip_non_lead_memory_write source=%s", event.get("source"))
             return
 
@@ -194,12 +193,12 @@ async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
         _log.warning("save_ai_memory_failed", exc_info=True)
 
 
-async def _lead_stream_guard(lead_stream, legacy_factory):
-    """主导 Agent 流式消费护栏（阶段 4 兜底）。
+async def _lead_stream_guard(lead_stream):
+    """主导 Agent 流式消费护栏。
 
-    - 未产出任何事件即异常 → 整体回落旧路径（用户无感知），done 标记 degraded=True。
-    - 已产出部分事件后异常 → 无法重跑，补发 status + done(degraded=True) 收尾。
-    `legacy_factory` 为惰性构造旧路径事件流的零参可调用对象（避免未降级时白建）。
+    主导 Agent 是唯一执行路径（旧双路径已整体移除）——异常时**不再静默降级**，
+    而是补发 status + done(degraded=True)，让失败被看见。理由：静默兜底会掩盖真实
+    问题，且长期不跑的旧路径本身大概率已腐坏，降级只是虚假的安全感。
     """
     emitted = False
     try:
@@ -208,15 +207,12 @@ async def _lead_stream_guard(lead_stream, legacy_factory):
             yield ev
     except Exception as exc:  # noqa: BLE001
         _log.exception(f"lead_agent_stream_failed: {exc}")
-        if emitted:
-            yield {"type": "status", "message": "主导 Agent 执行异常，已降级收尾。", "degradation": "lead_agent_error"}
-            yield {"type": "done", "degraded": True}
-            return
-        yield {"type": "status", "message": "主导 Agent 不可用，已回落既有路径。", "degradation": "lead_agent_fallback"}
-        async for ev in legacy_factory():
-            if isinstance(ev, dict) and ev.get("type") == "done":
-                ev = {**ev, "degraded": True}
-            yield ev
+        message = (
+            "主导 Agent 执行异常，本轮已中断。" if emitted
+            else "主导 Agent 不可用，本轮未能处理。"
+        )
+        yield {"type": "status", "message": message, "degradation": "lead_agent_error"}
+        yield {"type": "done", "degraded": True}
 
 
 # 事件流空闲看门狗阈值（秒）：超过这么久没有任何事件，判定 Agent 内部停住
@@ -1151,66 +1147,44 @@ async def data_chat_stream(
             ) = await _load_session_memory(db, session_id)
 
             def _event_factory(db_session: AsyncSession):
-                """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。
+                """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。"""
+                from app.services.agents.lead import LeadAgent, LeadContext
+                from app.services.observability import get_observer
 
-                Lead/legacy 分流：主导 Agent 异常时自动回落旧路径（阶段 4 兜底）。
-                """
-                if settings.LEAD_AGENT_ENABLED:
-                    from app.services.agents.lead import LeadAgent, LeadContext
-                    from app.services.observability import get_observer
-
-                    lead_ctx = LeadContext(
-                        user_id=str(current_user.id),
-                        session_id=str(session_id) if session_id else "",
-                        entry="chat",
-                        datasource_id=body.datasource_id,
-                        history_summary=memory_summary or "",
-                        memory_covered=memory_covered,
-                        memory_watermark=memory_watermark,
-                        memory_fail_count=memory_fail_count,
-                        extra_context=chart_summary_note,
-                        metrics_ctx=metrics_ctx_for_lead,
-                        ui_action=getattr(body, "ui_action", None),
-                    )
-                    # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
-                    # 会统一 add_turn 当前消息——这里剔除尾部的本条，避免同一消息在窗口里出现两次。
-                    history_for_ctx = history
-                    if (
-                        history_for_ctx
-                        and history_for_ctx[-1].get("role") == "user"
-                        and history_for_ctx[-1].get("content") == body.message
-                    ):
-                        history_for_ctx = history_for_ctx[:-1]
-                    # 成对对齐：前端按条数 slice 出来的窗口可能从"上一轮的回答"开始，
-                    # 这类孤立回答丢掉（否则模型开场就看到一个没有来由的答案）。
-                    for h in _align_history_pairs([
-                        {"role": h["role"], "content": str(h.get("content", ""))}
-                        for h in history_for_ctx
-                        if isinstance(h, dict) and h.get("role") in ("user", "assistant")
-                    ]):
-                        lead_ctx.turns.append(h)
-                    return _lead_stream_guard(
-                        LeadAgent(llm=llm_client, observer=get_observer()).stream(
-                            agent_message, ctx=lead_ctx, db_session=db_session
-                        ),
-                        lambda: ai_service.agent_stream(
-                            user_id=str(current_user.id),
-                            user_msg=agent_message,
-                            history=history,
-                            db_session=db_session,
-                            initial_phase="analyzing" if body.datasource_id else "selecting",
-                            memory_summary=memory_summary,
-                            selected_datasource_id=body.datasource_id,
-                        ),
-                    )
-                return ai_service.agent_stream(
+                lead_ctx = LeadContext(
                     user_id=str(current_user.id),
-                    user_msg=agent_message,
-                    history=history,
-                    db_session=db_session,
-                    initial_phase="analyzing" if body.datasource_id else "selecting",
-                    memory_summary=memory_summary,
-                    selected_datasource_id=body.datasource_id,
+                    session_id=str(session_id) if session_id else "",
+                    entry="chat",
+                    datasource_id=body.datasource_id,
+                    history_summary=memory_summary or "",
+                    memory_covered=memory_covered,
+                    memory_watermark=memory_watermark,
+                    memory_fail_count=memory_fail_count,
+                    extra_context=chart_summary_note,
+                    metrics_ctx=metrics_ctx_for_lead,
+                    ui_action=getattr(body, "ui_action", None),
+                )
+                # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
+                # 会统一 add_turn 当前消息——这里剔除尾部的本条，避免同一消息在窗口里出现两次。
+                history_for_ctx = history
+                if (
+                    history_for_ctx
+                    and history_for_ctx[-1].get("role") == "user"
+                    and history_for_ctx[-1].get("content") == body.message
+                ):
+                    history_for_ctx = history_for_ctx[:-1]
+                # 成对对齐：前端按条数 slice 出来的窗口可能从"上一轮的回答"开始，
+                # 这类孤立回答丢掉（否则模型开场就看到一个没有来由的答案）。
+                for h in _align_history_pairs([
+                    {"role": h["role"], "content": str(h.get("content", ""))}
+                    for h in history_for_ctx
+                    if isinstance(h, dict) and h.get("role") in ("user", "assistant")
+                ]):
+                    lead_ctx.turns.append(h)
+                return _lead_stream_guard(
+                    LeadAgent(llm=llm_client, observer=get_observer()).stream(
+                        agent_message, ctx=lead_ctx, db_session=db_session
+                    )
                 )
 
             # 启动后台任务（解耦连接：连接断开任务继续跑完并自行落库、释放锁）
@@ -2016,7 +1990,7 @@ async def canvas_ai_chat(
         if not canvas_ctx.strip():
             canvas_ctx = "当前画布为空，你可以根据数据源字段自由推荐图表配置。\n"
 
-    # 组装 user_msg：表引用 + 字段信息 + 画布上下文，交给 agent_stream 统一编排
+    # 组装 user_msg：表引用 + 字段信息 + 画布上下文，交给主导 Agent 统一编排
     canvas_tools_note = (
         "\n（你可以在画布上直接搭报告：用 add_text_block 写标题/叙事，"
         "add_chart_block 建图，update_chart_block/remove_block 改删已有块。）"
@@ -2299,19 +2273,7 @@ async def canvas_ai_chat(
                 history = _filter_canvas_history(prior_msgs, current_user_msg_id)
 
             # ---- 4. Agent 流式执行 ----
-            # 画布有数据源（已绑定或平台已有）时直接进 analyzing，
-            # 避免每次请求都从 selecting 开始、反复 list_datasources 而无法推进到查询。
-            try:
-                from app.repositories.datasource_repository import SQLAlchemyDataSourceRepository
-                ds_list, _ = await SQLAlchemyDataSourceRepository(db).list_datasources(
-                    current_user.id, page=1, page_size=1,
-                    source_type=None, status=None, search=None,
-                )
-                has_ds = bool(ds_list)
-            except Exception:
-                has_ds = datasource is not None
-            canvas_initial_phase = "analyzing" if (datasource or has_ds) else "selecting"
-            # ── 入口分流：主导 Agent（LEAD_AGENT_ENABLED）或旧双路径 ──
+            # ── 主导 Agent 事件流（旧双路径已移除，无降级兜底）──
             (
                 memory_summary,
                 memory_covered,
@@ -2319,51 +2281,32 @@ async def canvas_ai_chat(
                 memory_fail_count,
             ) = await _load_session_memory(db, session_id)
 
-            def _legacy_stream():
-                return ai_service.agent_stream(
-                    user_id=str(current_user.id),
-                    user_msg=user_msg,
-                    history=history,
-                    db_session=db,
-                    initial_phase=canvas_initial_phase,
-                    system_prompt_override=CANVAS_AGENT_SYSTEM,
+            from app.services.agents.lead import LeadAgent, LeadContext
+            from app.services.observability import get_observer
+
+            lead_ctx = LeadContext(
+                user_id=str(current_user.id),
+                session_id=str(session_id) if session_id else "",
+                entry="canvas",
+                canvas_id=body.canvas_id,
+                datasource_id=str(datasource.id) if datasource else body.datasource_id,
+                history_summary=memory_summary or "",
+                memory_covered=memory_covered,
+                memory_watermark=memory_watermark,
+                memory_fail_count=memory_fail_count,
+                metrics_ctx=metrics_ctx_for_lead,
+                ui_action=getattr(body, "ui_action", None),
+            )
+            for h in history:
+                if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+                    lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+            event_iter = _lead_stream_guard(
+                LeadAgent(
+                    llm=LLMClient(settings),
+                    observer=get_observer(),
                     extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
-                    memory_summary=memory_summary,
-                    entry="canvas",
-                    selected_datasource_id=str(datasource.id) if datasource else body.datasource_id,
-                )
-
-            if settings.LEAD_AGENT_ENABLED:
-                from app.services.agents.lead import LeadAgent, LeadContext
-                from app.services.observability import get_observer
-
-                lead_ctx = LeadContext(
-                    user_id=str(current_user.id),
-                    session_id=str(session_id) if session_id else "",
-                    entry="canvas",
-                    canvas_id=body.canvas_id,
-                    datasource_id=str(datasource.id) if datasource else body.datasource_id,
-                    history_summary=memory_summary or "",
-                    memory_covered=memory_covered,
-                    memory_watermark=memory_watermark,
-                    memory_fail_count=memory_fail_count,
-                    metrics_ctx=metrics_ctx_for_lead,
-                    ui_action=getattr(body, "ui_action", None),
-                )
-                for h in history:
-                    if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
-                        lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
-                # 阶段 4 兜底：主导 Agent 异常 → 自动回落旧路径
-                event_iter = _lead_stream_guard(
-                    LeadAgent(
-                        llm=LLMClient(settings),
-                        observer=get_observer(),
-                        extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
-                    ).stream(user_msg, ctx=lead_ctx, db_session=db),
-                    _legacy_stream,
-                )
-            else:
-                event_iter = _legacy_stream()
+                ).stream(user_msg, ctx=lead_ctx, db_session=db)
+            )
 
             async for event in _idle_guard(event_iter, label="canvas_chat"):
                 ev_type = event.get("type")
