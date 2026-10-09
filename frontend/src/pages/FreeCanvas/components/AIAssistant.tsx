@@ -195,6 +195,7 @@ export default memo(function AIAssistant({
   const steps = useCanvasAssistantStore((s) => s.steps);
   const meta = useCanvasAssistantStore((s) => s.meta);
   const isStreaming = useCanvasAssistantStore((s) => s.isStreaming);
+  const pendingConfirm = useCanvasAssistantStore((s) => s.pendingConfirm);
   const canvasSessions = useCanvasAssistantStore((s) => s.canvasSessions);
   const curSessionId = useCanvasAssistantStore((s) => s.curSessionId);
 
@@ -487,6 +488,38 @@ export default memo(function AIAssistant({
               </div>
               );
             })}
+            {/* HITL 确认卡片：后端 ask_user(ask_kind=confirm) 的显式确认入口。
+                点击产生结构化 ui_action（下一请求后端守卫零 LLM 直接恢复/取消）；
+                流式进行中禁点，防与在跑任务并发。 */}
+            {pendingConfirm && !isStreaming && (
+              <div className="flex justify-start">
+                <div className="max-w-[90%] px-3 py-2 rounded-[10px] bg-amber-50 border border-amber-200">
+                  <div className="text-[12.5px] text-card-foreground whitespace-pre-wrap">
+                    {pendingConfirm.question || "请确认是否执行上一步操作？"}
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => {
+                        useCanvasAssistantStore.getState().clearPendingConfirm();
+                        useCanvasAssistantStore.getState().send("确认", buildCtx(), { type: "confirm" });
+                      }}
+                      className="px-3 py-1 rounded-[8px] text-[12px] font-medium text-white bg-primary"
+                    >
+                      确认执行
+                    </button>
+                    <button
+                      onClick={() => {
+                        useCanvasAssistantStore.getState().clearPendingConfirm();
+                        useCanvasAssistantStore.getState().send("取消", buildCtx(), { type: "cancel" });
+                      }}
+                      className="px-3 py-1 rounded-[8px] text-[12px] font-medium text-muted-foreground border border-border bg-white"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 

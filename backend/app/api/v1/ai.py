@@ -58,7 +58,6 @@ STREAM_TEXT_SNAPSHOT_INTERVAL = 0.5
 # 普通润色、清洗建议等与画布无关的工具不会出现在画布助手里，避免 LLM 调错（如调 render_chart 只出 option 不落块）。
 _CANVAS_QUERY_TOOL_NAMES = frozenset({
     "list_datasources", "list_fields", "list_metrics", "query_sql", "query_engine",
-    "stats_analyzer", "recommend_charts",
 })
 CANVAS_ALLOWED_TOOL_NAMES = frozenset(CANVAS_TOOL_NAMES | _CANVAS_QUERY_TOOL_NAMES)
 from app.services.context_utils import align_history_pairs as _align_history_pairs
@@ -1171,6 +1170,7 @@ async def data_chat_stream(
                         memory_fail_count=memory_fail_count,
                         extra_context=chart_summary_note,
                         metrics_ctx=metrics_ctx_for_lead,
+                        ui_action=getattr(body, "ui_action", None),
                     )
                     # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
                     # 会统一 add_turn 当前消息——这里剔除尾部的本条，避免同一消息在窗口里出现两次。
@@ -2348,6 +2348,7 @@ async def canvas_ai_chat(
                     memory_watermark=memory_watermark,
                     memory_fail_count=memory_fail_count,
                     metrics_ctx=metrics_ctx_for_lead,
+                    ui_action=getattr(body, "ui_action", None),
                 )
                 for h in history:
                     if isinstance(h, dict) and h.get("role") in ("user", "assistant"):

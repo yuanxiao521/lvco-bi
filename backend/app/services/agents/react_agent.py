@@ -251,11 +251,18 @@ class ReactGraphAgent:
         query_call_count = state.get("query_call_count", 0)
 
         # 单轮并发钳制：防止 LLM 一次性并发大量工具调用（如 8 个查询），
-        # 超出部分丢弃（保留前 N 个），收敛为可管理的小步执行。
+        # 超出部分本轮不执行、留到后续轮次——但【必须回喂告知 LLM】（见下方注入）：
+        # 此前静默丢弃会让 LLM 误以为自己提议的调用全部执行成功，
+        # 下一轮凭记忆重提参数（如已被删除的 block_id）→ 反复 blocked + 反复要求用户确认。
         original_tool_calls = tool_calls
+        dropped_tool_calls: list[dict] = []
         if len(tool_calls) > MAX_PARALLEL_TOOL_CALLS:
-            logger.warning(f"[react] tool_calls={len(tool_calls)} 超并发上限，截断为 {MAX_PARALLEL_TOOL_CALLS}")
+            dropped_tool_calls = list(tool_calls[MAX_PARALLEL_TOOL_CALLS:])
             tool_calls = tool_calls[:MAX_PARALLEL_TOOL_CALLS]
+            logger.warning(
+                f"[react] tool_calls={len(original_tool_calls)} 超并发上限，"
+                f"本轮执行 {MAX_PARALLEL_TOOL_CALLS} 个，顺延 {len(dropped_tool_calls)} 个"
+            )
 
         # 执行层白名单：LLM 可能无视 schema 约束编造当前阶段外的工具调用
         # （如 GENERATING 阶段仍返回 query_sql）。schema 层的过滤只影响 LLM 可见性，
@@ -372,6 +379,26 @@ class ReactGraphAgent:
                 # 防爆：大结果压缩后进上下文（error 结果由 compact_result_json 完整保留供自纠错）
                 "content": compact_result_json(pr.result),
             })
+
+        # 被并发上限顺延的调用必须回喂：否则 LLM 以为全部执行成功，
+        # 下一轮凭记忆重提参数（典型：重提已删除的 block_id）→ 反复 blocked、删不干净。
+        if dropped_tool_calls:
+            dropped_desc = "、".join(
+                sorted({str(tc.get("name") or "?") for tc in dropped_tool_calls})
+            )
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"注意：你本轮提议了 {len(original_tool_calls)} 个工具调用，"
+                    f"但单轮并发上限为 {MAX_PARALLEL_TOOL_CALLS} 个，"
+                    f"本轮只执行了前 {MAX_PARALLEL_TOOL_CALLS} 个，"
+                    f"以下 {len(dropped_tool_calls)} 个【本轮未执行】：{dropped_desc}。\n"
+                    "请在后续轮次继续完成这些未执行的调用，不要当作已完成。\n"
+                    "涉及画布块的操作必须先用 get_canvas_layout 重新获取真实 id，不要凭记忆复用旧 id。\n"
+                    "若目标是清空/删除画布上的全部块，请直接调用 clear_canvas 一次完成，不要逐块删除。"
+                ),
+            })
+            logger.info(f"[react] dropped_calls_fed_back count={len(dropped_tool_calls)}")
 
         # 熔断：连续查询失败超过阈值，终止循环
         if consecutive_query_failures >= MAX_CONSECUTIVE_FAILURES:

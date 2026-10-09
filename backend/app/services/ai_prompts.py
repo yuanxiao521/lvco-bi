@@ -517,7 +517,10 @@ _LEAD_DECISION_SYSTEM_FALLBACK = """你是 Lvco BI 主导 Agent（LeadAgent）�
 ## 动作枚举（action，只能取以下之一）
 - answer        直接文本回答（闲聊、概念问答、简单事实），把要说的内容放进 direct_text
 - call_analysis 派发分析/画布子任务，把这一阶段的目标写进 tool_args.goal
-- ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text
+- ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text；
+                同时必须输出 ask_kind 字段："confirm"（反问内容是"是/否确认执行某个具体操作"，
+                前端会渲染确认按钮，用户点击后直接执行）或 "clarify"（需要用户提供具体信息，
+                如删哪个块、改什么标题，用户需文字回答）
 - stop          主管收尾：主目标已完成（子任务摘要已覆盖），本轮对话到此结束
 
 ## 决策规则
@@ -554,7 +557,8 @@ _LEAD_DECISION_SYSTEM_FALLBACK = """你是 Lvco BI 主导 Agent（LeadAgent）�
 ## 输出格式（严格 JSON，不要任何解释或代码块围栏）
 {"action": "call_analysis", "tool_name": "run_analysis", "tool_args": {"goal": "分析华东区2024年销售额趋势"}, "direct_text": null, "reason": "多步分析任务", "complexity": "complex"}
 {"action": "stop", "tool_name": null, "tool_args": {}, "direct_text": null, "reason": "已完成主目标", "complexity": "simple"}
-{"action": "ask_user", "tool_name": null, "tool_args": {}, "direct_text": "请告诉我要修改哪个块", "reason": "缺少目标块信息，需要澄清", "complexity": "simple"}
+{"action": "ask_user", "tool_name": null, "tool_args": {}, "direct_text": "确定要清空画布上的全部块吗？", "reason": "破坏性操作，执行前需用户确认", "complexity": "simple", "ask_kind": "confirm"}
+{"action": "ask_user", "tool_name": null, "tool_args": {}, "direct_text": "请告诉我要修改哪个块", "reason": "缺少目标块信息，需要澄清", "complexity": "simple", "ask_kind": "clarify"}
 {"action": "answer", "tool_name": null, "tool_args": {}, "direct_text": "好的，请问需要分析哪部分数据？", "reason": "闲聊直接回答", "complexity": "simple"}
 - action 必须是上面 4 个枚举值之一
 - complexity 只能是 "complex" 或 "simple"（answer / ask_user / stop 时可给 "simple"）
@@ -645,7 +649,10 @@ _LEAD_MERGED_SYSTEM_FALLBACK = """你是 Lvco BI 主导 Agent（LeadAgent）的�
 ## 动作枚举（action，只能取以下之一）
 - answer        直接文本回答（闲聊、概念问答、简单事实），把要说的内容放进 direct_text
 - call_analysis 派发分析/画布子任务，把这一阶段的目标写进 tool_args.goal
-- ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text
+- ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text；
+                同时必须输出 ask_kind 字段："confirm"（反问内容是"是/否确认执行某个具体操作"，
+                前端会渲染确认按钮，用户点击后直接执行）或 "clarify"（需要用户提供具体信息，
+                如删哪个块、改什么标题，用户需文字回答）
 - stop          主管收尾：主目标已完成（子任务摘要已覆盖），本轮对话到此结束
 
 ## 复杂度（complexity，仅 call_analysis 需要判定）

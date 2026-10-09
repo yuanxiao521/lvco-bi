@@ -315,6 +315,9 @@ class CanvasChatRequest(CamelModel):
     canvas_context: dict | None = None  # blocks, current config, etc.
     canvas_id: str | None = None  # 画布 ID；用于会话按画布隔离（可为空 = 未保存草稿）
     new_session: bool | None = None  # 强制新建会话（忽略该画布最近会话），供"新对话"使用
+    # HITL 确认卡片动作：{"type": "confirm" | "cancel"}。用户点击确认/取消按钮时携带，
+    # 主管守卫据此短路决策直接恢复/取消（无此字段 = 自由文本，走正常决策）。
+    ui_action: dict | None = None
 
 
 class DataChatRequest(CamelModel):
@@ -323,6 +326,8 @@ class DataChatRequest(CamelModel):
     message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
     history: list[dict] | None = None
     resume: bool = False  # 续收标记：刷新/断线后重连现有后台任务（纯订阅，不落新消息）
+    # HITL 确认卡片动作（同 CanvasChatRequest.ui_action）
+    ui_action: dict | None = None
 
 
 AggKind = Literal["SUM", "AVG", "COUNT", "MAX", "MIN", "COUNT_DISTINCT", "MEDIAN", "STDDEV"]

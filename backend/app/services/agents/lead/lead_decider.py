@@ -53,6 +53,9 @@ class Decision:
     # Lead 指导意见（仅 call_analysis 有意义）：对上一轮子任务的评估 + 本轮要改进/补充什么。
     # 由 run_analysis 作为注入消息带给 Worker，让 Planner 带着评判重做而不是盲目重排。
     guidance: str = ""
+    # ask_user 的反问类型：confirm = 封闭确认（前端渲染确认卡片，用户点击后零 LLM 恢复）；
+    # clarify = 开放澄清（用户文字回答，走正常决策）。缺省/非法值一律 clarify（保守）。
+    ask_kind: str = "clarify"
 
 
 def _guess_complexity(intent: IntentResult) -> str:
@@ -154,6 +157,36 @@ def _parse_decision(
     direct_text = str(direct_text) if direct_text else None
     reason = str(obj.get("reason") or "")
     guidance = str(obj.get("guidance") or "").strip()
+    raw_ask_kind = str(obj.get("ask_kind") or "").strip().lower()
+    if raw_ask_kind not in ("confirm", "clarify"):
+        raw_ask_kind = "clarify"
+
+    # 澄清豁免：目标已经很明确时禁止反问。
+    # 实测「清空画布」被连续 ask_user 三次，其中一次理由是
+    # "未明确是清空整个画布还是删除所有块"——两个选项语义完全等价，属于无效澄清，
+    # 用户回"确认"后又会被判成 followup→answer 只回文本不干活，形成死循环。
+    # 命中全量操作关键词 + 编辑/分析意图 → 强制派发执行。
+    _CLEAR_MARKERS = ("清空", "清掉", "全部", "所有块", "所有内容", "都删",
+                      "删掉所有", "删除所有", "全部删除", "remove all")
+    if (
+        action == ActionType.ASK_USER
+        and intent.intent in (IntentType.CANVAS_EDIT, IntentType.ANALYSIS)
+        and any(m in user_msg for m in _CLEAR_MARKERS)
+    ):
+        logger.info(
+            "[lead_decider] ask_user_suppressed reason=目标明确（命中全量操作词） "
+            f"intent={intent.intent.value} user_msg={user_msg[:40]} → forced call_analysis"
+        )
+        # degraded=False：豁免是确定性强制，不是降级。若标 degraded=True，
+        # 主管循环 rnd>0 时会命中"降级即收尾"分支，导致该执行的被跳过。
+        return Decision(
+            action=ActionType.CALL_ANALYSIS,
+            tool_name="run_analysis",
+            tool_args={"goal": user_msg},
+            reason="目标明确（全量操作），直接执行无需澄清",
+            degraded=False,
+            complexity="simple",
+        )
 
     if action == ActionType.CALL_ANALYSIS:
         tool_name = tool_name or "run_analysis"
@@ -202,6 +235,7 @@ def _parse_decision(
         degraded=False,
         complexity=raw_complexity,
         guidance=guidance,
+        ask_kind=raw_ask_kind,
     )
     logger.info(
         f"[lead_decider] action={action.value} tool={tool_name} "
@@ -399,14 +433,17 @@ async def decide_action_merged(
                 timeout=timeout,
             )
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"[lead_decider] merged_llm_error error={e} fallback=deterministic")
+        # asyncio.TimeoutError 的 str() 是空字符串，必须补上异常类型名，
+        # 否则日志只会打出 "error=" 而看不出是超时还是其他错误（排查时无从下手）。
+        err = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.warning(f"[lead_decider] merged_llm_error error={err} fallback=deterministic")
         if degradation is not None:
             degradation.append("lead_intent_fallback")
             degradation.append("lead_decision_fallback")
-        intent = fallback_intent(user_msg, history_summary, f"llm_error:{e}")
+        intent = fallback_intent(user_msg, history_summary, f"llm_error:{err}")
         return MergedOutcome(
             intent=intent,
-            decision=_fallback_decision(user_msg, intent, f"llm_error:{e}"),
+            decision=_fallback_decision(user_msg, intent, f"llm_error:{err}"),
         )
 
     obj = extract_json_object(content or "")

@@ -22,9 +22,12 @@ from app.services.context_utils import estimate_tokens
 from app.services.agents.lead.lead_decider import (
     ActionType,
     Decision,
+    MergedOutcome,
     decide_action,
     decide_action_merged,
 )
+from app.services.agents.lead.lead_intent import IntentResult, IntentType
+from app.services.lead_session_state import lead_session_state, read_phase
 from app.services.agents.lead.lead_perception import StepProgress, render_progress_text
 from app.services.agents.lead.lead_tools import (
     RunAnalysisArgs,
@@ -220,6 +223,33 @@ async def _load_unmerged_messages(
         return [], None
 
 
+def _is_affirmative(msg: str) -> bool:
+    """判定是否为"对上一轮反问的纯确认"回复（确认 / 是的 / 好 / ok…）——文本兜底路径。
+
+    主路径是前端确认卡片（ui_action 显式信号，零猜测）；本函数只在用户偏要
+    打字回复时兜底。只认短回复：长回复通常夹带新指令（"是的，不过改成折线图"），
+    那种情况应走正常决策。排除寒暄词（"你好"含"好"，会误触发恢复）。
+    """
+    s = (msg or "").strip().lower().rstrip("。！!.,，、~ ")
+    if not s or len(s) > 8:
+        return False
+    if s in ("你好", "您好", "hello", "hi", "嗨", "在吗"):
+        return False
+    return any(a in s for a in ("确认", "确定", "是的", "对的", "好", "可以", "嗯", "ok", "yes"))
+
+
+def _guard_stop_outcome(guard_text: str) -> MergedOutcome:
+    """确认取消 / 过期的确定性收尾：合成 STOP，主管循环第一轮即收敛（answer 文本由 STOP 分支吐出）。"""
+    return MergedOutcome(
+        intent=IntentResult(
+            intent=IntentType.CHAT, confidence=1.0, needs_plan=False, degraded=False,
+        ),
+        decision=Decision(
+            action=ActionType.STOP, direct_text=guard_text, reason="confirm_guard",
+        ),
+    )
+
+
 @dataclass
 class LeadContext:
     """主导 Agent 的会话上下文（短期活记忆 + 长期摘要 + 汇报累积）。"""
@@ -238,6 +268,9 @@ class LeadContext:
     canvas_state: object | None = None        # 请求级画布状态提供者（CanvasStateProvider，stream 开头构造）
     turn_summaries: list[str] = field(default_factory=list)  # 关键节点汇报累积
     metrics_ctx: str = ""                     # 受治理指标清单（入口注入，answer/决策复用）
+    # HITL 确认卡片动作：{"type": "confirm" | "cancel"}（前端按钮点击时由入口透传）。
+    # 守卫据此在决策之前短路——显式信号驱动状态迁移，不靠对自然语言的猜测。
+    ui_action: dict | None = None
 
     def add_turn(self, role: str, content: str) -> None:
         """追加一轮对话（自动裁剪窗口，避免上下文膨胀）。"""
@@ -409,17 +442,38 @@ class LeadAgent:
             # 让 Lead 知道"画布上现已落成什么图表/文本、布局如何"（完成的真实效果）。
             # 走请求级 provider（带缓存）：同一轮多处消费不会重复读库。
             canvas_layout = await ctx.canvas_state.layout() if ctx.canvas_state else ""
-            merged = await decide_action_merged(
-                user_msg,
-                history_summary=ctx.digest(),
-                datasources=available_datasources,
-                subtask_summaries=ctx.turn_summaries,
-                canvas_layout=canvas_layout,
-                llm=self.llm,
-                timeout=settings.LEAD_DECISION_TIMEOUT,
-                degradation=degradation,
-                trace=trace,
-            )
+            # ── 0) 确认守卫（HITL gate）：前端确认卡片的显式信号优先，文本"确认"兜底。
+            # 命中即短路 merged LLM 调用（绕开超时降级风险）；恢复走与正常派发
+            # 完全相同的执行/评审/收尾路径——只是跳过了"重新理解意图"这一步。
+            # 状态观测：守卫 pop 槽之前读（pop 后 AWAITING_CONFIRM 就变 IDLE 了）
+            try:
+                logger.info("[lead] phase=%s entry=%s", read_phase(ctx.session_id).value, ctx.entry)
+            except Exception:  # noqa: BLE001
+                pass
+            _guard = await self._confirm_guard(ctx, user_msg)
+            if _guard is None:
+                merged = await decide_action_merged(
+                    user_msg,
+                    history_summary=ctx.digest(),
+                    datasources=available_datasources,
+                    subtask_summaries=ctx.turn_summaries,
+                    canvas_layout=canvas_layout,
+                    llm=self.llm,
+                    timeout=settings.LEAD_DECISION_TIMEOUT,
+                    degradation=degradation,
+                    trace=trace,
+                )
+            elif _guard[0] == "resume":
+                merged = MergedOutcome(
+                    intent=IntentResult(
+                        intent=IntentType.FOLLOWUP, confidence=1.0,
+                        needs_plan=False, degraded=False,
+                    ),
+                    decision=_guard[1],
+                )
+            else:
+                # cancel / 确认过期：确定性文本收尾（合成 STOP，主管循环第一轮即收敛）
+                merged = _guard_stop_outcome(_guard[1])
             intent = merged.intent
             ctx.add_turn("user", user_msg)
             yield {
@@ -470,12 +524,26 @@ class LeadAgent:
                 # 不能直接 return：必须走下方统一收尾（_maybe_final_summary / 记忆回流 / done），
                 # 否则前端收不到 done 事件，流式状态永远停在"执行中"。
                 if decision.action == ActionType.ASK_USER:
+                    # 挂起本轮待确认目标（Redis 槽，跨请求存活，TTL 与会话锁对齐）；
+                    # 封闭确认（ask_kind=confirm）额外发 confirm_request 事件，
+                    # 前端渲染确认卡片——用户点按钮产生显式 ui_action，下一请求守卫直接恢复。
+                    lead_session_state.set_pending(ctx.session_id, str(user_msg or ""))
                     async for ev in self._emit_answer(decision.direct_text or "请补充更多信息，我好帮你继续。"):
                         yield ev
+                    if getattr(decision, "ask_kind", "clarify") == "confirm":
+                        yield {
+                            "type": "confirm_request",
+                            "goal": str(user_msg or ""),
+                            "question": decision.direct_text or "",
+                        }
                     break
                 # 主管收尾
                 if decision.action == ActionType.STOP:
                     stopped = True
+                    # 守卫的取消/过期收尾经由此处输出确定性话术（正常 STOP 的 direct_text 为空，不受影响）
+                    if decision.direct_text:
+                        async for ev in self._emit_answer(decision.direct_text):
+                            yield ev
                     break
                 # 降级防御：首轮降级按原兜底行为执行一次；非首轮降级意味着 LLM 已不可用，
                 # 直接收尾（避免兜底路径在每轮重复触发分析，白白消耗预算）
@@ -806,7 +874,7 @@ class LeadAgent:
                 "role": "assistant",
                 "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{canvas_layout}",
             })
-        for t in ctx.recent_turns(max_turns=8):
+        for t in ctx.recent_turns(max_turns=12):  # AB-B: 8->12
             messages.append({"role": t["role"], "content": t["content"]})
         messages.append({"role": "user", "content": user_msg})
         collected: list[str] = []
@@ -833,6 +901,48 @@ class LeadAgent:
         if answer:
             yield {"type": "report", "content": answer, "source": "lead"}
             ctx.add_turn("assistant", answer)
+
+    async def _confirm_guard(self, ctx: LeadContext, user_msg: str) -> tuple[str, object] | None:
+        """确认守卫（HITL gate，决策之前拦截）。
+
+        返回：
+            None                   → 无挂起 / 非确认场景，走正常 merged 决策
+            ("resume", Decision)   → 恢复派发上轮挂起目标（跳过 LLM，直接进执行分支）
+            ("text", str)          → 取消 / 确认过期，确定性文本收尾
+        """
+        ui = ctx.ui_action if isinstance(ctx.ui_action, dict) else {}
+        action_type = str(ui.get("type") or "").strip().lower()
+        pending = lead_session_state.pop_pending(ctx.session_id)
+
+        if action_type == "confirm":
+            if pending:
+                logger.info("[lead] confirm_gate_resume goal=%s", pending[:40])
+                return ("resume", Decision(
+                    action=ActionType.CALL_ANALYSIS,
+                    tool_name="run_analysis",
+                    tool_args={"goal": pending},
+                    reason="用户通过确认卡片恢复执行上轮目标",
+                    degraded=False,
+                    complexity="simple",
+                ))
+            return ("text", "这个确认已经过期了，请重新告诉我你想做什么。")
+
+        if action_type == "cancel":
+            logger.info("[lead] confirm_gate_cancel goal=%s", (pending or "")[:40])
+            return ("text", "好的，已取消，画布保持原样。有新需求随时告诉我。")
+
+        # 无显式信号：用户偏要打字回复的文本兜底（pop 已取走；非肯定 → 目标丢弃，走正常决策）
+        if pending and _is_affirmative(user_msg):
+            logger.info("[lead] confirm_text_resume goal=%s", pending[:40])
+            return ("resume", Decision(
+                action=ActionType.CALL_ANALYSIS,
+                tool_name="run_analysis",
+                tool_args={"goal": pending},
+                reason="用户文本确认，恢复执行上轮目标",
+                degraded=False,
+                complexity="simple",
+            ))
+        return None
 
     async def _emit_answer(self, text: str) -> AsyncIterator[dict]:
         """把一段确定性文本按行切片吐出（保持流式观感）。"""

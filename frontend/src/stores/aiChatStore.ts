@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createSession, listMessages, listSessions } from "../api/ai";
 import { tokenStore } from "../api/client";
 import type { AISession, AIMessage } from "../types/api";
-import { mapProgressStatus } from "../pages/FreeCanvas/components/ActivityFeed";
+import { mapProgressStatus, TOOL_STAGE } from "../pages/FreeCanvas/components/ActivityFeed";
 import type { AgentMeta, FeedStep } from "../pages/FreeCanvas/components/ActivityFeed";
 
 // ============================================================
@@ -232,6 +232,11 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
             break;
           case "progress": {
             const pIdx = Number(event.index ?? 0);
+            const pTotal = Number(event.total ?? 0);
+            // react 模式的 per-tool progress（total=0）与 tool_call/tool_result 冗余：
+            // 每个工具各建一行"执行 xxx"，执行记录压成无层级平铺。忽略之，状态由
+            // tool_call/tool_result 驱动；编排器 plan 级 progress（total>0）保留建 step。
+            if (!(pTotal > 0)) break;
             // 带 round 前缀，避免多轮循环下第二轮 index 覆盖第一轮步骤
             const pRound = Number(event.round ?? 0);
             const stepId = `p${pRound}_${pIdx}`;
@@ -263,13 +268,30 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
               appendVisible(event.delta);
               break;
             case "tool_call": {
+              const name = event?.name ?? "工具";
+              const stage = TOOL_STAGE(name);
               set((s) => {
-                // 找到当前正在执行的 progress 步骤（最后一个 run 状态的 step）
-                const runIdx = [...s.agentSteps].reverse().findIndex((st) => st.status === "run");
-                if (runIdx === -1) return {};
-                const idx = s.agentSteps.length - 1 - runIdx;
                 const next = s.agentSteps.slice();
-                next[idx] = { ...next[idx], tools: [...next[idx].tools, { name: event.name, args: event.args, status: "run" }] };
+                // 阶段分桶：找最后一个同阶段 step 聚合（"阶段 → 工具"两级层级）；
+                // 同时修复旧逻辑"无 progress 步骤时工具直接丢失"（runIdx=-1 静默 return）
+                for (let i = next.length - 1; i >= 0; i--) {
+                  if (next[i].title === stage) {
+                    next[i] = {
+                      ...next[i],
+                      tools: [...next[i].tools, { name, args: event.args, status: "run" }],
+                      status: next[i].status === "done" ? "run" : next[i].status,
+                      expanded: true,
+                    };
+                    return { agentSteps: next };
+                  }
+                }
+                next.push({
+                  id: `t${next.length + 1}_${name}`,
+                  title: stage,
+                  status: "run",
+                  tools: [{ name, args: event.args, status: "run" }],
+                  expanded: true,
+                });
                 return { agentSteps: next };
               });
               break;
@@ -281,17 +303,26 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
                   return !!(r && r.error);
                 } catch { return false; }
               })();
+              const settle = (st: FeedStep): FeedStep => {
+                // step 内全部工具收尾 → step 置 done/failed（实时，不等 done 事件）
+                const allSettled = st.tools.length > 0 && st.tools.every((t) => t.status !== "run");
+                const anyErr = st.tools.some((t) => t.status === "err");
+                if (allSettled) return { ...st, status: anyErr && st.status === "run" ? "failed" : "done" };
+                return st;
+              };
               set((s) => {
-                const runIdx = [...s.agentSteps].reverse().findIndex((st) => st.tools.some((t) => t.status === "run"));
-                if (runIdx === -1) return {};
-                const idx = s.agentSteps.length - 1 - runIdx;
-                return {
-                  agentSteps: s.agentSteps.map((st, i) =>
-                    i === idx
-                      ? { ...st, tools: st.tools.map((t, j) => (j === st.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t)) }
-                      : st,
-                  ),
-                };
+                for (let i = s.agentSteps.length - 1; i >= 0; i--) {
+                  const st = s.agentSteps[i];
+                  const ti = st.tools.findIndex((t) => t.name === event.name && t.status === "run");
+                  if (ti !== -1) {
+                    const next = s.agentSteps.slice();
+                    const tools = st.tools.slice();
+                    tools[ti] = { ...tools[ti], result: event.result, status: isErr ? "err" : "ok" };
+                    next[i] = settle({ ...st, tools });
+                    return { agentSteps: next };
+                  }
+                }
+                return {};
               });
               break;
             }

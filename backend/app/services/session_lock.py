@@ -45,6 +45,21 @@ def acquire_session_lock(session_id: object) -> str | None:
     return None
 
 
+def session_lock_held(session_id: object) -> bool:
+    """查询会话锁是否被占用（供状态机推导 EXECUTING，不新增存储）。
+
+    fail-open：查询异常按"未占用"处理——状态机只用于观测/守卫辅助，
+    误判 IDLE 的代价远小于把用户挡在门外。
+    """
+    from app.api.deps import get_cache_repository
+
+    try:
+        return bool(get_cache_repository().exists(_lock_key(session_id)))
+    except Exception:
+        logger.warning("session_lock_probe_failed session=%s", session_id, exc_info=True)
+        return False
+
+
 def release_session_lock(session_id: object, token: str | None) -> None:
     """释放会话锁。
 

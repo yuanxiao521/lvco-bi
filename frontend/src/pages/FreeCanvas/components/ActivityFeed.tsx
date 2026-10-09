@@ -58,6 +58,16 @@ const INTENT_LABEL: Record<string, string> = {
   followup: "追问",
 };
 
+/** 工具 → 所属执行阶段（工作台 step 分组："阶段 → 工具"两级层级，AIChat / 画布两个 store 共用） */
+export function TOOL_STAGE(name: string): string {
+  if (name === "run_analysis") return "执行分析任务";
+  if (/^(list_datasources|list_fields|get_canvas_layout)$/.test(name)) return "理解数据与环境";
+  if (/^(query_sql|query_engine)$/.test(name)) return "查询数据";
+  if (/^(insight|data_quality|clean_suggest|stats_analyzer|recommend_charts|validate_chart|render_chart|polish_text)$/.test(name)) return "分析洞察";
+  if (/^(add_chart_block|add_text_block|update_chart_block|remove_block|arrange_layout|clear_canvas)$/.test(name)) return "画布操作";
+  return "执行任务";
+}
+
 /** 决策动作 → 中文展示名 */
 const ACTION_LABEL: Record<string, string> = {
   call_analysis: "分析引擎",
@@ -86,6 +96,7 @@ const TOOL_LABEL: Record<string, string> = {
   update_chart_block: "修改图表块",
   remove_block: "删除块",
   arrange_layout: "自动布局",
+  clear_canvas: "清空画布",
 };
 
 /** 汇总工具结果：取首行 error 或 ok，供 chip 状态展示 */
@@ -201,9 +212,9 @@ function StepRow({ step, idx }: { step: FeedStep; idx: number }) {
         )}
         <span className="text-[10px] text-muted-foreground shrink-0">{metaInfo.label}</span>
       </div>
-      {/* 子工具列表（展开时显示） */}
+      {/* 子工具列表（展开时显示）：左连接线强化"步骤 → 工具"从属层级 */}
       {expanded && hasTools && (
-        <div className="mt-1.5 ml-6 space-y-1">
+        <div className="mt-1.5 ml-3 pl-3 border-l-2 border-border/50 space-y-1">
           {step.tools.map((t, i) => <ToolRow key={i} tool={t} />)}
         </div>
       )}

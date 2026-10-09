@@ -34,7 +34,7 @@ _CANVAS_MAX_ROWS = 50
 CANVAS_TOOL_NAMES = frozenset({
     "add_chart_block", "add_text_block",
     "update_chart_block", "remove_block", "arrange_layout",
-    "get_canvas_layout",
+    "get_canvas_layout", "clear_canvas",
 })
 
 
@@ -666,6 +666,57 @@ class RemoveBlockTool(BaseTool):
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
+class ClearCanvasTool(BaseTool):
+    """一次性清空画布上的所有块（原子操作）。"""
+
+    name = "clear_canvas"
+    description = (
+        "一次性清空画布上的全部块（所有文本块与图表块），一次调用即可完成。"
+        "当用户要求「清空画布 / 清空所有块 / 全部删除 / 都删掉 / 重新开始 / 把画布弄干净」时，"
+        "必须调用本工具一次完成，不要逐个调用 remove_block："
+        "逐块删除受单轮工具并发上限限制会被截断，导致删不干净、模型凭记忆重提已删除的 id、"
+        "并反复回头向用户确认。"
+    )
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+        }
+
+    async def execute(self, user_id: str = "", db_session=None, **kwargs) -> str:
+        """返回 canvas_action，前端据此一次性清空全部块。
+
+        与 remove_block 的区别：remove_block 一次只删一个块，清空 N 个块需要 N 次调用，
+        而执行层单轮并发上限（MAX_PARALLEL_TOOL_CALLS）会截断多余调用且此前不回喂模型，
+        导致"删不干净 + 凭记忆重提已删 id + 回头反问用户"。清空场景必须走本原子动作。
+        """
+        ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
+        canvas_id = str(kwargs.get("canvas_id") or "")
+        blocks = await _load_canvas_blocks(canvas_id, user_id, db_session)
+        cleared = 0
+        if blocks:
+            ids = [_block_id(b) for b in blocks if _block_id(b)]
+            cleared = len(ids)
+            # 台账同步记录为已移除，避免清空后模型仍对旧 id 发起删除
+            if ledger is not None:
+                for bid in ids:
+                    ledger.record_remove(bid)
+        logger.info("[clear_canvas] canvas_id=%s cleared=%d", canvas_id, cleared)
+        action = {"action": "clear_canvas", "cleared": cleared}
+        return json.dumps(
+            {"ok": True, "canvas_action": action, "cleared": cleared}, ensure_ascii=False
+        )
+
+
 class ArrangeLayoutTool(BaseTool):
     """自动重排画布布局（前端报告式布局已实现）。"""
 
@@ -767,5 +818,6 @@ ToolRegistry.register(AddChartBlockTool())
 ToolRegistry.register(AddTextBlockTool())
 ToolRegistry.register(UpdateChartBlockTool())
 ToolRegistry.register(RemoveBlockTool())
+ToolRegistry.register(ClearCanvasTool())
 ToolRegistry.register(ArrangeLayoutTool())
 ToolRegistry.register(GetCanvasLayoutTool())

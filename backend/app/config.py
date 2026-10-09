@@ -94,14 +94,21 @@ class Settings(BaseSettings):
     #       编排器/ReAct 降级为「被调用工具」，不再直接对用户说话
     # False: 保持旧双路径（路由分类器 → simple 走 ReAct / complex 走 AgentOrchestrator）
     LEAD_AGENT_ENABLED: bool = False
-    # 意图识别超时（秒）：超时降级为规则意图，不阻塞主链路
-    LEAD_INTENT_TIMEOUT: float = 8.0
+    # 意图识别超时（秒）：超时降级为规则意图，不阻塞主链路。
+    # 8s 实测偏紧（真机探针一轮合并调用 2.2s 正常，但深思考模型尖峰可到 9-10s），
+    # 超时降级的代价是关键词兜底误判意图（"清空画布"被判 chat → 答非所问），故放宽。
+    LEAD_INTENT_TIMEOUT: float = 12.0
     # 决策超时（秒）：超时降级为确定性决策（按意图直接映射动作）
-    LEAD_DECISION_TIMEOUT: float = 10.0
+    LEAD_DECISION_TIMEOUT: float = 15.0
     # 注入 LeadContext 的最近轮次上限（短期记忆窗口）
-    LEAD_MAX_TURNS_IN_CTX: int = 20
+    LEAD_MAX_TURNS_IN_CTX: int = 30  # AB-B: 20->30
     # 记忆合并节流：未并入长期记忆的用户轮数达到该阈值才触发一次累积合并
-    LEAD_MEMORY_MERGE_ROUNDS: int = 4
+    LEAD_MEMORY_MERGE_ROUNDS: int = 6  # AB-B: 4->6
+    # 清空类目标代码直执行开关（AB 实验）：False 时回落 LLM 推理选工具（观察用）
+    LEAD_CLEAR_DIRECT_EXEC: bool = True
+    # 清空类目标是否代码直执行 clear_canvas（绕过 LLM）。AB 开关：False 时回落
+    # LLM 推理路径，用于观测 LLM 在清空目标下的真实工具选择行为。
+    LEAD_CLEAR_DIRECT_EXEC: bool = True
     # 单次合并最多并入的消息条数：超出部分不会被丢弃，而是留到下一轮继续并（水位驱动）。
     LEAD_MEMORY_MAX_MERGE_MESSAGES: int = 24
     # 连续失败熔断阈值：达到后暂停合并，避免每轮白烧一次摘要 LLM 调用（借鉴 Claude Code

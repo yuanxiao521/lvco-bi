@@ -67,6 +67,15 @@ class ConversationPhase(str, Enum):
 # ANALYZING:  查数据(list_fields取列 + query/query_engine) + 数据质量 + 洞察 + 清洗建议
 # GENERATING: 图表生成(render) + 图表自校验(validate) + 类型推荐(recommend)
 # REPORTING:  报告润色
+# 不暴露给 Agent 的工具（集中清单）：属 UI 交互能力或未启用能力——
+# 注册表保留（前端按钮/独立端点仍可用、可一行恢复），但一律不进 LLM schema、
+# 不进阶段白名单、不进编排器/执行器白名单。
+# 判据：能力在 UI 已有调用路径 + agent 路径实测 0 调用。见《工具审计（20 工具）》。
+AGENT_HIDDEN_TOOLS = frozenset({
+    "insight", "clean_suggest", "polish_text", "recommend_charts",
+    "validate_chart", "data_quality",
+})
+
 _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
     ConversationPhase.SELECTING: {"list_datasources", "list_metrics"},
     ConversationPhase.ANALYZING: {
@@ -75,34 +84,31 @@ _PHASE_TOOLS: dict[ConversationPhase, set[str]] = {
         "list_metrics",
         "query_sql",
         "query_engine",
-        "data_quality",
-        "insight",
-        "clean_suggest",
         "stats_analyzer",
         "add_chart_block",
         "add_text_block",
         "update_chart_block",
         "remove_block",
+        "clear_canvas",
         "arrange_layout",
         "get_canvas_layout",
     },
     ConversationPhase.GENERATING: {
         "render_chart",
-        "validate_chart",
-        "recommend_charts",
         "add_chart_block",
         "add_text_block",
         "update_chart_block",
         "remove_block",
+        "clear_canvas",
         "arrange_layout",
         "get_canvas_layout",
     },
     ConversationPhase.REPORTING: {
-        "polish_text",
         "add_text_block",
         "add_chart_block",
         "update_chart_block",
         "remove_block",
+        "clear_canvas",
         "get_canvas_layout",
     },
 }
@@ -399,7 +405,7 @@ class ToolRegistry:
         """返回所有标记为 orchestrator_safe=True 的工具名称集合。"""
         return {
             name for name, tool in cls._tools.items()
-            if getattr(tool, "orchestrator_safe", False)
+            if getattr(tool, "orchestrator_safe", False) and name not in AGENT_HIDDEN_TOOLS
         }
 
 

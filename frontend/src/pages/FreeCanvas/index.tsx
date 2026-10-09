@@ -56,7 +56,7 @@ import { REPORT, resolveGeometry, nextChartSlot, nextFullWidthSlot, applyReportL
 import { remapChartsForDatasource } from "../../utils/canvasDatasource";
 // 跨图表联动筛选：图表 → store → 其他图表重查
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
-import { Filter as FilterIcon, RefreshCw } from "lucide-react";
+import { Filter as FilterIcon, RefreshCw, Eraser } from "lucide-react";
 
 // 默认画布初始块：包含一个一级标题、一段描述文本、一个二级标题
 const DEFAULT_BLOCKS: CanvasBlock[] = [
@@ -1198,6 +1198,19 @@ export default function FreeCanvas() {
         break;
       }
 
+      // 一次性清空全部块：Agent 侧的 clear_canvas 原子动作。
+      // 取代"逐块 remove_block"——后者受单轮工具并发上限截断，会删不干净并反复要求确认。
+      case "clear_canvas": {
+        setBlocks([]);
+        setChartConfigs({});
+        setChartResults({});
+        setSelectedBlockIdx(null);
+        if (canvasId) {
+          updateCanvasBlocks(canvasId, []).catch(() => {});
+        }
+        break;
+      }
+
       // 全量重排：报告式布局（h1/h2/text 通栏 + 图表双列网格）
       // 系统自动触发（auto:true，编排器落块后兜底）不弹 toast，避免批量落块时刷屏
       case "arrange_layout": {
@@ -1505,6 +1518,33 @@ export default function FreeCanvas() {
     setListRefreshTick((t) => t + 1);
   };
 
+  // 清空画布上的全部块：保留画布本身（canvasId 不变），区别于上面 handleResetCanvas
+  // ——后者是"删除整个画布到回收站"，会把用户踢出当前画布。
+  const handleClearBlocks = async () => {
+    if (!blocks.length) {
+      toast.success("画布已经是空的");
+      return;
+    }
+    const ok = await toast.confirm(
+      `确定要清空画布上的全部 ${blocks.length} 个块吗？画布会保留，可继续在当前画布上操作。`
+    );
+    if (!ok) return;
+    setBlocks([]);
+    setChartConfigs({});
+    setChartResults({});
+    setSelectedBlockIdx(null);
+    // 立即回写后端，不等 autosave 的 1.5s debounce（避免用户刷新后块又回来）
+    if (canvasId) {
+      try {
+        await updateCanvasBlocks(canvasId, []);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "清空画布失败");
+        return;
+      }
+    }
+    toast.success(`已清空 ${blocks.length} 个块`);
+  };
+
   // 打开指定画布继续编辑：加载其 blocks 与图表配置，并绑定 canvasId（对该画布 autosave）
   const openCanvasById = useCallback(async (id: string) => {
     try {
@@ -1784,11 +1824,24 @@ export default function FreeCanvas() {
             {exportingPdf ? "导出中..." : "导出 PDF"}
           </button>
           <button
+            onClick={handleClearBlocks}
+            disabled={!blocks.length}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12px] font-medium text-muted-foreground hover:text-danger border border-border bg-white disabled:opacity-50"
+            title="清空画布上的全部块（保留画布本身，可继续在当前画布上操作）"
+          >
+            <Eraser className="w-3.5 h-3.5" />
+            清空全部块
+          </button>
+          <button
             onClick={handleResetCanvas}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12px] font-medium text-muted-foreground hover:text-danger border border-border bg-white"
-            title={canvasId ? "删除画布（进入回收站）" : "清空本地画布草稿，重置为空白"}
+            title={
+              canvasId
+                ? "删除整个画布（移入回收站，可在回收站恢复）"
+                : "清空本地画布草稿，重置为空白"
+            }
           >
-            {canvasId ? "删除画布" : "清空画布"}
+            {canvasId ? "删除画布" : "重置草稿"}
           </button>
         </div>
       </header>

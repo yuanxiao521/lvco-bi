@@ -289,20 +289,23 @@ def _build_react_tools(extra_plannable_tools: set[str] | None) -> list[dict]:
     from app.services.agent_tools import ToolRegistry
     from app.services.canvas_tools import CANVAS_TOOL_NAMES
 
+    from app.services.agent_tools import AGENT_HIDDEN_TOOLS
+
     all_tools = ToolRegistry.schemas()
     if extra_plannable_tools:
-        allowed = set(extra_plannable_tools)
+        allowed = set(extra_plannable_tools) - AGENT_HIDDEN_TOOLS
         return [
             t for t in all_tools
             if isinstance(t, dict)
             and isinstance(t.get("function"), dict)
             and t["function"].get("name") in allowed
         ]
+    hidden = CANVAS_TOOL_NAMES | AGENT_HIDDEN_TOOLS
     return [
         t for t in all_tools
         if isinstance(t, dict)
         and isinstance(t.get("function"), dict)
-        and t["function"].get("name") not in CANVAS_TOOL_NAMES
+        and t["function"].get("name") not in hidden
     ]
 
 
@@ -472,6 +475,57 @@ async def run_analysis(
     history = list(getattr(lead_ctx, "turns", []) or [])
     mode = str(args.constraints.get("mode") or ("canvas" if args.entry == "canvas" else "orchestrator"))
 
+    # ── 清空类目标（canvas 入口）：代码层直执行 clear_canvas，不走 LLM 推理 ──
+    # 浏览器探针实测：LLM 拿到"清空"goal 会无视 system 硬规则——或逐块 remove_block
+    # （漏删残留 1 块），或反而 add 新块（"清空"目标下加了 6 个块）。清空是原子操作，
+    # 不需要 LLM 规划；这正是"收敛不依赖 LLM 自觉、代码层锁死"同一原则的延伸。
+    _CLEAR_GOAL_MARKERS = ("清空", "清掉", "删掉所有", "删除所有", "全部删除", "remove all")
+    if (
+        args.entry == "canvas" and args.canvas_id
+        and getattr(settings, "LEAD_CLEAR_DIRECT_EXEC", True)
+        and any(m in (args.goal or "") for m in _CLEAR_GOAL_MARKERS)
+    ):
+        import json as _json
+
+        from app.services.canvas_tools import ToolRegistry as _CanvasToolRegistry
+
+        _tool = _CanvasToolRegistry.get("clear_canvas")
+        if _tool is not None:
+            _started = time.monotonic()
+            _raw = await _tool.execute(
+                user_id=user_id, db_session=db_session, canvas_id=str(args.canvas_id),
+            )
+            try:
+                _parsed = _json.loads(_raw)
+            except Exception:  # noqa: BLE001
+                _parsed = {}
+            _cleared = _parsed.get("cleared", 0)
+            # 以 tool_call/tool_result 形状 emit：ai.py 的 SSE 转发层只从 tool_result
+            # 内嵌的 canvas_action 提取落块动作（独立 canvas_action 事件会被 if/elif
+            # 链丢弃）；顺带给前端执行记录一条完整工具链。
+            await emit({"type": "tool_call", "name": "clear_canvas", "args": {}})
+            _result_payload = {"ok": True, "cleared": _cleared,
+                               "canvas_action": _parsed.get("canvas_action")}
+            await emit({"type": "tool_result", "name": "clear_canvas",
+                        "result": _json.dumps(_result_payload, ensure_ascii=False)})
+            _cleared_n = _parsed.get("cleared", 0)
+            _report = (
+                f"已清空画布，共移除 {_cleared_n} 个块。画布现在为空，可以开始新的内容。"
+                if _cleared_n else "画布当前没有内容，已经是空的了。"
+            )
+            await emit({"type": "text", "content": _report})
+            logger.info(
+                "[run_analysis] clear_canvas_direct canvas=%s cleared=%s elapsed_ms=%d",
+                args.canvas_id, _cleared_n, int((time.monotonic() - _started) * 1000),
+            )
+            return RunAnalysisResult(
+                success=True,
+                report=_report,
+                blocks_added=0,
+                report_source="template",
+                tool_chain=[{"tool": "clear_canvas", "ok": True, "cleared": _cleared_n}],
+            )
+
     # 画布感知（对 Worker）：把数据库中已落盘的画布布局注入执行上下文。
     # 不拼进 goal（保持幂等键稳定），以一条 assistant 历史消息携带——Worker 据此
     # 知道画布现状，避免重复添加；也可在落块后调用 get_canvas_layout 刷新/查重叠。
@@ -630,26 +684,44 @@ async def run_analysis(
                     "role": "assistant",
                     "content": f"【压缩摘要】【历史记忆】{lead_ctx.history_summary}",
                 })
-            for h in history[-20:]:
+            for h in history[-30:]:  # AB-B: 20->30
                 if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
                     messages.append({"role": h["role"], "content": str(h.get("content", ""))})
-            messages = compress_history(messages, keep=60, max_chars=150000)
+            messages = compress_history(messages, keep=40, max_chars=150000)  # AB-B: 60->40
 
             is_canvas = args.entry == "canvas"
             if is_canvas:
-                # 画布简单任务：react 也要"落块交付"。当前阶段工具已含 add_chart_block/
-                # add_text_block，这里用一条系统指令固化落块契约，避免被当作纯文本问答。
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        "任务环境：分析画布（Canvas）。你的最终交付是【在画布上落块】，不是纯文本回复。"
-                        "规则：\n"
-                        "1. 取数用 query_engine/query_sql，或直接 add_chart_block（它内部会自取数）。\n"
-                        "2. 拿到数据后立即用 add_chart_block 生成图表块；字段名必须用字段清单里的真实列名（勿汉化/臆造）。\n"
-                        "3. 需要文字时用 add_text_block 写叙事文本块；不要用 render_chart（那是对话框文本图，画布不用）。\n"
-                        "4. 数据形态不合适就换维度/换图表类型重试，不要反复空查。"
-                    ),
-                })
+                # 清空类目标（代码层检测，不靠 LLM 自觉）：goal 含清空意图时，
+                # 压制下方的"落块交付"契约——否则 LLM 拿着"清空"目标 + "必须落块"
+                # 契约会冲突，实测演变成"清空反而加了 6 个块"。
+                _clear_goal = any(m in (args.goal or "") for m in (
+                    "清空", "清掉", "删掉所有", "删除所有", "全部删除", "remove all",
+                ))
+                if _clear_goal:
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "【硬规则·清空任务】本轮目标是清空/删除画布内容："
+                            "必须调用 clear_canvas 工具（一次调用即清空画布上全部块），"
+                            "禁止调用 add_text_block / add_chart_block / update_chart_block。"
+                            "调用成功后向用户报告清空完成即可；若画布本已为空，同样调用一次"
+                            " clear_canvas 并告知用户画布已为空。"
+                        ),
+                    })
+                else:
+                    # 画布简单任务：react 也要"落块交付"。当前阶段工具已含 add_chart_block/
+                    # add_text_block，这里用一条系统指令固化落块契约，避免被当作纯文本问答。
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "任务环境：分析画布（Canvas）。你的最终交付是【在画布上落块】，不是纯文本回复。"
+                            "规则：\n"
+                            "1. 取数用 query_engine/query_sql，或直接 add_chart_block（它内部会自取数）。\n"
+                            "2. 拿到数据后立即用 add_chart_block 生成图表块；字段名必须用字段清单里的真实列名（勿汉化/臆造）。\n"
+                            "3. 需要文字时用 add_text_block 写叙事文本块；不要用 render_chart（那是对话框文本图，画布不用）。\n"
+                            "4. 数据形态不合适就换维度/换图表类型重试，不要反复空查。"
+                        ),
+                    })
             messages.append({"role": "user", "content": args.goal})
 
             queue: asyncio.Queue = asyncio.Queue()

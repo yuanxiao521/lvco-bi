@@ -46,7 +46,7 @@ _MAX_STEP_FAILURES = 3  # 同一工具+参数连续失败跳过阈值
 # 时，执行器可主动拉真实列名，避免凭空猜列名导致整块失败。
 _EXECUTOR_TOOL_NAMES = frozenset({
     "add_chart_block", "add_text_block",
-    "update_chart_block", "remove_block", "arrange_layout",
+    "update_chart_block", "remove_block", "clear_canvas", "arrange_layout",
     "list_fields",
 })
 

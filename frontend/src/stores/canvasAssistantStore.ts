@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { listCanvasSessions, listMessages } from "../api/ai";
 import { tokenStore } from "../api/client";
 import type { AISession } from "../types/api";
-import { mapProgressStatus } from "../pages/FreeCanvas/components/ActivityFeed";
+import { mapProgressStatus, TOOL_STAGE } from "../pages/FreeCanvas/components/ActivityFeed";
 import type { AgentMeta, FeedStep } from "../pages/FreeCanvas/components/ActivityFeed";
 
 // ============================================================
@@ -75,50 +75,6 @@ function buildWelcome(
   };
 }
 
-/** 工具名 → 中文名（无步骤时自动建"执行 xxx"步骤标题用的兜底映射，对齐后端全部工具） */
-function TOOL_FALLBACK_NAME(name: string): string {
-  const map: Record<string, string> = {
-    run_analysis: "分析执行",
-    list_datasources: "浏览数据源",
-    list_fields: "查看字段",
-    query_sql: "SQL 查询",
-    query_engine: "结构化查询",
-    insight: "自动洞察",
-    data_quality: "数据质量",
-    clean_suggest: "清洗建议",
-    stats_analyzer: "统计分析",
-    render_chart: "生成图表",
-    validate_chart: "校验图表",
-    recommend_charts: "推荐图表",
-    polish_text: "润色文本",
-    add_chart_block: "新增图表",
-    add_text_block: "写文本",
-    update_chart_block: "改图表",
-    remove_block: "删除块",
-    arrange_layout: "自动布局",
-  };
-  return map[name] ?? name;
-}
-
-/** canvas_action 类型 → 动作中文 */
-const ACTION_LABEL: Record<string, string> = {
-  add_chart_block: "添加图表", add_text_block: "添加文本", update_chart_block: "更新图表",
-  remove_block: "删除块", arrange_layout: "自动布局",
-};
-
-/** 根据 canvas_action 生成一段可读的描述文本 */
-function actionDesc(action: any): string {
-  const block = action?.block;
-  const title = block?.title || block?.content || "";
-  const target = action?.blockId || "";
-  switch (action?.action) {
-    case "add_chart_block": return `「${title}」已添加`;
-    case "add_text_block": return `「${title}」已添加`;
-    case "update_chart_block": return `块 ${target} 已更新`;
-    case "remove_block": return `块 ${target} 已删除`;
-    default: return "";
-  }
-}
 
 // ---- 模块级"同步互斥"与流控制器（组件卸载后依旧存活） ----
 let streamingLock = false;          // 并发互斥：同步级，替代组件内 streamingRef
@@ -158,8 +114,12 @@ interface CanvasAssistantStore {
   applySession: (sid: string | null) => void;
   /** 新对话（1:1 画布会话：清空界面，下一次发送后端复用唯一会话并清空历史） */
   newConversation: (ctx: CanvasAssistantCtx) => void;
-  /** 发送消息：首步校验 + SSE 流式消费（核心逻辑迁移自 AIAssistant.handleSend） */
-  send: (content: string, ctx: CanvasAssistantCtx) => Promise<void>;
+  /** 发送消息：首步校验 + SSE 流式消费（核心逻辑迁移自 AIAssistant.handleSend）。
+   *  uiAction：HITL 确认卡片动作（{type:"confirm"|"cancel"}），点按钮时携带，后端守卫据此短路决策。 */
+  send: (content: string, ctx: CanvasAssistantCtx, uiAction?: { type: string } | null) => Promise<void>;
+  /** 待确认卡片（后端 confirm_request 事件的载荷）；null = 无待确认。用户点击按钮或取消后清除 */
+  pendingConfirm: { goal: string; question: string } | null;
+  clearPendingConfirm: () => void;
 }
 
 export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get) => ({
@@ -171,6 +131,9 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
   isStreaming: false,
   sessionsLoaded: false,
   open: false,
+  pendingConfirm: null,
+
+  clearPendingConfirm: () => set({ pendingConfirm: null }),
 
   setOpen: (open) => set({ open }),
 
@@ -220,6 +183,16 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
 
   resetForCanvas: (ctx) => {
     const cid = ctx.canvasId ?? null;
+    set({ pendingConfirm: null });
+    // 同画布重入守卫：首条消息发送时 ensureCanvas 会创建画布（canvasId: null → 新 id），
+    // 组件随之触发本函数。此刻本画布的流正在跑（streamingLock 已置位，但
+    // activeStreamCanvasId 要到 ensureCanvas 之后才赋值，故 null 也视为"本流初始化中"）——
+    // 清空 messages 会让流事件的 patchAssistant 按找不到的 id 静默失效，
+    // assistant 回复整条丢失（实测首条消息必现）。同画布 ≠ 串台，保留现场返回。
+    if (streamingLock && cid && (activeStreamCanvasId === cid || !activeStreamCanvasId)) {
+      activeCanvasId = cid;
+      return;
+    }
     // 进行中的流若属于别的画布：先中止，避免它继续往当前画布写消息/进度/落块
     if (streamingLock && activeStreamCanvasId !== cid) {
       try { activeCancel?.(); } catch { /* ignore */ }
@@ -247,6 +220,10 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
 
   onCanvasReady: async (canvasId) => {
     if (!canvasId || get().sessionsLoaded) return;
+    // 流进行中禁止历史恢复：DB 里的 assistant 正文要等流结束才落库，此刻恢复会把
+    // 流中的 assistant 占位整体覆盖（patchAssistant 随后全部 MISS，回复整条丢失）。
+    // 流结束后组件 effect 再触发时（切走切回/列表刷新）DB 已完整，恢复无害。
+    if (get().isStreaming) return;
     // 画布激活态校验：若期间用户已切走或重设为别的画布，本回调返回
     if (activeCanvasId !== canvasId) return;
     const { canvasSessions } = get();
@@ -286,7 +263,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     set({ steps: [], meta: null, messages: [buildWelcome(ctx.datasourceId, ctx.fieldMeta)] });
   },
 
-  send: async (content, ctx) => {
+  send: async (content, ctx, uiAction) => {
     // [关键] 同步级互斥：秒级连点不会绕过
     if (streamingLock) return;
     const trimmed = (content ?? "").trim();
@@ -379,6 +356,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
           new_session: newSession || false,
           message: trimmed,
           canvas_context: canvasContext,
+          ui_action: uiAction ?? null,
         }),
       });
       newSession = false;
@@ -426,6 +404,11 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
             const pTotal = Number(event.total ?? 0);
             // 带 round 前缀，避免多轮循环下第二轮 index 覆盖第一轮步骤
             const pRound = Number(event.round ?? 0);
+            // react 模式的 per-tool progress（total=0）与 tool_call/tool_result 完全冗余：
+            // 每个工具各建一个"执行 xxx"step，把执行记录压成一串无层级平铺行。忽略之，
+            // 工具状态由 tool_call/tool_result 驱动；编排器的 plan 级 progress（total>0，
+            // 有真实的 1/n 步骤语义）仍保留建 step。
+            if (!(pTotal > 0)) break;
             const stepId = `p${pRound}_${pIdx}`;
             set((s) => {
               const base = {
@@ -449,18 +432,30 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
             patchAssistant(assistantContent);
             break;
           }
-          case "tool_call":
+          case "tool_call": {
+            const name = event?.name ?? "工具";
+            const stage = TOOL_STAGE(name);
             set((s) => {
-              if (s.steps.length === 0) {
-                runSeq += 1;
-                return { steps: [{ id: `${runSeq}`, title: `执行 ${TOOL_FALLBACK_NAME(event?.name ?? "工具")}`, status: "run", tools: [{ name: event.name, args: event.args, status: "run" }] }] };
-              }
               const next = s.steps.slice();
-              const last = next[next.length - 1];
-              next[next.length - 1] = { ...last, tools: [...last.tools, { name: event.name, args: event.args, status: "run" }] };
+              // 阶段分桶：找本次流内最后一个同阶段 step 聚合（"阶段 → 工具"两级层级），
+              // 替代旧的"永远 append 到最后一个 step"——那会把所有工具塞进同一个无语义的
+              // "执行 分析执行" step，整个执行记录变成一串平铺的同名行。
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].title === stage) {
+                  next[i] = {
+                    ...next[i],
+                    tools: [...next[i].tools, { name, args: event.args, status: "run" }],
+                    status: next[i].status === "done" ? "run" : next[i].status,
+                  };
+                  return { steps: next };
+                }
+              }
+              runSeq += 1;
+              next.push({ id: `${runSeq}`, title: stage, status: "run", tools: [{ name, args: event.args, status: "run" }] });
               return { steps: next };
             });
             break;
+          }
           case "tool_result": {
             const isErr = (() => {
               try {
@@ -469,6 +464,13 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
               } catch { return false; }
             })();
             const tName = event.name ?? "";
+            const settle = (st: FeedStep): FeedStep => {
+              // step 内全部工具已收尾 → step 置 done（不等 done 事件统一收敛，实时反映）
+              const allSettled = st.tools.length > 0 && st.tools.every((t) => t.status !== "run");
+              const anyErr = st.tools.some((t) => t.status === "err");
+              if (allSettled) return { ...st, status: anyErr && st.status === "run" ? "failed" : "done" };
+              return st;
+            };
             set((s) => {
               for (let si = s.steps.length - 1; si >= 0; si--) {
                 const step = s.steps[si];
@@ -477,7 +479,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
                     const next = s.steps.slice();
                     const newTools = step.tools.slice();
                     newTools[ti] = { ...newTools[ti], result: event.result, status: isErr ? "err" : "ok" };
-                    next[si] = { ...step, tools: newTools };
+                    next[si] = settle({ ...step, tools: newTools });
                     return { steps: next };
                   }
                 }
@@ -485,17 +487,30 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
               return {
                 steps: s.steps.map((st, i) =>
                   i === s.steps.length - 1
-                    ? { ...st, tools: st.tools.map((t, j) => (j === st.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t)) }
+                    ? settle({ ...st, tools: st.tools.map((t, j) => (j === st.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t)) })
                     : st,
                 ),
               };
             });
             break;
           }
+          case "confirm_request": {
+            // HITL 确认卡片：后端 ask_user(ask_kind=confirm) 的载荷。
+            // 用户点按钮 → 带 ui_action 的下一请求由后端守卫短路恢复/取消。
+            set({
+              pendingConfirm: {
+                goal: String(event.goal ?? ""),
+                question: String(event.question ?? ""),
+              },
+            });
+            break;
+          }
           case "canvas_action": {
             localCanvasActions += 1;
-            assistantContent += `\n\n> 已${ACTION_LABEL[event.action] ?? event.action}: ${actionDesc(event)}\n`;
-            patchAssistant(assistantContent);
+            // 画布动作不再拼进对话正文：逐条 += 会产出「已删除块: 块 xxx 已删除」
+            // 这类冗余回执（且 ACTION_LABEL 与 desc 表述重复），污染对话观感。
+            // 工具调用本身已由 tool_call / tool_result 记入执行记录（steps），
+            // 画布上的增删改本身也是可见反馈，无需在正文里再念一遍。
             if (ctx.onCanvasAction) ctx.onCanvasAction(event);
             break;
           }
