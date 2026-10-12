@@ -56,7 +56,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "deepseek-v4-flash"
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_timeout: int = 30
+    # LLM 调用超时（秒）。httpx 单值 = connect/read/write/pool 同值；read 指
+    # 两次流块之间的空闲而非总时长。30s 按 deepseek-v4-flash 出块速度调的，换
+    # glm-5.3-flash（本地网关串行排队 + 生成更慢）后，长收尾文本流出现 >30s
+    # 块间空闲被掐断（现象：节点 reason 异常 str 为空，画布复杂任务 success=False）。
+    openai_timeout: int = 120
     MAX_UPLOAD_SIZE_MB: int = 100
     UPLOAD_DIR: str = "./data/uploads"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
