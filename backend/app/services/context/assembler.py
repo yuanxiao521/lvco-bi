@@ -35,9 +35,11 @@ def render_window_for_decision(
     装配规则：不切句子（整条消息从新到旧累加，装不下就停；单条自身超预算才截它）、
     长期记忆有上限（预算 - 活记忆预留）、成对对齐丢孤立回答、兜底硬上限。
     """
-    limit = int(max_chars or getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000)
+    # P0：limit 语义仍是"字符"（与 legacy 逐字节等价）；阶段 4 由 Compressor 接管后
+    # 切换为 token 语义。配置项先行统一读 token（等价换算见 config 别名注释）。
+    limit = int(max_chars or getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400)
     reserve = min(
-        max(0, int(getattr(settings, "LEAD_CTX_LIVE_RESERVE_CHARS", 800) or 0)),
+        max(0, int(getattr(settings, "LEAD_CTX_LIVE_RESERVE_TOKENS", 800) or 0)),
         limit // 2,
     )
 
@@ -163,7 +165,9 @@ class Assembler:
             # 否则 legacy 摘要可能上千字，原样注入会挤占追问所需的空间。
             # P0：精确复刻 legacy 的字符截断；阶段 4 由 Compressor 的记忆策略接管。
             mem = parts[BlockKind.MEMORY.value]
-            mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000) // 3)
+            # legacy: LEAD_CTX_MAX_CHARS(4000字)//3 = 1333 字（中文 1:1 → 1333 token）。
+            # 等价派生：LEAD_CTX_MAX_TOKENS(2400, 混排0.6) * 5 / 9 ≈ 1333。
+            mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400) * 5 // 9)
             if len(mem) > mem_cap:
                 mem = mem[:mem_cap] + "…"
                 ledger.degrade("memory_capped_for_answer")

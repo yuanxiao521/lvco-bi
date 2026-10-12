@@ -27,6 +27,16 @@ DEGRADE_TOOL_COMPACTED = "tool_result_compacted"
 DEGRADE_MESSAGE_LIST_FOLDED = "message_list_folded"
 
 
+def _tokens_to_json_chars(tokens: int) -> int:
+    """token → 字符（JSON 0.4 系数；底层 compact_result_json 仍是字符口径）。"""
+    return chars_for_tokens(tokens, TOKENS_PER_CHAR_JSON)
+
+
+def _tokens_to_mixed_chars(tokens: int) -> int:
+    """token → 字符（混排 0.6 系数；底层 compress_history 仍是字符口径）。"""
+    return chars_for_tokens(tokens, TOKENS_PER_CHAR_MIXED)
+
+
 class Policy(Protocol):
     """压缩策略协议：把一块内容压进给定 token 预算。"""
 
@@ -58,7 +68,7 @@ class ToolResultPolicy:
         max_chars = (
             chars_for_tokens(max_tokens, TOKENS_PER_CHAR_JSON)
             if max_tokens > 0
-            else int(self._fallback_chars or getattr(settings, "RESULT_MAX_CHARS", 2000) or 2000)
+            else _tokens_to_json_chars(int(getattr(settings, "TOOL_RESULT_MAX_TOKENS", 800) or 800))
         )
         out = compact_result_json(block.text, max_chars=max_chars)
         if out == block.text:
@@ -83,7 +93,7 @@ class MessageListPolicy:
         max_chars = (
             chars_for_tokens(max_tokens, TOKENS_PER_CHAR_MIXED)
             if max_tokens > 0
-            else int(self._fallback_chars or getattr(settings, "CONTEXT_MAX_CHARS", 150000) or 150000)
+            else _tokens_to_mixed_chars(int(getattr(settings, "MESSAGE_LIST_MAX_TOKENS", 90000) or 90000))
         )
         keep = self._keep if self._keep is not None else int(getattr(settings, "CONTEXT_KEEP", 60) or 60)
         out = compress_history([dict(m) for m in block.messages], keep=keep, max_chars=max_chars)

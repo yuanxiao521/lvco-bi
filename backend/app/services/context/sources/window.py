@@ -21,7 +21,7 @@ def select_for_answer(
     规则：取最近若干"整条"消息；总字符超预算即停；只有最新的那一条自身超预算时
     才截断它；最后丢掉开头的孤立回答——除非整个窗口只剩回答（保住一点线索）。
     """
-    limit = int(max_chars or getattr(settings, "LEAD_CTX_ANSWER_HISTORY_CHARS", 2000) or 2000)
+    limit = int(max_chars or getattr(settings, "LEAD_CTX_ANSWER_HISTORY_TOKENS", 2000) or 2000)
     picked: list[dict] = []
     used = 0
     for t in reversed(turns[-max(1, max_turns):]):

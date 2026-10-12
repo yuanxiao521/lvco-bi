@@ -1047,7 +1047,7 @@ async def data_chat_stream(
             # 一个多图答案就能灌进上万字符 —— 这是"免费可省的一层"：先裁状态载荷，再谈摘要。
             chart_summary_note = ""
             if session_id:
-                chart_budget = int(getattr(settings, "LEAD_CTX_CHART_SUMMARY_CHARS", 2000) or 2000)
+                chart_budget = int(getattr(settings, "LEAD_CTX_CHART_SUMMARY_TOKENS", 1200) or 1200)   # token 口径（混排）
                 prior_msgs = (
                     await db.execute(
                         select(AIMessage)

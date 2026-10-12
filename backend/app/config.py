@@ -2,6 +2,15 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+# 字符 ↔ token 换算系数（与 services/context/budgets.py 保持一致；config 是最底层模块，
+# 不允许 import app 内其它模块，故这里内联同款系数）。
+_TOKENS_PER_CHAR_MIXED = 0.6   # 中英混排提示
+_TOKENS_PER_CHAR_JSON = 0.4    # JSON / 工具结果
+
+
+def _chars_for_tokens(tokens: int, tokens_per_char: float) -> int:
+    return int(round(max(0, tokens) / tokens_per_char)) if tokens_per_char > 0 else 0
+
 # .env 优先于系统环境变量：本机环境变量可能残留旧 LLM key/base_url
 # （如用户级 OPENAI_API_KEY 指向旧提供方），而 pydantic-settings
 # 默认"环境变量 > .env 文件"，会导致换 key 后进程仍用旧配置。
@@ -108,59 +117,106 @@ class Settings(BaseSettings):
     LEAD_INTENT_TIMEOUT: float = 12.0
     # 决策超时（秒）：超时降级为确定性决策（按意图直接映射动作）
     LEAD_DECISION_TIMEOUT: float = 15.0
-    # 注入 LeadContext 的最近轮次上限（短期记忆窗口）
+    # 清空类目标代码直执行开关（AB 实验）：False 时回落 LLM 推理选工具（观察用）。
+    # （历史上有两处重复定义，迁移 token 口径时合并为一处；两值相同无行为差异。）
+    LEAD_CLEAR_DIRECT_EXEC: bool = True
+
+    # 意图识别超时（秒）：超时降级为规则意图，不阻塞主链路。
+    # 8s 实测偏紧（真机探针一轮合并调用 2.2s 正常，但深思考模型尖峰可到 9-10s），
+    # 超时降级的代价是关键词兜底误判意图（"清空画布"被判 chat → 答非所问），故放宽。
+    # ── 上下文与记忆预算（token 口径） ─────────────────────────────────────────
+    # 单位约定：**一律 token**，禁止字符数比较（换算系数见 services/context/budgets.py：
+    # 中文散文 ≈1.0 / 中英混排 ≈0.6 / JSON≈0.4 token/字）。
+    # 旧 *_CHARS 字段已降级为 @property 兼容别名（从 token 反推），仅剩少量旧调用点使用，
+    # 全部改读 token 后删除。
+
+    # 注入决策上下文的最近消息条数上限（短期记忆窗口；阶段 3 改为"轮"口径 WINDOW_MAX_ROUNDS）
     LEAD_MAX_TURNS_IN_CTX: int = 30  # AB-B: 20->30
     # 记忆合并节流：未并入长期记忆的用户轮数达到该阈值才触发一次累积合并
     LEAD_MEMORY_MERGE_ROUNDS: int = 6  # AB-B: 4->6
-    # 清空类目标代码直执行开关（AB 实验）：False 时回落 LLM 推理选工具（观察用）
-    LEAD_CLEAR_DIRECT_EXEC: bool = True
-    # 清空类目标是否代码直执行 clear_canvas（绕过 LLM）。AB 开关：False 时回落
-    # LLM 推理路径，用于观测 LLM 在清空目标下的真实工具选择行为。
-    LEAD_CLEAR_DIRECT_EXEC: bool = True
     # 单次合并最多并入的消息条数：超出部分不会被丢弃，而是留到下一轮继续并（水位驱动）。
     LEAD_MEMORY_MAX_MERGE_MESSAGES: int = 24
     # 连续失败熔断阈值：达到后暂停合并，避免每轮白烧一次摘要 LLM 调用（借鉴 Claude Code
     # 的 MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES；其线上观测到 1279 个会话曾连续失败 50+ 次）。
     LEAD_MEMORY_MAX_FAILURES: int = 3
-    # 长期记忆摘要的目标字数（分区化结构化记忆，四节：口径/数字与结论/数据源/未决问题）。
+    # 长期记忆摘要的目标 token 数（分区化结构化记忆，四节：口径/数字与结论/数据源/未决问题）。
     # 旧值 200 字实测会被"新信息挤旧信息"，口径容易丢；放宽到 600 且分节后口径有固定位置。
-    LEAD_MEMORY_SUMMARY_CHARS: int = 600
-    # 摘要输出的 max_tokens（须显著大于字数的 token 上限，留出 <analysis> 草稿的空间）
+    LEAD_MEMORY_SUMMARY_TOKENS: int = 600
+    # 摘要输出的 max_tokens（须显著大于摘要目标 token，留出 <analysis> 草稿的空间）
     LEAD_MEMORY_SUMMARY_MAX_TOKENS: int = 900
-    # 上下文装配预算（digest 注入给子任务的总字符上限）
-    LEAD_CTX_MAX_CHARS: int = 4000
-    # 其中为"最近几轮活记忆"预留的字符数：长期记忆再长也不能把它挤没
-    LEAD_CTX_LIVE_RESERVE_CHARS: int = 800
-    # "上一轮已生成图表"摘要注入的总字符预算（按图逐条累加，超预算即停）
-    LEAD_CTX_CHART_SUMMARY_CHARS: int = 2000
-    # 答案生成时喂入的历史轮次总字符预算（取最近若干"整条"消息，超预算即停）
-    LEAD_CTX_ANSWER_HISTORY_CHARS: int = 2000
+    # 决策上下文装配总预算（digest 注入给子任务的 token 上限；中文 1:1，等价于旧 4000 字）
+    LEAD_CTX_MAX_TOKENS: int = 2400
+    # 其中为"最近几轮活记忆"预留的 token：长期记忆再长也不能把它挤没（等价于旧 800 字）
+    LEAD_CTX_LIVE_RESERVE_TOKENS: int = 800
+    # "上一轮已生成图表"摘要注入的总 token 预算（按图逐条累加，超预算即停；混排，等价旧 2000 字）
+    LEAD_CTX_CHART_SUMMARY_TOKENS: int = 1200
+    # 答案生成时喂入的历史轮次总 token 预算（取最近若干"整条"消息，超预算即停；等价旧 2000 字）
+    LEAD_CTX_ANSWER_HISTORY_TOKENS: int = 2000
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
     LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
 
-    # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
-    INSIGHT_ENABLED: bool = True
-    INSIGHT_INTERVAL_MINUTES: int = 5
-
-    # 上下文压缩
-    CONTEXT_MAX_CHARS: int = 150000
+    # 上下文压缩（消息列表；等价换算见 budgets.py：混排 0.6 token/字）
+    MESSAGE_LIST_MAX_TOKENS: int = 90000
     CONTEXT_KEEP: int = 60
     CONTEXT_MIN_ROUNDS: int = 3
     CONTEXT_KEEP_ROUNDS: int = 3
 
     # 单工具结果压缩（rows 数据行保留前 N 行；insights 等建议列表不按条数截断，
-    # 完整保留，仅受上方 RESULT_MAX_CHARS 总字符上限兜底）。
-    # 2000/20：1500 字符对 executed_sql+summary+明细偏紧；20 行覆盖常见分析报表。
-    # 仍保留"工具侧 sample 50 行 → 注入侧 20 行 → 字符 2000 兜底"三层防线，
+    # 完整保留，仅受总 token 上限兜底）。
+    # JSON ≈0.4 token/字：旧 2000 字 → 800 token / 旧 8000 字 → 3200 token。
+    # 仍保留"工具侧 sample 50 行 → 注入侧 20 行 → token 兜底"三层防线，
     # 全量数据按需走 executed_sql 续查（LIMIT/OFFSET），不放开上限。
-    RESULT_MAX_CHARS: int = 2000
+    TOOL_RESULT_MAX_TOKENS: int = 800
     RESULT_MAX_ROWS: int = 20
     # 元数据类结果（无 rows 键，如 list_datasources 的完整列名/描述）保底上限。
-    # 这类结果必须完整进入上下文才能让 LLM 拿到全量列名，不能用 1500 一刀切，
+    # 这类结果必须完整进入上下文才能让 LLM 拿到全量列名，不能一刀切，
     # 仅用一个较大的上限防 pathological 超大响应。
-    RESULT_MAX_META_CHARS: int = 8000
+    TOOL_RESULT_META_MAX_TOKENS: int = 3200
+
+    # ── 旧字符口径：兼容别名（property 不参与 env 解析，extra=forbid 不受影响） ──
+    # 消费点全部改读 *_TOKENS 后删除本段。
+
+    @property
+    def LEAD_MEMORY_SUMMARY_CHARS(self) -> int:
+        """旧字符口径（中文 1:1）——仅供未迁移消费点过渡使用。"""
+        return self.LEAD_MEMORY_SUMMARY_TOKENS
+
+    @property
+    def LEAD_CTX_MAX_CHARS(self) -> int:
+        """旧字符口径（混排 0.6 token/字的反推）——仅供未迁移消费点过渡使用。"""
+        return _chars_for_tokens(self.LEAD_CTX_MAX_TOKENS, _TOKENS_PER_CHAR_MIXED)
+
+    @property
+    def LEAD_CTX_LIVE_RESERVE_CHARS(self) -> int:
+        """旧字符口径（中文 1:1）——仅供未迁移消费点过渡使用。"""
+        return self.LEAD_CTX_LIVE_RESERVE_TOKENS
+
+    @property
+    def LEAD_CTX_CHART_SUMMARY_CHARS(self) -> int:
+        """旧字符口径（混排 0.6 反推）——仅供未迁移消费点过渡使用。"""
+        return _chars_for_tokens(self.LEAD_CTX_CHART_SUMMARY_TOKENS, _TOKENS_PER_CHAR_MIXED)
+
+    @property
+    def LEAD_CTX_ANSWER_HISTORY_CHARS(self) -> int:
+        """旧字符口径（中文 1:1）——仅供未迁移消费点过渡使用。"""
+        return self.LEAD_CTX_ANSWER_HISTORY_TOKENS
+
+    @property
+    def CONTEXT_MAX_CHARS(self) -> int:
+        """旧字符口径（混排 0.6 反推）——仅供未迁移消费点过渡使用。"""
+        return _chars_for_tokens(self.MESSAGE_LIST_MAX_TOKENS, _TOKENS_PER_CHAR_MIXED)
+
+    @property
+    def RESULT_MAX_CHARS(self) -> int:
+        """旧字符口径（JSON 0.4 反推）——仅供未迁移消费点过渡使用。"""
+        return _chars_for_tokens(self.TOOL_RESULT_MAX_TOKENS, _TOKENS_PER_CHAR_JSON)
+
+    @property
+    def RESULT_MAX_META_CHARS(self) -> int:
+        """旧字符口径（JSON 0.4 反推）——仅供未迁移消费点过渡使用。"""
+        return _chars_for_tokens(self.TOOL_RESULT_META_MAX_TOKENS, _TOKENS_PER_CHAR_JSON)
 
     @property
     def is_ai_configured(self) -> bool:
@@ -195,4 +251,27 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
+def _check_deprecated_env_keys() -> None:
+    """预算口径已统一为 token：检测残留的旧字符配置并给出可读报错。
+
+    Settings 的 extra 策略是 forbid，残留旧 key 会让 pydantic 抛出
+    "Extra inputs are not permitted"——对部署排查不友好，这里提前拦截并说明迁移路径。
+    """
+    import os
+
+    legacy = [k for k in (
+        "LEAD_CTX_MAX_CHARS", "LEAD_CTX_LIVE_RESERVE_CHARS",
+        "LEAD_CTX_CHART_SUMMARY_CHARS", "LEAD_CTX_ANSWER_HISTORY_CHARS",
+        "LEAD_MEMORY_SUMMARY_CHARS", "CONTEXT_MAX_CHARS",
+        "RESULT_MAX_CHARS", "RESULT_MAX_META_CHARS",
+    ) if os.environ.get(k)]
+    if legacy:
+        raise RuntimeError(
+            "检测到旧字符口径配置（预算已统一为 token，请删除或换用新 key）: "
+            + ", ".join(legacy)
+            + "。对应关系见 app/services/context/budgets.py 的迁移表。"
+        )
+
+
+_check_deprecated_env_keys()
 settings = Settings()

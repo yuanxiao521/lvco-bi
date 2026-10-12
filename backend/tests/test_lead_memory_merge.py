@@ -418,8 +418,8 @@ def test_memory_merge_prompt_is_structured_and_configurable(monkeypatch):
         assert sec in prompt
     assert "时间范围/口径/来源" in prompt      # 数字必须带语境
     assert "逐条保留" in prompt               # 旧口径不得被新信息挤掉
-    monkeypatch.setattr(settings, "LEAD_MEMORY_SUMMARY_CHARS", 1234)
-    assert "1234" in _memory_merge_system_prompt()   # 字数上限可配
+    monkeypatch.setattr(settings, "LEAD_MEMORY_SUMMARY_TOKENS", 1234)
+    assert "1234" in _memory_merge_system_prompt()   # 摘要 token 上限可配（token 口径统一后）
 
 
 async def test_maybe_summarize_keeps_structured_summary_intact(monkeypatch):

@@ -70,46 +70,46 @@ class BudgetTable:
         return sum(b.max_tokens for b in self.blocks)
 
 
-# ── 等价表（P0）：由现有 *_CHARS 配置换算，保持行为不变 ─────────────────────
+# ── 等价表（P0）：直接读 token 配置（与旧 *_CHARS 语义等价） ─────────────────
 def equivalent_decision_table() -> BudgetTable:
-    total_chars = int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000)
-    reserve_chars = int(getattr(settings, "LEAD_CTX_LIVE_RESERVE_CHARS", 800) or 800)
+    total_tokens = int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400)
+    reserve_tokens = int(getattr(settings, "LEAD_CTX_LIVE_RESERVE_TOKENS", 800) or 800)
     return BudgetTable(
         purpose="decision",
         blocks=(
-            BlockBudget("memory", tokens_for_chars(max(0, total_chars - reserve_chars), TOKENS_PER_CHAR_MIXED), priority=70),
-            BlockBudget("window", tokens_for_chars(reserve_chars, TOKENS_PER_CHAR_ZH), priority=90),
+            BlockBudget("memory", max(0, total_tokens - reserve_tokens), priority=70),
+            BlockBudget("window", reserve_tokens, priority=90),
         ),
         output_tokens=400,
-        note="等价换算：memory=LEAD_CTX_MAX_CHARS-预留，window=预留",
+        note="等价：memory=LEAD_CTX_MAX_TOKENS-预留，window=预留（旧 4000/800 字口径）",
     )
 
 
 def equivalent_answer_table() -> BudgetTable:
-    total_chars = int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000)
-    answer_chars = int(getattr(settings, "LEAD_CTX_ANSWER_HISTORY_CHARS", 2000) or 2000)
+    memory_tokens = max(200, int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400) * 5 // 9)
+    window_tokens = int(getattr(settings, "LEAD_CTX_ANSWER_HISTORY_TOKENS", 2000) or 2000)
     return BudgetTable(
         purpose="answer",
         blocks=(
-            BlockBudget("memory", tokens_for_chars(max(200, total_chars // 3), TOKENS_PER_CHAR_ZH), priority=70),
-            BlockBudget("window", tokens_for_chars(answer_chars, TOKENS_PER_CHAR_ZH), priority=90),
+            BlockBudget("memory", memory_tokens, priority=70),
+            BlockBudget("window", window_tokens, priority=90),
         ),
         output_tokens=1200,
-        note="等价换算：answer 分支 memory 上限=LEAD_CTX_MAX_CHARS//3",
+        note="等价：answer 分支 memory 上限=LEAD_CTX_MAX_TOKENS*5/9（旧 4000字//3）",
     )
 
 
 def equivalent_worker_table() -> BudgetTable:
-    result_chars = int(getattr(settings, "RESULT_MAX_CHARS", 2000) or 2000)
-    list_chars = int(getattr(settings, "CONTEXT_MAX_CHARS", 150000) or 150000)
+    result_tokens = int(getattr(settings, "TOOL_RESULT_MAX_TOKENS", 800) or 800)
+    list_tokens = int(getattr(settings, "MESSAGE_LIST_MAX_TOKENS", 90000) or 90000)
     return BudgetTable(
         purpose="worker",
         blocks=(
-            BlockBudget("tool_result", tokens_for_chars(result_chars, TOKENS_PER_CHAR_JSON), priority=80),
-            BlockBudget("window", tokens_for_chars(list_chars, TOKENS_PER_CHAR_MIXED), priority=90),
+            BlockBudget("tool_result", result_tokens, priority=80),
+            BlockBudget("window", list_tokens, priority=90),
         ),
         output_tokens=2000,
-        note="等价换算：tool_result=RESULT_MAX_CHARS，window=CONTEXT_MAX_CHARS（实测约 9 万 token）",
+        note="等价：tool_result=TOOL_RESULT_MAX_TOKENS，window=MESSAGE_LIST_MAX_TOKENS（约 9 万 token）",
     )
 
 
