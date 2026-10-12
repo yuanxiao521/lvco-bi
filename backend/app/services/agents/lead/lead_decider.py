@@ -100,36 +100,22 @@ def _build_context_blocks(
 ) -> tuple[str, str, str, str]:
     """组装【可用数据源】【当前画布状态】【上一轮子任务评估】【已完成子任务摘要】四块（prompt 注入）。
 
-    子任务摘要可能含报告全文（数百~千字），多轮累积会撑爆决策 prompt：
-    只保留最近 2 条，且每条截断到 MAX_SUMMARY_CHARS，控制注入总量。
-    canvas_layout 来自数据库落盘的画布布局（_load_canvas_snapshot），
-    让 Supervisor 每轮决策都知道"画布上现已落成什么图表/文本、布局如何"。
-    assessment_block 提取最近 1 条 [子任务评估]（规则评审产物），单独注入、不随摘要截断丢弃，
-    决策据此判断"上轮是否达标"，决定 stop / 重做（带 guidance 改进意见）。
+    阶段 4：渲染实现已迁至 context/sources/state.py（唯一实现，等价性由
+    test_context_assembly 锁住），此处保留签名作为兼容入口转调。
     """
-    ds_lines = []
-    for d in datasources or []:
-        if not isinstance(d, dict):
-            continue
-        ds_lines.append(
-            f"- id={d.get('id')} name={d.get('name')} type={d.get('type')}"
-        )
-    ds_block = "\n".join(ds_lines) or "（无）"
+    from app.services.context.sources.state import (
+        render_assessment,
+        render_canvas,
+        render_datasources,
+        render_subtask_summaries,
+    )
 
-    canvas_block = (canvas_layout or "").strip()
-    if not canvas_block:
-        canvas_block = "（非画布入口或画布状态不可用）"
-
-    # 最近 1 条子任务评估（规则评审，Short 前缀）
-    assess_lines = [s for s in (subtask_summaries or []) if "[子任务评估]" in s]
-    assessment_block = assess_lines[-1] if assess_lines else "（本轮无子任务评估）"
-
-    # 最近 2 条 + 每条限长（保留工具链/规划/报告头部，丢弃过长的尾部）
-    MAX_SUMMARY_CHARS = 1000
-    recent = list(subtask_summaries or [])[-2:]
-    summary_lines = [f"- {s[:MAX_SUMMARY_CHARS]}" for s in recent]
-    summary_block = "\n".join(summary_lines) or "（本轮无已完成子任务）"
-    return ds_block, canvas_block, assessment_block, summary_block
+    return (
+        render_datasources(datasources),
+        render_canvas(canvas_layout),
+        render_assessment(subtask_summaries),
+        render_subtask_summaries(subtask_summaries),
+    )
 
 
 def _parse_decision(

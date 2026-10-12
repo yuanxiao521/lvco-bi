@@ -701,7 +701,8 @@ class QueryDatasourceTool(BaseTool):
             }
             return json.dumps({
                 # 执行结果附完整 SQL：审计追溯 + 供 LLM 精确续查（调大 LIMIT/加 OFFSET 翻页）。
-                # 放在最前，compact_result_json 截断时优先保留（rows 靠后被裁）。
+                # 键序约定（executed_sql 在前）由压缩层的保留策略消费——截断规则的唯一
+                # 所有者是 app/services/context/compress.py 的 ToolResultPolicy。
                 "executed_sql": final_sql,
                 "columns": cols,
                 "row_count": len(data_rows),

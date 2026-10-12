@@ -25,6 +25,7 @@ from app.services.context_utils import compact_result_json, compress_history, es
 # 降级原因（会写进 Ledger.degraded，最终随 SSE 的 degradation 暴露）
 DEGRADE_TOOL_COMPACTED = "tool_result_compacted"
 DEGRADE_MESSAGE_LIST_FOLDED = "message_list_folded"
+DEGRADE_MEMORY_SECTION_CAPPED = "memory_section_capped"
 
 
 def _tokens_to_json_chars(tokens: int) -> int:
@@ -102,11 +103,86 @@ class MessageListPolicy:
         return replace(block, messages=tuple(out)), DEGRADE_MESSAGE_LIST_FOLDED
 
 
+# ── 长期记忆四节配额（阶段 4：替代"整体尾部硬切"，保证每节都活着） ──────────
+MEMORY_SECTION_QUOTA: dict[str, int] = {
+    "【口径与规则】": 300,       # 口径必须完整——丢了会让后续分析全算错
+    "【关键数字与结论】": 250,
+    "【数据源与字段】": 150,
+    "【未决问题】": 100,         # 旧实现的跨节硬切最先砍掉它，恰恰是下一轮要做的
+}
+
+
+def compress_structured_memory(summary: str, max_tokens: int) -> tuple[str, bool]:
+    """分区化长期记忆压缩：按四节配额裁剪，只在节内截断、绝不跨节丢弃。
+
+    旧实现的 `summary[:上限]` 是跨节硬切——超长时【未决问题】整节消失，
+    而它正是下一轮该做的事。这里按 MEMORY_SECTION_QUOTA 逐节裁剪：
+    - 配额按字符计（记忆是中文散文，≈1:1）；
+    - 无标记的纯文本（legacy 摘要）整体按 max_tokens 尾部硬切（保持兜底语义）；
+    - 返回 (压缩后文本, 是否发生降级)。
+    """
+    text = (summary or "").strip()
+    if not text:
+        return text, False
+
+    budget = max_tokens if max_tokens > 0 else sum(MEMORY_SECTION_QUOTA.values())
+    # 各节按配额比例分摊预算（max_tokens 小于默认总配额时等比缩小）
+    total_quota = sum(MEMORY_SECTION_QUOTA.values())
+    scale = min(1.0, budget / total_quota) if total_quota else 1.0
+
+    sections: list[tuple[str, list[str]]] = []   # (节头, 行列表)
+    current_head = ""
+    current_lines: list[str] = []
+    for line in text.split("\n"):
+        matched = next((h for h in MEMORY_SECTION_QUOTA if line.strip().startswith(h)), None)
+        if matched is not None:
+            if current_head or current_lines:
+                sections.append((current_head, current_lines))
+            current_head, current_lines = matched, [line]
+        else:
+            current_lines.append(line)
+    if current_head or current_lines:
+        sections.append((current_head, current_lines))
+
+    out_lines: list[str] = []
+    degraded = False
+    for head, lines in sections:
+        quota = MEMORY_SECTION_QUOTA.get(head, 150) * scale
+        used = 0
+        kept: list[str] = []
+        for line in lines:
+            cost = len(line) + 1
+            if head and used + cost > quota and kept and line.strip() != head:
+                degraded = True
+                break                      # 本节配额用尽：停止（节内裁剪，不碰其它节）
+            kept.append(line)
+            used += cost
+        out_lines.extend(kept)
+
+    out = "\n".join(out_lines)
+    # 兜底：分区裁剪后仍超预算（无标记文本/超长单行）→ 尾部硬切
+    if estimate_tokens(out) > budget:
+        out = out[:budget] + "…"
+        degraded = True
+    return out, degraded
+
+
+class StructuredMemoryPolicy:
+    """长期记忆策略：四节分区配额（永不跨节丢弃，口径有固定位置）。"""
+
+    def compress(self, block: Block, max_tokens: int) -> tuple[Block, str | None]:
+        out, degraded = compress_structured_memory(block.text, max_tokens)
+        if not degraded:
+            return block, None
+        return replace(block, text=out), DEGRADE_MEMORY_SECTION_CAPPED
+
+
 def default_policies() -> dict[BlockKind, Policy]:
     """默认策略表：按 BlockKind 分派。"""
     return {
         BlockKind.TOOL_RESULT: ToolResultPolicy(),
         BlockKind.WINDOW: MessageListPolicy(),
+        BlockKind.MEMORY: StructuredMemoryPolicy(),
     }
 
 
