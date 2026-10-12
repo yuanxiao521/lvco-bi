@@ -83,7 +83,6 @@ async def _run(agent: ReactGraphAgent, llm: StubLLM) -> dict:
         messages=[{"role": "user", "content": "分析销售额趋势"}],
         user_id="u1",
         db_session=None,
-        initial_phase="analyzing",
         emit=emit,
     )
     state["_events"] = events
@@ -100,32 +99,35 @@ async def test_parallel_tool_calls_limited():
     assert len(executed) == 3, f"应钳制为 3 个，实际 {len(executed)}"
 
 
-async def test_out_of_phase_tools_blocked_at_execution_layer():
-    """执行层白名单：GENERATING 阶段 LLM 编造 query_sql 调用 → 不执行，注入纠正。"""
-    # 第1轮 3 个 query_engine（ANALYZING 正常执行并流转 GENERATING）
-    # 第2轮 LLM 无视 schema 返回 query_sql → 应被执行层拦截，不产生 executed 记录
-    llm = StubLLM(
-        [
-            [_mk_call("query_engine", 1), _mk_call("query_engine", 2), _mk_call("query_engine", 3)],
-            [_mk_call("query_sql", 4)],  # GENERATING 阶段伪造查询
-        ],
-        final_round="正常收尾",
-    )
-    agent = ReactGraphAgent(llm, _tools(), None)
-    with patch("app.services.agents.react_agent.ToolExecutor", StubExecutor):
-        state = await _run(agent, llm)
-    names = state.get("executed_tool_names") or []
-    assert names.count("query_engine") == 3
-    assert "query_sql" not in names, "GENERATING 阶段的 query_sql 不应被执行"
+def test_tools_for_state_blocks_query_after_limit():
+    """工具可见性：查询累计达上限后 _tools_for_state 屏蔽查询工具（取代旧的 phase 收窄）。
+
+    phase 会在"第一次查询成功"后就收走查询工具，与"一次分析常需多次查询"冲突；
+    现改为按累计查询次数屏蔽——只在真正达到 MAX_QUERY_CALLS 后才收。
+    """
+    from app.services.agents.react_agent import MAX_QUERY_CALLS
+
+    all_tools = [
+        {"type": "function", "function": {"name": n, "parameters": {}}}
+        for n in ("query_sql", "query_engine", "render_chart")
+    ]
+    agent = ReactGraphAgent(None, all_tools, None)
+    names = lambda st: {t["function"]["name"] for t in agent._tools_for_state(st)}  # noqa: E731
+
+    fresh = names({"query_call_count": 0})
+    assert {"query_sql", "query_engine"} <= fresh, "未达上限时查询工具应可见"
+
+    exhausted = names({"query_call_count": MAX_QUERY_CALLS})
+    assert "query_sql" not in exhausted and "query_engine" not in exhausted, "达上限后应屏蔽查询工具"
+    assert "render_chart" in exhausted, "非查询工具不受影响"
 
 
 async def test_invalid_tool_streak_forces_wrapup():
-    """连续无效调用强制收尾：GENERATING 阶段两次编造 query_engine → 直接 wrapup，不再空转。"""
+    """连续无效调用强制收尾：LLM 两次编造**不存在的工具名** → 直接 wrapup，不再空转。"""
     llm = StubLLM(
         [
-            [_mk_call("query_engine", 1), _mk_call("query_engine", 2), _mk_call("query_engine", 3)],
-            [_mk_call("query_sql", 4)],  # 首次无效（streak=1，注入纠正重试）
-            [_mk_call("query_engine", 5)],  # 第二次无效（streak=2 → 强制 wrapup）
+            [_mk_call("bogus_tool_a", 1)],  # 首次无效（streak=1，注入纠正重试）
+            [_mk_call("bogus_tool_b", 2)],  # 第二次无效（streak=2 → 强制 wrapup）
         ],
         final_round="",  # 不该走到这一轮
     )

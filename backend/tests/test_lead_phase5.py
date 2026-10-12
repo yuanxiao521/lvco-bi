@@ -55,7 +55,7 @@ def fake_run_analysis(monkeypatch):
             elapsed_ms=12,
         )
 
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
 
     monkeypatch.setattr(mod, "run_analysis", _fake)
     return calls
@@ -302,21 +302,27 @@ async def test_answer_branch_injects_metrics_ctx():
     assert any("sales_amount" in t for t in texts)
 
 
-async def test_resolve_subtask_mode_canvas_uses_complexity():
-    """画布简单/复杂分流：canvas+simple → react；canvas+complex → canvas。"""
-    from app.services.agents.lead.lead_decider import ActionType, Decision
+def test_resolve_worker_table_driven():
+    """worker 选择表（lead_worker）：入口×复杂度 → 执行内核，显式指定优先。
 
-    agent = LeadAgent(llm=None)
+    取代旧的 LeadAgent._resolve_subtask_mode 两级 if——新增助手只加表项。
+    """
+    from app.services.agents.lead.lead_worker import resolve_worker
 
-    simple = Decision(action=ActionType.CALL_ANALYSIS, complexity="simple")
-    assert await agent._resolve_subtask_mode("canvas", simple, {}) == "react"
-
-    complex_ = Decision(action=ActionType.CALL_ANALYSIS, complexity="complex")
-    assert await agent._resolve_subtask_mode("canvas", complex_, {}) == "canvas"
-
-    # 缺省 complexity → 按 complex 处理（画布保守走 CanvasOrchestrator）
-    default = Decision(action=ActionType.CALL_ANALYSIS)
-    assert await agent._resolve_subtask_mode("canvas", default, {}) == "canvas"
+    # 画布入口：simple → react（轻量），complex → canvas（画布编排）
+    assert resolve_worker("canvas", "simple").mode == "react"
+    assert resolve_worker("canvas", "complex").mode == "canvas"
+    # 缺省/未登记复杂度 → 按 complex 档（画布保守走 CanvasOrchestrator）
+    assert resolve_worker("canvas", "").mode == "canvas"
+    assert resolve_worker("canvas", None).mode == "canvas"
+    # 对话入口
+    assert resolve_worker("chat", "complex").mode == "orchestrator"
+    assert resolve_worker("chat", "simple").mode == "react"
+    # 显式指定优先于查表（调用方可强制）
+    assert resolve_worker("chat", "complex", "react").mode == "react"
+    assert resolve_worker("canvas", "simple", "orchestrator").mode == "orchestrator"
+    # 未登记的入口 → 兜底通用编排（不抛错，保证主链路可用）
+    assert resolve_worker("unknown", "complex").mode == "orchestrator"
 
 
 class _AskUserLLM:

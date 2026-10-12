@@ -2106,19 +2106,233 @@ async def canvas_ai_chat(
                 )
             canvas_owner_ok = True
 
-    async def event_generator():
-        from app.schemas import AISessionResponse
+    async def _consume_canvas_task(gen, task_sid: str):
+        """消费任务体的 async generator：文本快照 + 事件广播给订阅者。"""
+        acc = ""
+        async for ev in gen:
+            if ev.get("type") == "message" and ev.get("delta"):
+                acc += ev["delta"]
+                chat_registry.update_text(task_sid, acc)
+            chat_registry.publish(task_sid, ev)
 
-        ai_service = AIService(LLMClient(settings))
+    async def _canvas_chat_task(session_id: uuid.UUID | None, user_msg_id, assistant_msg_id, lock_token):
+        """后台任务体：Agent 执行 + 事件翻译（yield dict，由连接段 publish 给订阅者）。
+        断线不影响本任务：落库/释放会话锁/清任务态都在这里完成（请求级连接已不存活）。"""
         full_content = ""
-        # 画布动作计数器：工具型对话即使 LLM 不落纯文本，
-        # 也能据此生成兜底 assistant 消息，保证会话链路完整。
         canvas_actions_count = 0
         stream_degraded = False  # 事件流里出现过的降级标记，随流尾唯一的 done 下发
+        db = async_session_factory()
+        try:
+            # ---- 3. 加载历史（最近 6 轮） ----
+            history: list[dict] = []
+            if session_id:
+                prior_msgs = (
+                    await db.execute(
+                        select(AIMessage)
+                        .where(AIMessage.session_id == session_id)
+                        # 次级键 role 方向必须与 created_at 一致（都是 desc）：本轮随后会
+                        # reversed() 成全量正序，方向一致才能在反转后仍得到"提问在前"。
+                        # 反向会得到"答在问前"——有 tie 时 DESC+LIMIT 再反转 ≠ ASC。
+                        .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
+                        # 取 13 条而非 12：多留 1 条给"成对对齐"的余量，
+                        # 窗口起点若落在某轮回答上，对齐后仍能保留 12 条完整问答
+                        .limit(13)
+                    )
+                ).scalars().all()
+                prior_msgs.reverse()
+                history = _filter_canvas_history(prior_msgs, user_msg_id)
+
+            # ---- 4. Agent 流式执行 ----
+            # ── 主导 Agent 事件流（旧双路径已移除，无降级兜底）──
+            (
+                memory_summary,
+                memory_covered,
+                memory_watermark,
+                memory_fail_count,
+            ) = await _load_session_memory(db, session_id)
+
+            from app.services.agents.lead import LeadAgent, LeadContext
+            from app.services.observability import get_observer
+
+            lead_ctx = LeadContext(
+                user_id=str(current_user.id),
+                session_id=str(session_id) if session_id else "",
+                entry="canvas",
+                canvas_id=body.canvas_id,
+                datasource_id=str(datasource.id) if datasource else body.datasource_id,
+                history_summary=memory_summary or "",
+                memory_covered=memory_covered,
+                memory_watermark=memory_watermark,
+                memory_fail_count=memory_fail_count,
+                metrics_ctx=metrics_ctx_for_lead,
+                ui_action=getattr(body, "ui_action", None),
+            )
+            for h in history:
+                if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+                    lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
+            event_iter = _lead_stream_guard(
+                LeadAgent(
+                    llm=LLMClient(settings),
+                    observer=get_observer(),
+                    extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
+                ).stream(user_msg, ctx=lead_ctx, db_session=db)
+            )
+
+            async for event in _idle_guard(event_iter, label="canvas_chat"):
+                ev_type = event.get("type")
+                if ev_type == "text":
+                    delta = event.get("content", "")
+                    full_content += delta
+                    yield ({"type": "message", "delta": delta})
+                elif ev_type == "plan":
+                    # entry=canvas 与对话入口（entry=chat, mode=orchestrator）区分，
+                    # 观测方可从 SSE 直接识别规划来源；steps 保留工具名与目标
+                    steps = (event.get("plan") or {}).get("steps", [])
+                    yield ({"type": "plan", "entry": "canvas", "mode": "canvas_orchestrator",
+                                "steps": [{"tool": s.get("tool"), "goal": s.get("goal")} for s in steps if isinstance(s, dict)]})
+                elif ev_type == "status":
+                    yield ({"type": "status", "message": event.get("message", ""),
+                                "phase": event.get("phase"),
+                                "degradation": event.get("degradation")})
+                elif ev_type == "tool_call":
+                    name = event.get("name", "")
+                    args = event.get("args", {}) or {}
+                    yield ({"type": "tool_call", "name": name, "args": args})
+                elif ev_type == "tool_result":
+                    name = event.get("name", "")
+                    result_raw = event.get("result", "")
+                    yield ({"type": "tool_result", "name": name, "result": result_raw})
+                    # 画布工具返回内嵌 canvas_action：提取后转发为独立 SSE 事件，
+                    # 前端据此实时落块。画布白名单不含 render_chart，无需（也不可能）兜底合成。
+                    try:
+                        r = json.loads(result_raw) if isinstance(result_raw, str) else {}
+                        action = r.get("canvas_action") if isinstance(r, dict) else None
+                        if isinstance(action, dict):
+                            canvas_actions_count += 1
+                            yield ({"type": "canvas_action", **action})
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                elif ev_type == "intent":
+                    yield ({"type": "intent", "intent": event.get("intent"),
+                                "confidence": event.get("confidence"),
+                                "needs_plan": event.get("needs_plan"),
+                                "degraded": event.get("degraded")})
+                elif ev_type == "decision":
+                    yield ({"type": "decision", "round": event.get("round"),
+                                "action": event.get("action"),
+                                "tool": event.get("tool"), "reason": event.get("reason"),
+                                "degraded": event.get("degraded")})
+                elif ev_type == "progress":
+                    yield ({"type": "progress", "round": event.get("round"),
+                                "index": event.get("index"),
+                                "total": event.get("total"), "title": event.get("title"),
+                                "status": event.get("status"), "note": event.get("note"),
+                                "tool": event.get("tool")})
+                elif ev_type == "report":
+                    if not full_content.strip():
+                        report_delta = event.get("content", "")
+                        if report_delta:
+                            full_content += report_delta
+                            yield ({"type": "message", "delta": report_delta})
+                elif ev_type == "memory_saved":
+                    yield ({"type": "memory_saved", "chars": event.get("chars", 0)})
+                elif ev_type == "error":
+                    yield ({"type": "error", "message": event.get("message", "服务异常")})
+                elif ev_type == "done":
+                    # 不下发：done 统一在流尾补发一次（见下方第 5 步之后）。
+                    # 原因：事件流里可能混入子执行器的内部 done，提前下发会让前端
+                    # 在子任务落块完就认为本轮结束（解锁输入、清 streaming），出现"一次请求两个 done"。
+                    stream_degraded = bool(event.get("degraded", stream_degraded))
+                elif ev_type == "compressed_history":
+                    # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
+                    await _save_memory(db, session_id, event)
+
+            # ---- 5. 保存助手消息：更新占位行为最终内容，并清除 Redis 任务态 ----
+            # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作，
+            # 也生成一份兜底文案，保证下次加载历史时链路完整。
+            save_content = full_content.strip()
+            if not save_content and canvas_actions_count > 0:
+                save_content = f"本次分析通过画布工具完成：已在画布执行 {canvas_actions_count} 次落块操作，请查看画布内容与工作台执行记录。"
+            # 占位行由连接段创建（请求级 session），任务体经 task_db 重新加载后更新
+            assistant_row = await db.get(AIMessage, assistant_msg_id) if assistant_msg_id else None
+            if assistant_row is not None:
+                assistant_row.content = save_content
+                try:
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                # 任务正常结束：清除 running 标记，避免误报"未完成"
+                try:
+                    get_cache_repository().delete(f"ai:canvas:task:{session_id}")
+                except Exception:
+                    pass
+
+            # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
+            yield ({"type": "done", "degraded": stream_degraded})
+
+        except AINotConfiguredError:
+            yield ({"type": "error", "message": "AI 未配置"})
+        except AIUpstreamError as e:
+            yield ({"type": "error", "message": str(e)})
+        except Exception as e:
+            _log.exception("Canvas AI chat error")
+            yield ({"type": "error", "message": f"服务异常: {str(e)}"})
+        finally:
+            # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
+            # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
+            am = await db.get(AIMessage, assistant_msg_id) if assistant_msg_id else None
+            if am is not None:
+                try:
+                    if not am.content and full_content.strip():
+                        am.content = full_content.strip()
+                    await db.commit()
+                except Exception:
+                    try:
+                        await db.rollback()
+                    except Exception:
+                        pass
+                task_key = f"ai:canvas:task:{session_id}"
+                try:
+                    repo = get_cache_repository()
+                    if repo.exists(task_key):
+                        repo.set(
+                            task_key,
+                            json.dumps({
+                                "status": "interrupted",
+                                "chars": len(full_content),
+                                "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                            }),
+                            ttl=settings.redis_ttl,
+                        )
+                except Exception:
+                    pass
+            # 会话锁：正常结束/异常/断线都走这里释放（TTL 仅作进程崩溃的兜底）
+            release_session_lock(session_id, lock_token)
+            await db.close()
+    async def event_generator():
+        """画布助手 SSE：任务后台化（registry）+ resume 续收。"""
+        # 画布动作计数器：工具型对话即使 LLM 不落纯文本，
+        # 也能据此生成兜底 assistant 消息，保证会话链路完整。
         session_id: uuid.UUID | None = None
         lock_token: str | None = None
         # 必须先于 try 初始化：抢锁失败会提前 return，此时 finally 里的 assistant_msg 还没被赋值
         assistant_msg: AIMessage | None = None
+        task_sid = ""
+        # resume：带 session_id 且有运行中任务 → 不重发消息，直接续收
+        if getattr(body, "resume", False) and body.session_id:
+            task_sid = str(body.session_id)
+            rt = chat_registry.get(task_sid)
+            if rt is None:
+                yield _sse({"type": "status", "message": "后台任务已结束，画布内容以画布为准", "resumed": True, "finished": True})
+                yield _sse({"type": "done"})
+                return
+            yield _sse({"type": "status", "message": "已恢复连接，正在续收后台任务", "resumed": True})
+            if rt.full_text:
+                yield _sse({"type": "message", "delta": rt.full_text})
+            async for ev in chat_registry.subscribe(task_sid):
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+            return
+        task_launched = False
         try:
             # ---- 1. 解析 / 创建会话（画布按 canvas_id 隔离 + 画布内多会话） ----
             if body.session_id:
@@ -2253,189 +2467,28 @@ async def canvas_ai_chat(
                 except Exception:
                     _log.debug("canvas task running cache set failed", exc_info=True)
 
-            # ---- 3. 加载历史（最近 6 轮） ----
-            history: list[dict] = []
-            if session_id:
-                prior_msgs = (
-                    await db.execute(
-                        select(AIMessage)
-                        .where(AIMessage.session_id == session_id)
-                        # 次级键 role 方向必须与 created_at 一致（都是 desc）：本轮随后会
-                        # reversed() 成全量正序，方向一致才能在反转后仍得到"提问在前"。
-                        # 反向会得到"答在问前"——有 tie 时 DESC+LIMIT 再反转 ≠ ASC。
-                        .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
-                        # 取 13 条而非 12：多留 1 条给"成对对齐"的余量，
-                        # 窗口起点若落在某轮回答上，对齐后仍能保留 12 条完整问答
-                        .limit(13)
-                    )
-                ).scalars().all()
-                prior_msgs.reverse()
-                history = _filter_canvas_history(prior_msgs, current_user_msg_id)
-
-            # ---- 4. Agent 流式执行 ----
-            # ── 主导 Agent 事件流（旧双路径已移除，无降级兜底）──
-            (
-                memory_summary,
-                memory_covered,
-                memory_watermark,
-                memory_fail_count,
-            ) = await _load_session_memory(db, session_id)
-
-            from app.services.agents.lead import LeadAgent, LeadContext
-            from app.services.observability import get_observer
-
-            lead_ctx = LeadContext(
-                user_id=str(current_user.id),
-                session_id=str(session_id) if session_id else "",
-                entry="canvas",
-                canvas_id=body.canvas_id,
-                datasource_id=str(datasource.id) if datasource else body.datasource_id,
-                history_summary=memory_summary or "",
-                memory_covered=memory_covered,
-                memory_watermark=memory_watermark,
-                memory_fail_count=memory_fail_count,
-                metrics_ctx=metrics_ctx_for_lead,
-                ui_action=getattr(body, "ui_action", None),
+            assistant_msg_id = assistant_msg.id if assistant_msg is not None else None
+            user_msg_id = user_msg_model.id if (session_id and body.message.strip()) else None
+            task_sid = str(session_id) if session_id else f"anon-{uuid.uuid4()}"
+            task_launched = chat_registry.start(
+                task_sid,
+                lambda: _consume_canvas_task(_canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token), task_sid),
             )
-            for h in history:
-                if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
-                    lead_ctx.turns.append({"role": h["role"], "content": str(h.get("content", ""))})
-            event_iter = _lead_stream_guard(
-                LeadAgent(
-                    llm=LLMClient(settings),
-                    observer=get_observer(),
-                    extra_plannable_tools=CANVAS_ALLOWED_TOOL_NAMES,
-                ).stream(user_msg, ctx=lead_ctx, db_session=db)
-            )
-
-            async for event in _idle_guard(event_iter, label="canvas_chat"):
-                ev_type = event.get("type")
-                if ev_type == "text":
-                    delta = event.get("content", "")
-                    full_content += delta
-                    yield _sse({"type": "message", "delta": delta})
-                elif ev_type == "plan":
-                    # entry=canvas 与对话入口（entry=chat, mode=orchestrator）区分，
-                    # 观测方可从 SSE 直接识别规划来源；steps 保留工具名与目标
-                    steps = (event.get("plan") or {}).get("steps", [])
-                    yield _sse({"type": "plan", "entry": "canvas", "mode": "canvas_orchestrator",
-                                "steps": [{"tool": s.get("tool"), "goal": s.get("goal")} for s in steps if isinstance(s, dict)]})
-                elif ev_type == "status":
-                    yield _sse({"type": "status", "message": event.get("message", ""),
-                                "phase": event.get("phase"),
-                                "degradation": event.get("degradation")})
-                elif ev_type == "tool_call":
-                    name = event.get("name", "")
-                    args = event.get("args", {}) or {}
-                    yield _sse({"type": "tool_call", "name": name, "args": args})
-                elif ev_type == "tool_result":
-                    name = event.get("name", "")
-                    result_raw = event.get("result", "")
-                    yield _sse({"type": "tool_result", "name": name, "result": result_raw})
-                    # 画布工具返回内嵌 canvas_action：提取后转发为独立 SSE 事件，
-                    # 前端据此实时落块。画布白名单不含 render_chart，无需（也不可能）兜底合成。
-                    try:
-                        r = json.loads(result_raw) if isinstance(result_raw, str) else {}
-                        action = r.get("canvas_action") if isinstance(r, dict) else None
-                        if isinstance(action, dict):
-                            canvas_actions_count += 1
-                            yield _sse({"type": "canvas_action", **action})
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                elif ev_type == "intent":
-                    yield _sse({"type": "intent", "intent": event.get("intent"),
-                                "confidence": event.get("confidence"),
-                                "needs_plan": event.get("needs_plan"),
-                                "degraded": event.get("degraded")})
-                elif ev_type == "decision":
-                    yield _sse({"type": "decision", "round": event.get("round"),
-                                "action": event.get("action"),
-                                "tool": event.get("tool"), "reason": event.get("reason"),
-                                "degraded": event.get("degraded")})
-                elif ev_type == "progress":
-                    yield _sse({"type": "progress", "round": event.get("round"),
-                                "index": event.get("index"),
-                                "total": event.get("total"), "title": event.get("title"),
-                                "status": event.get("status"), "note": event.get("note"),
-                                "tool": event.get("tool")})
-                elif ev_type == "report":
-                    if not full_content.strip():
-                        report_delta = event.get("content", "")
-                        if report_delta:
-                            full_content += report_delta
-                            yield _sse({"type": "message", "delta": report_delta})
-                elif ev_type == "memory_saved":
-                    yield _sse({"type": "memory_saved", "chars": event.get("chars", 0)})
-                elif ev_type == "error":
-                    yield _sse({"type": "error", "message": event.get("message", "服务异常")})
-                elif ev_type == "done":
-                    # 不下发：done 统一在流尾补发一次（见下方第 5 步之后）。
-                    # 原因：事件流里可能混入子执行器的内部 done，提前下发会让前端
-                    # 在子任务落块完就认为本轮结束（解锁输入、清 streaming），出现"一次请求两个 done"。
-                    stream_degraded = bool(event.get("degraded", stream_degraded))
-                elif ev_type == "compressed_history":
-                    # 压缩记忆回流：持久化到会话级记忆，下一轮开始时重新注入上下文
-                    await _save_memory(db, session_id, event)
-
-            # ---- 5. 保存助手消息：更新占位行为最终内容，并清除 Redis 任务态 ----
-            # 即使 LLM 全程只调用工具（full_content 空），只要有实际画布动作，
-            # 也生成一份兜底文案，保证下次加载历史时链路完整。
-            save_content = full_content.strip()
-            if not save_content and canvas_actions_count > 0:
-                save_content = f"本次分析通过画布工具完成：已在画布执行 {canvas_actions_count} 次落块操作，请查看画布内容与工作台执行记录。"
-            if assistant_msg is not None:
-                assistant_msg.content = save_content
-                try:
-                    await db.commit()
-                except Exception:
-                    await db.rollback()
-                # 任务正常结束：清除 running 标记，避免误报"未完成"
-                try:
-                    get_cache_repository().delete(f"ai:canvas:task:{session_id}")
-                except Exception:
-                    pass
-
-            # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
-            yield _sse({"type": "done", "degraded": stream_degraded})
-
-        except AINotConfiguredError:
-            yield _sse({"type": "error", "message": "AI 未配置"})
-        except AIUpstreamError as e:
-            yield _sse({"type": "error", "message": str(e)})
-        except Exception as e:
-            _log.exception("Canvas AI chat error")
-            yield _sse({"type": "error", "message": f"服务异常: {str(e)}"})
+            if not task_launched:
+                yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
+                yield _sse({"type": "done"})
+                return
+            # 本连接作为首个订阅者：补发文本快照，再实时转发任务事件
+            rt = chat_registry.get(task_sid)
+            if rt and rt.full_text:
+                yield _sse({"type": "message", "delta": rt.full_text})
+            async for ev in chat_registry.subscribe(task_sid):
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
         finally:
-            # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
-            # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
-            if assistant_msg is not None:
-                try:
-                    if not assistant_msg.content and full_content.strip():
-                        assistant_msg.content = full_content.strip()
-                    await db.commit()
-                except Exception:
-                    try:
-                        await db.rollback()
-                    except Exception:
-                        pass
-                task_key = f"ai:canvas:task:{session_id}"
-                try:
-                    repo = get_cache_repository()
-                    if repo.exists(task_key):
-                        repo.set(
-                            task_key,
-                            json.dumps({
-                                "status": "interrupted",
-                                "chars": len(full_content),
-                                "interrupted_at": datetime.now(timezone.utc).isoformat(),
-                            }),
-                            ttl=settings.redis_ttl,
-                        )
-                except Exception:
-                    pass
-            # 会话锁：正常结束/异常/断线都走这里释放（TTL 仅作进程崩溃的兜底）
-            release_session_lock(session_id, lock_token)
-
+            # 任务未启动（构建中途异常/竞态被拒）→ 清理本轮副作用；已启动 → 归任务协程管
+            if not task_launched:
+                if lock_token:
+                    release_session_lock(session_id, lock_token)
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",

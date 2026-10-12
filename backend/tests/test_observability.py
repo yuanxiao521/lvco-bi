@@ -141,9 +141,23 @@ def test_settings_model_for_task_routing():
     assert default == settings.openai_model
 
 
-def test_settings_is_langfuse_configured():
-    """LANGFUSE_ENABLED + 双 key 都配置才算 configured。"""
+def test_settings_is_langfuse_configured(monkeypatch):
+    """LANGFUSE_ENABLED + 双 key 三者齐备才算 configured。
+
+    显式 monkeypatch，不读本机 .env——否则本机配了 Langfuse 时该断言会因环境而失败。
+    """
     from app.config import settings
 
-    # 默认未启用
-    assert settings.is_langfuse_configured is False
+    monkeypatch.setattr(settings, "LANGFUSE_ENABLED", False)
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", None)
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", None)
+    assert settings.is_langfuse_configured is False, "未启用时应为 False"
+
+    monkeypatch.setattr(settings, "LANGFUSE_PUBLIC_KEY", "pk-test")
+    assert settings.is_langfuse_configured is False, "启用但缺 secret key 仍应为 False"
+
+    monkeypatch.setattr(settings, "LANGFUSE_SECRET_KEY", "sk-test")
+    assert settings.is_langfuse_configured is False, "开关本身关闭时仍应为 False"
+
+    monkeypatch.setattr(settings, "LANGFUSE_ENABLED", True)
+    assert settings.is_langfuse_configured is True, "三者齐备应为 True"

@@ -101,19 +101,22 @@ def test_sub_executor_done_is_not_forwarded():
     经 run_analysis → Lead._forward 原样转发后，前端会在子任务落块完就把流标记完成，
     而外层 Lead 还在继续（决策 stop / 记忆回流）。
     """
-    src = inspect.getsource(LeadAgent._run_analysis_branch)
+    from app.services.agents.lead.lead_dispatch import run_worker
+
+    src = inspect.getsource(run_worker)
     assert 'ev.get("type") == "done"' in src, "Lead._forward 必须过滤子执行器的 done"
     # 过滤后紧跟着才 put：确认 done 被拦在 out_q 之外
-    assert "if isinstance(ev, dict) and ev.get(\"type\") == \"done\":\n                return" in src
+    assert "if isinstance(ev, dict) and ev.get(\"type\") == \"done\":\n            return" in src
 
 
 def test_canvas_endpoint_sends_exactly_one_done_at_stream_end():
-    """画布端点：事件流里的 done 只记录降级标记，流尾统一下发唯一 done。"""
+    """画布端点：事件流里的 done 只记录降级标记，流尾统一下发唯一 done（任务体内）。"""
     src = inspect.getsource(ai_module)
     # 事件分发处不再直接 yield done
     assert 'yield _sse({"type": "done", "degraded": event.get("degraded", False)})' not in src
     assert "stream_degraded = bool(event.get(\"degraded\", stream_degraded))" in src
-    assert 'yield _sse({"type": "done", "degraded": stream_degraded})' in src
+    # P2 后台任务化：done 在 _canvas_chat_task 尾部以 dict 形式 yield（由连接段统一序列化）
+    assert 'yield ({"type": "done", "degraded": stream_degraded})' in src
 
 
 # ── 会话级并发锁（抢锁失败提前 return 不能踩到 finally 的未绑定变量） ──────────
@@ -126,20 +129,24 @@ def _event_generator_src(endpoint: object) -> str:
 
 
 def test_stream_locals_bound_before_try() -> None:
-    """画布端点 finally 会引用这些局部变量，必须都在 try 之前初始化。
+    """画布端点已后台任务化（P2）：连接层 finally 只引用 try 前绑定的变量。
 
-    对话端点已后台任务化（事件循环/落库整体搬到 _run_chat_task），连接层不再有
-    finally，改为独立断言（见 test_chat_endpoint_delegates_to_background_task）。
+    与对话端点同款模式（test_chat_endpoint_delegates_to_background_task）：
+    Agent 执行/事件翻译/收尾整体搬到 _canvas_chat_task；连接层只剩
+    resume 续收 + registry.start + 订阅转发；finally 仅在任务未启动时释放锁。
     """
     endpoint = ai_module.canvas_ai_chat
     gen_src = _event_generator_src(endpoint)
     try_at = gen_src.index("\n        try:\n")
     head = gen_src[:try_at]
-    for name in ("assistant_msg: AIMessage | None = None", "full_content = \"\""):
+    for name in ("assistant_msg: AIMessage | None = None", "lock_token: str | None = None",
+                 "session_id: uuid.UUID | None = None"):
         assert name in head, f"{endpoint.__name__}: {name} 必须在 try 之前初始化"
-    assert head.count("assistant_msg: AIMessage | None = None") == 1, (
-        f"{endpoint.__name__}: assistant_msg 不应重复初始化（真源在 try 之前）"
-    )
+    mod_src = inspect.getsource(ai_module)
+    assert "async def _canvas_chat_task(" in mod_src, "画布端点必须存在后台任务体"
+    assert "chat_registry.start(" in gen_src, "画布端点必须经 registry 启动后台任务"
+    # full_content 已随任务体搬离连接层（它只在任务体里累加/落库）
+    assert 'full_content = ""' not in gen_src
 
 
 def test_chat_endpoint_delegates_to_background_task() -> None:

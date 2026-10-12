@@ -4,12 +4,12 @@
 Lead 无从判断子任务"做了什么、成败如何、多少行"。本阶段：
 
 - `run_analysis` 顺带收集工具调用链（tool_chain：工具名 + 参数摘要 + 行数 + 成败 + 落块数）；
-- `LeadAgent._build_execution_summary` 把执行产物组装成结构化摘要回填 turn_summaries，
+- `lead_review.build_execution_summary` 把执行产物组装成结构化摘要回填 turn_summaries，
   Supervisor 下一轮决策据此判断"达没达成"，而不是盲目重复派发。
 
 本文件测试：
-1. `_build_execution_summary` 成功路径：概况 / 规划 / 工具链 / 数值证据 / 报告全文。
-2. `_build_execution_summary` 失败路径：错误行 + 无工具链段。
+1. `build_execution_summary` 成功路径：概况 / 规划 / 工具链 / 数值证据 / 报告全文。
+2. `build_execution_summary` 失败路径：错误行 + 无工具链段。
 3. 真实 `run_analysis` 主循环：tool_call → tool_result 配对收集（ok / rows / args 摘要），
    落块计数、数值去伪、memo 幂等。
 4. 端到端 LeadAgent.stream：结构化摘要确实回写 ctx.turn_summaries，供决策器可见。
@@ -19,6 +19,7 @@ import json
 import pytest
 
 from app.services.agents.lead.lead_agent import LeadAgent, LeadContext
+from app.services.agents.lead.lead_review import build_execution_summary
 from app.services.agents.lead.lead_tools import (
     RunAnalysisArgs,
     RunAnalysisResult,
@@ -33,7 +34,7 @@ from app.services.canvas_tools import (
 )
 
 
-# ── 1/2. _build_execution_summary 纯函数（零依赖，确定性）────────────────────
+# ── 1/2. build_execution_summary 纯函数（零依赖，确定性）────────────────────
 
 def test_execution_summary_success_with_tool_chain():
     """成功：概况 + 规划 + 工具链（✓/✗/行数）+ 数值证据 + 报告全文。"""
@@ -52,7 +53,7 @@ def test_execution_summary_success_with_tool_chain():
         ],
     )
 
-    summary = LeadAgent._build_execution_summary(result)
+    summary = build_execution_summary(result)
 
     assert summary.startswith("[子任务执行记录]")
     assert "动作：分析完成，在画布上新增 2 个内容块。" in summary
@@ -83,7 +84,7 @@ def test_execution_summary_failure_case():
         ],
     )
 
-    summary = LeadAgent._build_execution_summary(result)
+    summary = build_execution_summary(result)
 
     assert "动作：分析未完成。原因：query_sql: 表不存在。" in summary
     assert "工具链：" in summary
@@ -203,7 +204,7 @@ class _MergedCallAnalysisThenStopLLM:
 async def test_lead_agent_backfills_structured_execution_summary(monkeypatch):
     """LeadAgent.stream 走 call_analysis → round1 stop：turn_summaries 注入
     [子任务执行记录]（含工具链/行数/报告全文），下一次决策输入即可感知效果。"""
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
 
     async def _fake_run_analysis(args, *, emit, **kw):  # noqa: ANN001
         await emit({"type": "status", "message": "开始分析"})
@@ -264,7 +265,7 @@ async def test_turn_summaries_injected_into_next_round_decision(monkeypatch):
             captured.append(str(user_content))
             return await super().complete(messages, **kw)
 
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
 
     async def _fake_run_analysis(args, *, emit, **kw):  # noqa: ANN001
         await emit({"type": "text", "content": "报告：总销售额 100 元。", "report_source": "orchestrator"})
@@ -389,13 +390,13 @@ def test_execution_summary_includes_canvas_landscape():
         "画布 id：c1\n画布当前共有 2 个块：图表 2 个、文本 0 个。\n"
         "图表清单：\n- 销售额柱状图（bar）\n- 区域分布饼图（pie）"
     )
-    summary = LeadAgent._build_execution_summary(result, canvas_layout=layout)
+    summary = build_execution_summary(result, canvas_layout=layout)
 
     assert "画布现状：画布 id：c1；画布当前共有 2 个块：图表 2 个、文本 0 个" in summary
     assert "销售额柱状图" in summary
 
     # 无画布快照时不产出该段
-    assert "画布现状" not in LeadAgent._build_execution_summary(result)
+    assert "画布现状" not in build_execution_summary(result)
 
 
 async def test_canvas_entry_injects_snapshot_into_decision_prompt(monkeypatch):
@@ -411,7 +412,7 @@ async def test_canvas_entry_injects_snapshot_into_decision_prompt(monkeypatch):
             captured.append(str(user_content))
             return await super().complete(messages, **kw)
 
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
     import app.services.agents.lead.lead_tools as tools_mod
 
     # 打桩新的接缝：画布状态由请求级 CanvasStateProvider 提供，Provider 的唯一读取入口是
@@ -505,7 +506,7 @@ def test_merged_decision_parses_guidance():
 
 async def test_worker_guidance_forwarded_to_run_analysis(monkeypatch):
     """Lead 的 guidance 确实随 decision 传到 run_analysis。"""
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
 
     captured = {}
 
@@ -546,7 +547,7 @@ async def test_assessment_injected_into_next_decision_prompt(monkeypatch):
             captured.append(str(user_content))
             return await super().complete(messages, **kw)
 
-    import app.services.agents.lead.lead_agent as mod
+    import app.services.agents.lead.lead_dispatch as mod
 
     async def _fake_run_analysis(args, *, emit, **kw):  # noqa: ANN001
         await emit({"type": "text", "content": "报告：销售额下降。", "report_source": "orchestrator"})

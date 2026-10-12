@@ -13,6 +13,7 @@ from app.services.agent_tools import BaseTool
 from app.schemas.query import ChartQueryConfig, MeasureConfig
 from app.services.metric_service import MetricServiceError
 from app.services.query_engine import QueryEngineError, execute_chart_query
+from app.services.canvas_block_writer import maybe_persist as _maybe_persist
 
 logger = logging.getLogger("lvco.canvas_tools")
 
@@ -470,6 +471,12 @@ class AddChartBlockTool(BaseTool):
         ledger: CanvasActionLedger | None = kwargs.get("canvas_ledger")
         if ledger is not None:
             ledger.record_add(action)
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False, default=str)
 
 
@@ -534,6 +541,12 @@ class AddTextBlockTool(BaseTool):
         action = {"action": "add_text_block", "block": {"blockType": block_type, "content": content}}
         if ledger is not None:
             ledger.record_add(action)
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -613,6 +626,12 @@ class UpdateChartBlockTool(BaseTool):
         action = {"action": "update_chart_block", "blockId": block_id, "patch": patch}
         if ledger is not None:
             ledger.record_update(block_id)
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -663,6 +682,12 @@ class RemoveBlockTool(BaseTool):
         action = {"action": "remove_block", "blockId": block_id}
         if ledger is not None:
             ledger.record_remove(block_id)
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 
@@ -712,6 +737,12 @@ class ClearCanvasTool(BaseTool):
                     ledger.record_remove(bid)
         logger.info("[clear_canvas] canvas_id=%s cleared=%d", canvas_id, cleared)
         action = {"action": "clear_canvas", "cleared": cleared}
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps(
             {"ok": True, "canvas_action": action, "cleared": cleared}, ensure_ascii=False
         )
@@ -747,6 +778,12 @@ class ArrangeLayoutTool(BaseTool):
     async def execute(self, layout: str = "auto", user_id: str = "", db_session=None, **kwargs) -> str:
         """返回 canvas_action；前端按报告式布局全量重排。"""
         action = {"action": "arrange_layout", "layout": layout}
+        _persisted = await _maybe_persist(
+            action, user_id=user_id,
+            canvas_id=str(kwargs.get("canvas_id") or ""), db=db_session,
+        )
+        if _persisted is not None:
+            action = _persisted
         return json.dumps({"ok": True, "canvas_action": action}, ensure_ascii=False)
 
 

@@ -22,10 +22,10 @@ from app.services.agents.planner_agent import (
 
 
 # 默认白名单（启动时由 agent_tools.py 底部模块级 register 注册产生的 10 个工具）。
+# 注意：validate_chart / data_quality / insight / clean_suggest / recommend_charts /
+# polish_text 已进 AGENT_HIDDEN_TOOLS（UI 型能力，不进 agent 白名单），故不在期望集内。
 EXPECTED_SAFE_TOOLS = (
-    "list_datasources", "query_sql", "render_chart",
-    "validate_chart", "query_engine", "data_quality",
-    "insight", "clean_suggest", "recommend_charts", "polish_text",
+    "list_datasources", "query_sql", "query_engine", "render_chart",
 )
 
 
@@ -43,7 +43,7 @@ def test_default_tool_not_in_orchestrator_whitelist():
     """默认白名单包含全部已注册的 orchestrator_safe=True 工具。"""
     tools = get_orchestrator_tools()
     assert isinstance(tools, set)
-    assert len(tools) >= 10
+    assert len(tools) >= 7  # 隐藏 6 个 UI 型工具后的存量
     for expected in EXPECTED_SAFE_TOOLS:
         assert expected in tools, f"缺少 {expected}"
 

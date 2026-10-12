@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     DUCKDB_DATA_DIR: str = "./data/duckdb"
     DUCKDB_MEMORY_LIMIT: str = "2GB"
+    # 画布后端唯一落库灰度开关：true 时 canvas_tools 写动作在 emit 前先写 DB（canvases.blocks），
+    # AI 落块不再依赖前端消费——画布助手后台化（P2）的前置。
+    CANVAS_BACKEND_PERSIST: bool = False
+    # 方案 B：以只读模式打开 lvco_bi.duckdb（多进程/多副本并行读的前提）。
+    # true 时本进程不可写——上传导入/删源必须经 DuckDBClient.write_window() 独占升级。
+    DUCKDB_READ_ONLY: bool = False
     # SQL 查询执行超时（秒）：guard 通过后抛给执行层的最长耗时。
     # 查询超时保护：DuckDB 查询在 to_thread 中异步执行，超过该值直接中断并返回错误。
     QUERY_EXEC_TIMEOUT: int = 30

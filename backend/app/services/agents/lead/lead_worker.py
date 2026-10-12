@@ -65,5 +65,5 @@ def resolve_worker(
     宁可退化到通用编排，也不要让整轮对话失败。
     """
     table = ENTRY_WORKERS.get(entry) or ENTRY_WORKERS.get("chat") or {}
-    name = explicit or table.get(complexity) or FALLBACK_WORKER
+    name = explicit or table.get(complexity or "complex") or FALLBACK_WORKER
     return WORKERS.get(name) or WORKERS[FALLBACK_WORKER]
