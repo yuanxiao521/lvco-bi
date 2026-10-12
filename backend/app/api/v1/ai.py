@@ -110,6 +110,50 @@ def _filter_canvas_history(rows, current_msg_id=None) -> list[dict]:
     return _align_history_pairs(history)
 
 
+async def _load_server_window(
+    db: AsyncSession,
+    session_id: uuid.UUID | None,
+    *,
+    exclude_msg_id: Any | None = None,
+    max_rounds: int | None = None,
+) -> list[dict]:
+    """服务端窗口（阶段 3）：按会话从 DB 取最近 N 轮——窗口唯一所有者。
+
+    为什么收归服务端：旧实现聊天入口用前端 slice(-10)、画布入口 LIMIT 13，
+    窗口大小由客户端决定（换客户端/清缓存即失忆），服务端的 30 条上限形同虚设。
+
+    规则（与 _filter_canvas_history 一致）：
+    - 排除本条用户消息（由 Lead 统一 add_turn，避免窗口重复）；
+    - 跳过空占位 assistant 行；
+    - 成对对齐（丢掉裁剪产生的孤立回答开场）。
+    """
+    if not session_id:
+        return []
+    from app.config import settings as _settings
+
+    rounds = max(1, int(max_rounds or getattr(_settings, "WINDOW_MAX_ROUNDS", 8) or 8))
+    # 每轮 2 条（user+assistant），多取 1 条给成对对齐做余量
+    limit = rounds * 2 + 1
+    prior = (
+        await db.execute(
+            select(AIMessage)
+            .where(AIMessage.session_id == session_id)
+            # 次级键 role 与 created_at 同向（见画布入口注释）；多取 2 条余量
+            .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
+            .limit(limit + 1)
+        )
+    ).scalars().all()
+    prior = list(reversed(prior))
+    history: list[dict] = []
+    for pm in prior:
+        if exclude_msg_id is not None and getattr(pm, "id", None) == exclude_msg_id:
+            continue
+        if pm.role == AIMessageRole.assistant and not (pm.content or "").strip():
+            continue
+        history.append({"role": pm.role.value, "content": pm.content})
+    return _align_history_pairs(history)[: rounds * 2]
+
+
 def _build_chart_summary_note(prior_msgs, budget: int) -> str:
     """把"最近几轮已生成的图表"渲染成一段注入文本，受总字符预算约束。
 
@@ -1146,6 +1190,14 @@ async def data_chat_stream(
                 memory_fail_count,
             ) = await _load_session_memory(db, session_id)
 
+            # 服务端窗口要排除的本条用户消息（已落库，id 已知）
+            user_msg_id_for_window = user_msg_model.id if session_id else None
+            # 阶段 3：服务端窗口在请求作用域查询一次（快照语义——窗口本就该反映
+            # 本轮启动前的会话状态）；factory 是同步函数，不能 await。
+            server_window_snapshot = await _load_server_window(
+                db, session_id, exclude_msg_id=user_msg_id_for_window
+            )
+
             def _event_factory(db_session: AsyncSession):
                 """由后台任务调用（传入任务自己的 db session，请求断开后它仍有效）。"""
                 from app.services.agents.lead import LeadAgent, LeadContext
@@ -1164,6 +1216,8 @@ async def data_chat_stream(
                     metrics_ctx=metrics_ctx_for_lead,
                     ui_action=getattr(body, "ui_action", None),
                 )
+                # 阶段 3：窗口所有权收归服务端——DB 取最近 N 轮（唯一所有者），
+                # 前端 history 降级为兜底（仅当 DB 窗口为空时使用，如极端落库延迟）。
                 # 前端把本条用户消息一并放进 history（aiChatStore 追加），而 stream 内部
                 # 会统一 add_turn 当前消息——这里剔除尾部的本条，避免同一消息在窗口里出现两次。
                 history_for_ctx = history
@@ -1175,11 +1229,13 @@ async def data_chat_stream(
                     history_for_ctx = history_for_ctx[:-1]
                 # 成对对齐：前端按条数 slice 出来的窗口可能从"上一轮的回答"开始，
                 # 这类孤立回答丢掉（否则模型开场就看到一个没有来由的答案）。
-                for h in _align_history_pairs([
+                aligned_history = _align_history_pairs([
                     {"role": h["role"], "content": str(h.get("content", ""))}
                     for h in history_for_ctx
                     if isinstance(h, dict) and h.get("role") in ("user", "assistant")
-                ]):
+                ])
+                window_turns = server_window_snapshot or aligned_history
+                for h in window_turns:
                     lead_ctx.turns.append(h)
                 return _lead_stream_guard(
                     LeadAgent(llm=llm_client, observer=get_observer()).stream(
@@ -2123,24 +2179,10 @@ async def canvas_ai_chat(
         stream_degraded = False  # 事件流里出现过的降级标记，随流尾唯一的 done 下发
         db = async_session_factory()
         try:
-            # ---- 3. 加载历史（最近 6 轮） ----
-            history: list[dict] = []
-            if session_id:
-                prior_msgs = (
-                    await db.execute(
-                        select(AIMessage)
-                        .where(AIMessage.session_id == session_id)
-                        # 次级键 role 方向必须与 created_at 一致（都是 desc）：本轮随后会
-                        # reversed() 成全量正序，方向一致才能在反转后仍得到"提问在前"。
-                        # 反向会得到"答在问前"——有 tie 时 DESC+LIMIT 再反转 ≠ ASC。
-                        .order_by(AIMessage.created_at.desc(), AIMessage.role.desc())
-                        # 取 13 条而非 12：多留 1 条给"成对对齐"的余量，
-                        # 窗口起点若落在某轮回答上，对齐后仍能保留 12 条完整问答
-                        .limit(13)
-                    )
-                ).scalars().all()
-                prior_msgs.reverse()
-                history = _filter_canvas_history(prior_msgs, user_msg_id)
+            # ---- 3. 加载历史（阶段 3：服务端窗口，与聊天入口共用同一所有者） ----
+            history = await _load_server_window(
+                db, session_id, exclude_msg_id=user_msg_id, max_rounds=None
+            ) if session_id else []
 
             # ---- 4. Agent 流式执行 ----
             # ── 主导 Agent 事件流（旧双路径已移除，无降级兜底）──

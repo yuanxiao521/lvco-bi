@@ -78,6 +78,35 @@ def _extract_summary(text: str) -> str:
     return (m.group(1) if m else raw).strip()
 
 
+def _rule_based_fallback_summary(messages: list[dict]) -> str:
+    """熔断期间的规则式兜底摘要（不调 LLM，确定性输出）。
+
+    语义：只做"压缩保存"，不做"理解归纳"——每轮抽用户首句（≤80 字） +
+    助手回复中的数字 token（带 % / 万 / 亿 / 元 / 条等量纲），拼成分区条目。
+    质量必然低于 LLM 摘要，但保证滑出窗口的轮次不消失（空心窗口防线）。
+    """
+    user_lines: list[str] = []
+    numbers: list[str] = []
+    num_re = re.compile(r"[\d,.]+\s*(?:%|万|亿|元|条|人|单|笔)")
+    for m in messages or []:
+        content = str(m.get("content", "") or "").strip()
+        if not content:
+            continue
+        if m.get("role") == "user":
+            user_lines.append(content[:80])
+        for tok in num_re.findall(content)[:3]:
+            numbers.append(tok)
+    parts: list[str] = []
+    if user_lines:
+        parts.append("【口径与规则】（熔断期规则式兜底，未做语义归纳）")
+        parts.extend(f"- {line}" for line in user_lines[:6])
+    if numbers:
+        parts.append("【关键数字与结论】" + "、".join(numbers[:10]))
+    if not parts:
+        return "（本段无可并入内容）"
+    return "\n".join(parts)
+
+
 def _resolve_memory_progress(total_rounds: int, covered_rounds: int) -> int:
     """归一化记忆合并进度：越界/脏数据（旧语义混杂、负数）一律按 0 处理。
 
@@ -91,11 +120,24 @@ def _resolve_memory_progress(total_rounds: int, covered_rounds: int) -> int:
     return 0
 
 
-def _should_merge_memory(total_rounds: int, covered_rounds: int, min_rounds: int) -> bool:
-    """节流判定：未合并的用户轮数达到 min_rounds 才触发一次记忆合并。"""
+def _should_merge_memory(
+    total_rounds: int,
+    covered_rounds: int,
+    min_rounds: int,
+    window_rounds: int | None = None,
+) -> bool:
+    """节流判定：未合并的用户轮数达到 min_rounds 才触发一次记忆合并。
+
+    阶段 3（窗口联动）：window_rounds 给定时，只要存在"已滑出近端窗口且尚未并入
+    摘要"的轮次（total - covered > window），**必须**触发——保证"窗口外一定有摘要"，
+    消除长会话的空心窗口。窗口未滑出时仍按 min_rounds 节流。
+    """
     if total_rounds <= 0 or min_rounds <= 0:
         return False
-    return (total_rounds - _resolve_memory_progress(total_rounds, covered_rounds)) >= min_rounds
+    unmerged = total_rounds - _resolve_memory_progress(total_rounds, covered_rounds)
+    if window_rounds is not None and window_rounds > 0 and unmerged > window_rounds:
+        return True
+    return unmerged >= min_rounds
 
 
 def _build_memory_merge_input(
@@ -704,13 +746,42 @@ class LeadAgent:
         max_messages = max(2, int(getattr(settings, "LEAD_MEMORY_MAX_MERGE_MESSAGES", 24) or 24))
 
         if int(ctx.memory_fail_count or 0) >= max_failures:
+            # 阶段 3：熔断不再"什么都不做"——那是长会话空心窗口的根源。
+            # 降级为规则式兜底摘要（不调 LLM）：把滑出窗口的未并入轮次抽成
+            # "用户首句 + 数字"条目，保轮次、保口径；下次成功合并时会被覆盖。
+            total_rounds = await _count_session_user_rounds(db_session, ctx.session_id)
+            window_rounds = int(getattr(settings, "WINDOW_MAX_ROUNDS", 8) or 8)
+            progress = _resolve_memory_progress(total_rounds, ctx.memory_covered)
+            unmerged = total_rounds - progress
+            if unmerged > window_rounds:
+                new_messages, last_id = await _load_unmerged_messages(
+                    db_session, ctx.session_id, after_id=ctx.memory_watermark,
+                    max_messages=max_messages,
+                )
+                if last_id is not None:
+                    fallback = _rule_based_fallback_summary(new_messages)
+                    merged_rounds = sum(1 for m in new_messages if m.get("role") == "user")
+                    next_covered = min(progress + merged_rounds, max(0, total_rounds - 1))
+                    logger.warning(
+                        "[lead_agent] memory_fallback_summary: 熔断期间规则式兜底 %s 条/%s 轮",
+                        len(new_messages), merged_rounds,
+                    )
+                    ctx.memory_covered = next_covered
+                    ctx.memory_watermark = last_id
+                    return {
+                        "source": "lead",
+                        "summary": fallback,
+                        "covered_rounds": next_covered,
+                        "last_merged_message_id": last_id,
+                    }
             logger.warning(
-                "[lead_agent] memory_merge_circuit_open: 连续失败 %s 次，本轮跳过",
+                "[lead_agent] memory_merge_circuit_open: 连续失败 %s 次，本轮跳过（窗口内无空洞）",
                 ctx.memory_fail_count,
             )
             return None
         total_rounds = await _count_session_user_rounds(db_session, ctx.session_id)
-        if not _should_merge_memory(total_rounds, ctx.memory_covered, min_rounds):
+        window_rounds = int(getattr(settings, "WINDOW_MAX_ROUNDS", 8) or 8)
+        if not _should_merge_memory(total_rounds, ctx.memory_covered, min_rounds, window_rounds):
             return None
         progress = _resolve_memory_progress(total_rounds, ctx.memory_covered)
         new_messages, last_id = await _load_unmerged_messages(
