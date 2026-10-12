@@ -161,6 +161,12 @@ class Settings(BaseSettings):
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
     LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
 
+    # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
+    # （阶段 2 迁移 token 口径时曾被区间替换误删，端到端启动探针抓出后恢复——
+    #   单测不覆盖 startup 路径，这类字段只能靠真机启动验证兜底。）
+    INSIGHT_ENABLED: bool = True
+    INSIGHT_INTERVAL_MINUTES: int = 5
+
     # 上下文压缩（消息列表；等价换算见 budgets.py：混排 0.6 token/字）
     MESSAGE_LIST_MAX_TOKENS: int = 90000
     CONTEXT_KEEP: int = 60
