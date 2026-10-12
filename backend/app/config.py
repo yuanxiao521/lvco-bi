@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     openai_timeout: int = 120
     MAX_UPLOAD_SIZE_MB: int = 100
     UPLOAD_DIR: str = "./data/uploads"
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

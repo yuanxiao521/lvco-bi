@@ -16,6 +16,43 @@ from app.models.chart_config import ChartConfig, ChartType
 logger = logging.getLogger(__name__)
 
 
+def _json_safe_blocks(blocks: list[Any]) -> list[Any]:
+    """把 blocks 里非 JSON 原生类型（date/datetime/Decimal/UUID/set）转成字符串。
+
+    深变换：块结构为 {type, content, chartData:{option, _chartResult:{rows:[...]}}}，
+    rows 来自 DuckDB 查询结果，date/Decimal 直接嵌在里面。
+    """
+    import json
+    from datetime import date as _date, datetime as _datetime
+    from decimal import Decimal
+    from uuid import UUID as _UUID
+
+    def _safe(v: Any) -> Any:
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, (_datetime, _date)):
+            return v.isoformat()
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, _UUID):
+            return str(v)
+        if isinstance(v, dict):
+            return {k: _safe(val) for k, val in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [_safe(x) for x in v]
+        if isinstance(v, (set, frozenset)):
+            return [_safe(x) for x in v]
+        return str(v)
+
+    try:
+        # 先走一遍 json.dumps 验证（default=str 兜住漏网类型），再原样返回清洗结果
+        json.dumps(_safe(blocks), ensure_ascii=False, allow_nan=False)
+        return _safe(blocks)
+    except (TypeError, ValueError) as e:
+        logger.warning(f"blocks json-safe 清洗后仍不可序列化，退化为 default=str 全转: {e}")
+        return json.loads(json.dumps(blocks, ensure_ascii=False, default=str))
+
+
 class SQLAlchemyCanvasRepository:
     """基于 SQLAlchemy 的画布仓库实现。"""
 
@@ -88,7 +125,11 @@ class SQLAlchemyCanvasRepository:
         if canvas is None:
             logger.warning(f"更新画布块失败：画布不存在 canvas_id={canvas_id}")
             return None
-        canvas.blocks = blocks
+        # 块内嵌的 chartData._chartResult.rows 可能含 date/datetime/Decimal 等非 JSON 原生类型
+        # （DuckDB 查询结果直接嵌入）。不清洗会在 flush 时抛 "date is not JSON serializable"，
+        # 且 PendingRollback 会拖垮同一 session 的后续写、后台任务崩溃不释放会话锁
+        # （现象：任务崩溃后用户所有新消息被"上一轮还在处理中"挡住）。
+        canvas.blocks = _json_safe_blocks(blocks)
         await self.db.flush()
         await self.db.refresh(canvas)
         logger.info(f"画布块更新成功 canvas_id={canvas_id}")

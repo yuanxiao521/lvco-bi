@@ -691,25 +691,25 @@ class LeadAgent:
             messages = assembled.messages
         else:
             messages = [{"role": "system", "content": _ANSWER_SYSTEM}]
-        if ctx.history_summary.strip():
-            # 长期记忆也要给上限：legacy 摘要可能上千字，原样注入会挤占追问所需的空间
-            mem = ctx.history_summary.strip()
-            mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000) // 3)
-            if len(mem) > mem_cap:
-                mem = mem[:mem_cap] + "…"
-            messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
-        if ctx.metrics_ctx.strip():
-            messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
-        if canvas_layout.strip():
-            # 画布感知也要覆盖"直接回答"分支：此前只有决策与 Worker 有画布快照，
-            # 于是"画布上有什么？""我刚让你画的是什么？"这类短问句若被路由成 answer
-            # 就会失去画布信息（能力层已有 provider，这里取用即可，不额外读库）。
-            messages.append({
-                "role": "assistant",
-                "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{canvas_layout}",
-            })
-        for t in ctx.recent_turns(max_turns=12):  # AB-B: 8->12
-            messages.append({"role": t["role"], "content": t["content"]})
+            if ctx.history_summary.strip():
+                # 长期记忆也要给上限：legacy 摘要可能上千字，原样注入会挤占追问所需的空间
+                mem = ctx.history_summary.strip()
+                mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400) * 5 // 9)
+                if len(mem) > mem_cap:
+                    mem = mem[:mem_cap] + "…"
+                messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
+            if ctx.metrics_ctx.strip():
+                messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
+            if canvas_layout.strip():
+                # 画布感知也要覆盖"直接回答"分支：此前只有决策与 Worker 有画布快照，
+                # 于是"画布上有什么？""我刚让你画的是什么？"这类短问句若被路由成 answer
+                # 就会失去画布信息（能力层已有 provider，这里取用即可，不额外读库）。
+                messages.append({
+                    "role": "assistant",
+                    "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{canvas_layout}",
+                })
+            for t in ctx.recent_turns(max_turns=12):  # AB-B: 8->12
+                messages.append({"role": t["role"], "content": t["content"]})
         messages.append({"role": "user", "content": user_msg})
         collected: list[str] = []
         try:
