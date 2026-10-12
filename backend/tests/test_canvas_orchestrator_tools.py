@@ -72,9 +72,15 @@ def test_orchestrator_default_has_no_extra_tools():
 _EXECUTOR_BLOCK_TOOLS = frozenset({
     "add_chart_block", "add_text_block",
     "update_chart_block", "remove_block", "arrange_layout",
+    # clear_canvas：清空是原子落块操作（整体清空画布）
+    # list_fields：列名自纠错需要（执行器不直接查数，但缺列名时允许补查）
+    "clear_canvas", "list_fields",
 })
+# 执行器不可见的"查数类"工具。注意 **list_fields 不在此列**：执行器允许它在
+# "注入的字段清单缺失/字段不确定"时自纠错，真正要拦的是查数工具（query_*）——
+# 它们会诱导 LLM"取数但不建图"（add_chart_block 自带取数验证）。
 _QUERY_TOOLS = frozenset({
-    "query_engine", "query_sql", "list_datasources", "list_fields",
+    "query_engine", "query_sql", "list_datasources",
     "stats_analyzer", "recommend_charts",
 })
 

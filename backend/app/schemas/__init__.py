@@ -311,7 +311,9 @@ class PolishRequest(CamelModel):
 class CanvasChatRequest(CamelModel):
     datasource_id: str | None = None
     session_id: str | None = None
-    message: str = Field(..., max_length=2000)  # 长度限制只作用于用户原始输入
+    # resume=true 时 message 可为空：不重发消息，仅续收运行中任务（画布助手后台化）
+    message: str = Field("", max_length=2000)  # 长度限制只作用于用户原始输入
+    resume: bool = False  # true = 断线重连续收：跳过会话/锁/消息保存，直接订阅运行中任务
     canvas_context: dict | None = None  # blocks, current config, etc.
     canvas_id: str | None = None  # 画布 ID；用于会话按画布隔离（可为空 = 未保存草稿）
     new_session: bool | None = None  # 强制新建会话（忽略该画布最近会话），供"新对话"使用

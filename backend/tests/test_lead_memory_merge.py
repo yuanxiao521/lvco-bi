@@ -284,7 +284,12 @@ def _patch_merge_io(monkeypatch, total_rounds: int, messages: list[dict]):
     模拟真实 `_load_unmerged_messages` 的语义：返回的消息列表跳过空内容行，但
     "本段最后一条消息 id"取**原始窗口最后一行**（空行也要被水位跨越）。
     """
+    from app.config import settings
     from app.services.agents.lead import lead_agent as mod
+
+    # 合并阈值会随配置漂移（AB 实验把 4 调成过 6）：测试显式钉住，避免结果依赖全局参数值。
+    # 本文件验证的是"合并编排逻辑"，不是"阈值取值"。
+    monkeypatch.setattr(settings, "LEAD_MEMORY_MERGE_ROUNDS", 4)
 
     rows = [
         {"id": m.get("id") or f"msg-{i}", "role": m["role"], "content": m["content"]}

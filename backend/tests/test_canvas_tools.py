@@ -24,9 +24,20 @@ USER_ID = "11111111-1111-1111-1111-111111111111"
 DS_ID = "22222222-2222-2222-2222-222222222222"
 
 
+async def _passthrough_resolve_measures(db, user_id, raw_measures, dimensions=None):  # noqa: ANN001
+    """直通替身：把这些测试里的"普通度量"原样透传（不查指标库）。
+
+    `resolve_measures` 是"指标语义层"引入的依赖（会把命中受治理指标的字段升级为
+    指标引用）；本文件验证的是落块结构与缺参守卫，与指标解析无关，故替换为直通。
+    """
+    ms = list(raw_measures or [])
+    return ms, ms  # (可执行度量, 前端展示度量) —— 普通度量两者同形
+
+
 @pytest.fixture
-def db_session() -> MagicMock:
-    return MagicMock()
+def db_session() -> AsyncMock:
+    """异步会话替身：工具内部会 await 会话上的方法，MagicMock 会在 await 处崩。"""
+    return AsyncMock()
 
 
 # ── add_chart_block ──────────────────────────────────────────────────────────
@@ -38,7 +49,8 @@ async def test_add_chart_block_success(db_session: MagicMock):
         rows=[{"channel": "抖音", "users": 100}, {"channel": "小红书", "users": 80}],
         query_time_ms=12,
     )
-    with patch("app.services.canvas_tools.execute_chart_query", new=AsyncMock(return_value=result)):
+    with patch("app.services.canvas_tools.execute_chart_query", new=AsyncMock(return_value=result)), \
+         patch("app.services.metric_service.resolve_measures", new=_passthrough_resolve_measures):
         tool = AddChartBlockTool()
         out = await tool.execute(
             title="渠道获客对比",
@@ -67,7 +79,8 @@ async def test_add_chart_block_kpi_card_no_dimension_allowed(db_session: MagicMo
         rows=[{"sum_amount": 1533082.61}],
         query_time_ms=8,
     )
-    with patch("app.services.canvas_tools.execute_chart_query", new=AsyncMock(return_value=result)):
+    with patch("app.services.canvas_tools.execute_chart_query", new=AsyncMock(return_value=result)), \
+         patch("app.services.metric_service.resolve_measures", new=_passthrough_resolve_measures):
         tool = AddChartBlockTool()
         out = await tool.execute(
             title="本月总销售额",
@@ -99,7 +112,8 @@ async def test_add_chart_block_requires_dimension_except_kpi(db_session: MagicMo
     )
     parsed = json.loads(out)
     assert "error" in parsed
-    assert "kpi_card" in parsed["error"]
+    # 缺参守卫优先命中"缺少必填参数: dimensions"（早于后面那条"请改用 kpi_card"的提示）
+    assert "dimensions" in parsed["error"], out
 
 
 async def test_add_chart_block_query_error(db_session: MagicMock):

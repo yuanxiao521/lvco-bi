@@ -141,9 +141,12 @@ class DataSourceService:
 
         schema_name = duckdb_client.get_schema_name(user_id, ds.id, ds.name)
         try:
-            table_name = await asyncio.to_thread(
-                connector.load_to_duckdb, duckdb_client, str(file_path), schema_name
-            )
+            def _import_in_window(conn=connector, fp=str(file_path), sch=schema_name):
+                # 方案 B：DUCKDB_READ_ONLY 模式下导入必须经写窗口独占升级；默认读写模式透传
+                with duckdb_client.write_window():
+                    return conn.load_to_duckdb(duckdb_client, fp, sch)
+
+            table_name = await asyncio.to_thread(_import_in_window)
             schema_meta = await asyncio.to_thread(
                 connector.get_schema_meta, duckdb_client, schema_name, table_name
             )
@@ -223,7 +226,8 @@ class DataSourceService:
             else:
                 connector = ExcelConnector()
             try:
-                table_name = connector.load_to_duckdb(duckdb_client, ds.file_path, schema_name)
+                with duckdb_client.write_window():
+                    table_name = connector.load_to_duckdb(duckdb_client, ds.file_path, schema_name)
                 ds.row_count = connector.get_row_count(duckdb_client, schema_name, table_name)
                 ds.schema_meta = connector.get_schema_meta(duckdb_client, schema_name, table_name)
                 ds.status = DatasourceStatus.connected
@@ -370,7 +374,8 @@ class DataSourceService:
         if ds.file_path and ds.source_type in (SourceType.csv, SourceType.excel):
             schema_name = duckdb_client.get_schema_name(user_id, ds.id, ds.name)
             try:
-                duckdb_client.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+                with duckdb_client.write_window():
+                    duckdb_client.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
             except Exception:
                 pass
 

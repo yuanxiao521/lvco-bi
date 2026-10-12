@@ -1104,7 +1104,7 @@ export default function FreeCanvas() {
           limit: block.queryConfig?.limit ?? 20,
           datasourceId: dsId,
         };
-        const blockId = `chart_${Date.now()}`;
+        const blockId = block.blockId || `chart_${Date.now()}`;
         setChartConfigs((prev) => ({ ...prev, [blockId]: queryConfig }));
         // 优先使用后端已取回的真实数据，避免二次查询；无数据时再查
         if (Array.isArray(block.rows)) {
@@ -1127,10 +1127,13 @@ export default function FreeCanvas() {
         }
         const title = block.title || `${ct} 图表`;
         setBlocks((prev) => {
-          const { x, y } = nextChartSlot(prev, { width: canvasWidth });
+          // P1 后端唯一落库：事件带后端已算好的坐标/ID 时直接采用（渲染与 DB 一致）
+          const pos = block.x != null && block.y != null
+            ? { x: block.x, y: block.y }
+            : nextChartSlot(prev, { width: canvasWidth });
           return [
             ...prev,
-            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: geometry.chartW, height: REPORT.chartH, x, y },
+            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: geometry.chartW, height: REPORT.chartH, x: pos.x, y: pos.y },
           ];
         });
         scrollToBlock(blockId);
@@ -1144,10 +1147,12 @@ export default function FreeCanvas() {
         const content = block.content || "";
         const blockType = block.blockType || "text";
         const type = blockType === "h1" || blockType === "h2" ? blockType : "text";
-        const blockId = newBlockId(type);
+        const blockId = block.blockId || newBlockId(type);
         setBlocks((prev) => {
-          const { x, y } = nextFullWidthSlot(prev, { width: canvasWidth });
-          return [...prev, { type, blockId, content, width: geometry.fullW, x, y }];
+          const pos = block.x != null && block.y != null
+            ? { x: block.x, y: block.y }
+            : nextFullWidthSlot(prev, { width: canvasWidth });
+          return [...prev, { type, blockId, content, width: geometry.fullW, x: pos.x, y: pos.y }];
         });
         break;
       }

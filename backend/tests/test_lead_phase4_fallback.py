@@ -159,26 +159,21 @@ async def test_no_tool_call_twice_skipped(monkeypatch):
 # ── 2. api 层主导 Agent 降级护栏 ──
 
 
-async def test_guard_falls_back_when_lead_raises_before_events():
-    """主导 Agent 未产出任何事件即异常 → 整体回落旧路径，done 标记 degraded。"""
+async def test_guard_reports_error_when_lead_raises_before_events():
+    """主导 Agent 未产出任何事件即异常 → 补发 status + done(degraded)。
+
+    旧双路径已整体移除：异常必须被看见，而不是悄悄切到一条可能已腐坏的旧路径。
+    """
 
     async def lead_stream():
         raise RuntimeError("intent boom")
         yield  # pragma: no cover
 
-    legacy_calls = {"n": 0}
-
-    async def legacy_factory():
-        legacy_calls["n"] += 1
-        yield {"type": "text", "content": "旧路径回答"}
-        yield {"type": "done", "degraded": False}
-
-    events = [ev async for ev in _lead_stream_guard(lead_stream(), legacy_factory)]
+    events = [ev async for ev in _lead_stream_guard(lead_stream())]
     types = [e["type"] for e in events]
-    assert types == ["status", "text", "done"], types
-    assert events[0]["degradation"] == "lead_agent_fallback"
+    assert types == ["status", "done"], types
+    assert events[0]["degradation"] == "lead_agent_error"
     assert events[-1]["degraded"] is True
-    assert legacy_calls["n"] == 1
 
 
 async def test_guard_degrades_after_partial_events():
@@ -188,11 +183,7 @@ async def test_guard_degrades_after_partial_events():
         yield {"type": "intent", "intent": "data_qa"}
         raise RuntimeError("analysis boom")
 
-    async def legacy_factory():
-        raise AssertionError("已产出事件后不应回落旧路径")
-        yield  # pragma: no cover
-
-    events = [ev async for ev in _lead_stream_guard(lead_stream(), legacy_factory)]
+    events = [ev async for ev in _lead_stream_guard(lead_stream())]
     types = [e["type"] for e in events]
     assert types == ["intent", "status", "done"], types
     assert events[-1]["degraded"] is True
@@ -205,10 +196,6 @@ async def test_guard_passthrough_when_no_error():
         yield {"type": "intent", "intent": "chat"}
         yield {"type": "done", "degraded": False}
 
-    async def legacy_factory():
-        raise AssertionError("不应回落旧路径")
-        yield  # pragma: no cover
-
-    events = [ev async for ev in _lead_stream_guard(lead_stream(), legacy_factory)]
+    events = [ev async for ev in _lead_stream_guard(lead_stream())]
     assert [e["type"] for e in events] == ["intent", "done"]
     assert events[-1]["degraded"] is False

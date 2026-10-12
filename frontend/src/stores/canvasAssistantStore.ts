@@ -51,6 +51,8 @@ export interface CanvasAssistantCtx {
   onCanvasAction?: (action: any) => void;
   onApplyChartConfig?: (config: CanvasChartConfig) => void;
   ensureCanvas?: () => Promise<string>;
+  /** P2 断线续收：resume 命中运行中任务后由调用方 GET 画布对齐本地渲染（块状态以 DB 为准） */
+  refreshCanvas?: () => void;
 }
 
 /** 生成稳定唯一的消息 id */
@@ -117,6 +119,7 @@ interface CanvasAssistantStore {
   /** 发送消息：首步校验 + SSE 流式消费（核心逻辑迁移自 AIAssistant.handleSend）。
    *  uiAction：HITL 确认卡片动作（{type:"confirm"|"cancel"}），点按钮时携带，后端守卫据此短路决策。 */
   send: (content: string, ctx: CanvasAssistantCtx, uiAction?: { type: string } | null) => Promise<void>;
+  resumeStream: (ctx: CanvasAssistantCtx) => Promise<void>;
   /** 待确认卡片（后端 confirm_request 事件的载荷）；null = 无待确认。用户点击按钮或取消后清除 */
   pendingConfirm: { goal: string; question: string } | null;
   clearPendingConfirm: () => void;
@@ -610,6 +613,89 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         patchAssistant("> 已停止本轮生成。");
       }
       abortRequested = false;
+      activeStreamCanvasId = null;
+      streamingLock = false;
+      set({ isStreaming: false });
+    }
+  },
+
+  /** P2 断线续收：不重发消息，POST resume 订阅运行中任务的剩余事件。
+   * 画布块最终状态以 DB 为准（P1 后端唯一落库）——resume 命中运行中任务时
+   * 触发 ctx.refreshCanvas() 由调用方 GET 画布对齐本地渲染。 */
+  resumeStream: async (ctx: CanvasAssistantCtx) => {
+    if (streamingLock) return;
+    const sid = get().curSessionId;
+    if (!sid) return;
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    streamingLock = true;
+    set({ isStreaming: true });
+    activeStreamCanvasId = ctx.canvasId ?? null;
+    const assistantId = makeMsgId("a");
+    set((s) => ({ messages: [...s.messages, { id: assistantId, role: "assistant", content: "" }] }));
+    const patchAssistant = (c: string) =>
+      set((s) => ({ messages: s.messages.map((m) => (m.id === assistantId ? { ...m, content: c } : m)) }));
+    const token = tokenStore.getAccess();
+    const controller = new AbortController();
+    activeCancel = () => { try { controller.abort(); } catch { /* ignore */ } };
+    let assistantContent = "";
+    try {
+      const response = await fetch(`${baseUrl}/ai/canvas/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          resume: true,
+          session_id: sid,
+          canvas_id: ctx.canvasId ?? null,
+          datasource_id: ctx.datasourceId ?? null,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const consumeLine = (line: string) => {
+        if (!line.startsWith("data: ")) return;
+        let event: any;
+        try { event = JSON.parse(line.slice(6).trim()); } catch { return; }
+        switch (event.type) {
+          case "status":
+            if (event.resumed) {
+              if (event.finished) {
+                patchAssistant("[后台任务已结束，画布内容以画布为准]");
+              } else {
+                patchAssistant("[已恢复连接，正在续收后台任务]");
+                ctx.refreshCanvas?.();
+              }
+            }
+            break;
+          case "message": {
+            const delta = event.delta ?? "";
+            assistantContent += delta;
+            patchAssistant(assistantContent);
+            break;
+          }
+          case "error":
+            patchAssistant(assistantContent ? assistantContent + `\n\n> ${event.message}` : `> ${event.message}`);
+            break;
+          case "done":
+            break;
+        }
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n");
+        buffer = parts.pop() ?? "";
+        for (const line of parts) consumeLine(line);
+      }
+      if (buffer) consumeLine(buffer);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "未知错误";
+      patchAssistant(`[续收失败] ${msg}`);
+    } finally {
+      activeCancel = null;
       activeStreamCanvasId = null;
       streamingLock = false;
       set({ isStreaming: false });

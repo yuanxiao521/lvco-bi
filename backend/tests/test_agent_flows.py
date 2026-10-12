@@ -430,7 +430,6 @@ async def test_react_graph_flow_with_trace(fake_registry):
         ],
         user_id="u1",
         db_session=None,
-        initial_phase="analyzing",
         emit=emit,
     )
 
@@ -527,7 +526,7 @@ async def test_react_tool_result_compacted_into_messages(monkeypatch):
     react = ReactGraphAgent(CallOnceLLM(), [HugeQueryTool().schema()], None)
     state = await react.run(
         messages=[{"role": "system", "content": "助手"}, {"role": "user", "content": "查询"}],
-        user_id="u1", db_session=None, initial_phase="analyzing", emit=emit,
+        user_id="u1", db_session=None, emit=emit,
     )
 
     # LLM 上下文侧：大结果被压缩（rows 截断 + total/truncated 标记）
@@ -557,7 +556,7 @@ async def test_react_tool_error_result_kept_full(monkeypatch):
     react = ReactGraphAgent(CallOnceLLM(), [ErrorQueryTool().schema()], None)
     state = await react.run(
         messages=[{"role": "system", "content": "助手"}, {"role": "user", "content": "查询"}],
-        user_id="u1", db_session=None, initial_phase="analyzing", emit=None,
+        user_id="u1", db_session=None, emit=None,
     )
 
     tool_msgs = [m for m in state["messages"] if m.get("role") == "tool"]
@@ -643,7 +642,7 @@ def test_tool_registry_includes_stats_analyzer():
         "arrange_layout",
     ):
         assert tool in names
-    assert len(names) == 19  # 12 分析 + list_metrics + 6 画布（含 get_canvas_layout）
+    assert len(names) == 20  # 13 分析 + 7 画布（含 clear_canvas / get_canvas_layout）
 
 
 def test_list_datasources_returns_table_level_only():
