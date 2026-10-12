@@ -13,7 +13,18 @@ from typing import Any
 
 from app.config import settings
 
-_MAX_RESULT_CHARS = settings.RESULT_MAX_CHARS  # 单个工具结果注入上下文的最大字符数
+# 字符 ↔ token 换算（与 services/context/budgets.py 同系数；本文件是字符口径的 legacy 层）
+_TOKENS_PER_CHAR_MIXED = 0.6
+_TOKENS_PER_CHAR_JSON = 0.4
+
+
+def _chars_for_tokens(tokens: int, tokens_per_char: float) -> int:
+    return int(round(max(0, tokens) / tokens_per_char)) if tokens_per_char > 0 else 0
+
+
+_MAX_RESULT_CHARS = _chars_for_tokens(
+    int(getattr(settings, "TOOL_RESULT_MAX_TOKENS", 800) or 800), _TOKENS_PER_CHAR_JSON
+)   # 单个工具结果注入上下文的最大字符数（token 口径反推）
 _MAX_ROWS = settings.RESULT_MAX_ROWS            # rows 保留前 N 行
 
 
@@ -78,7 +89,10 @@ def compact_result_json(result_str: str, max_chars: int = _MAX_RESULT_CHARS) -> 
 
     # 元数据类（无 rows 数据行）→ 用较大的保底上限，避免列名/描述被腰斩
     has_rows = isinstance(obj.get("rows"), list)
-    cap = max_chars if has_rows else max(max_chars, settings.RESULT_MAX_META_CHARS)
+    cap = max_chars if has_rows else max(
+        max_chars,
+        _chars_for_tokens(int(getattr(settings, "TOOL_RESULT_META_MAX_TOKENS", 3200) or 3200), _TOKENS_PER_CHAR_JSON),
+    )
 
     out: dict[str, Any] = {}
     for k, v in obj.items():
@@ -102,7 +116,9 @@ def compress_history(messages: list[dict], keep: int = 0, max_chars: int = 0) ->
     if not messages:
         return messages
     keep = keep or settings.CONTEXT_KEEP
-    max_chars = max_chars or settings.CONTEXT_MAX_CHARS
+    max_chars = max_chars or _chars_for_tokens(
+        int(getattr(settings, "MESSAGE_LIST_MAX_TOKENS", 90000) or 90000), _TOKENS_PER_CHAR_MIXED
+    )
     total = sum(len(str(m.get("content", ""))) for m in messages)
     if len(messages) <= keep and total <= max_chars:
         return messages
@@ -209,7 +225,9 @@ async def smart_compress_history(
 
     min_rounds = min_rounds or settings.CONTEXT_MIN_ROUNDS
     keep_rounds = keep_rounds or settings.CONTEXT_KEEP_ROUNDS
-    max_chars = max_chars or settings.CONTEXT_MAX_CHARS
+    max_chars = max_chars or _chars_for_tokens(
+        int(getattr(settings, "MESSAGE_LIST_MAX_TOKENS", 90000) or 90000), _TOKENS_PER_CHAR_MIXED
+    )
     rounds = _count_rounds_since_marker(messages)
     if rounds < min_rounds:
         return messages

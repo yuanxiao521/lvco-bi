@@ -64,7 +64,7 @@ _MEMORY_MERGE_TEMPLATE = (
 
 def _memory_merge_system_prompt() -> str:
     """记忆合并的系统提示词（摘要字数上限来自配置）。"""
-    max_chars = max(200, int(getattr(settings, "LEAD_MEMORY_SUMMARY_CHARS", 600) or 600))
+    max_chars = max(200, int(getattr(settings, "LEAD_MEMORY_SUMMARY_TOKENS", 600) or 600))
     return _MEMORY_MERGE_TEMPLATE.format(max_chars=max_chars)
 
 # 先打草稿再给摘要可显著提升合并质量，草稿由这里剥掉（不会进长期记忆）
