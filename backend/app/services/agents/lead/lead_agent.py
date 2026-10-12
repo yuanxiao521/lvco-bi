@@ -31,6 +31,8 @@ from app.services.agents.lead.lead_intent import IntentResult, IntentType
 from app.services.agents.lead.lead_worker import resolve_worker
 from app.services.lead_session_state import lead_session_state, read_phase
 from app.services.agents.lead.lead_tools import _load_available_datasources
+from app.services.context.sources.state import CanvasSource, DatasourceSource
+from app.services.context.types import BlockKind
 
 logger = logging.getLogger("lvco.lead.agent")
 
@@ -370,6 +372,20 @@ class LeadAgent:
         self._memo: dict = {}
         self._memo_lock = asyncio.Lock()
 
+    def _log_ctx_ledger(self, assembled, label: str, trace=None) -> None:
+        """上下文装配台账落 trace + 本地日志（Langfuse 未启用时也有本地记录）。
+
+        回答"这个 prompt 为什么这么大"：每个块的 token 占用 / 丢了谁 / 为什么降级。
+        """
+        try:
+            ledger = assembled.ledger
+            logger.info("[ctx_ledger] %s %s", label, ledger.summary())
+            if trace is not None:
+                span = trace.span(f"context_assembly_{label}", span_type="span")
+                span.update(metadata=ledger.as_dict())
+        except Exception:  # noqa: BLE001
+            logger.debug("[ctx_ledger] trace span failed", exc_info=True)
+
     # ── 对外主入口：异步事件流 ──
     async def stream(
         self,
@@ -412,6 +428,22 @@ class LeadAgent:
                 trace_cm = None
 
         try:
+            # ── 0.5) 请求级上下文门面（阶段 6）：一次构造全轮复用，装配产台账落 trace。
+            # P0 语义：parts["history_summary"] 与 ctx.digest() 逐字节等价（测试锁定），
+            # 决策 prompt 的实际内容不变——本步只增加"每块 token 台账"这一可观测产物。
+            from app.services.context.provider import TurnContextProvider, TurnInputs
+
+            ctx_provider = TurnContextProvider.for_turn(TurnInputs(
+                user_id=str(ctx.user_id),
+                session_id=ctx.session_id,
+                entry=ctx.entry,
+                turns=list(ctx.turns),
+                history_summary=ctx.history_summary,
+                subtask_summaries=ctx.turn_summaries,
+                metrics_ctx=ctx.metrics_ctx,
+                artifact_note=ctx.extra_context,
+            ))
+
             # ── 1) 首轮合并调用：意图 + 决策 一次 LLM 请求（省一次调用，语义同源）──
             available_datasources = await _load_available_datasources(
                 db_session, str(ctx.user_id), ctx.datasource_id,
@@ -431,10 +463,15 @@ class LeadAgent:
                 pass
             _guard = await self._confirm_guard(ctx, user_msg)
             if _guard is None:
+                # 决策还需要两个请求级块：数据源清单与画布快照（本分支刚加载完）
+                ctx_provider._sources[BlockKind.DATASOURCES] = DatasourceSource(available_datasources)
+                ctx_provider._sources[BlockKind.CANVAS] = CanvasSource(canvas_layout)
+                assembled = ctx_provider.for_decision(user_msg)
+                self._log_ctx_ledger(assembled, "decision_r0", trace=trace)
                 merged = await decide_action_merged(
                     user_msg,
                     entry=ctx.entry,
-                    history_summary=ctx.digest(),
+                    history_summary=assembled.parts["history_summary"],
                     datasources=available_datasources,
                     subtask_summaries=ctx.turn_summaries,
                     canvas_layout=canvas_layout,
@@ -477,10 +514,13 @@ class LeadAgent:
                     # 已变化 → force=True 跳过缓存重读
                     if ctx.canvas_state is not None:
                         canvas_layout = await ctx.canvas_state.layout(force=True) or canvas_layout
+                    ctx_provider.refresh_canvas(canvas_layout)
+                    decision_assembled = ctx_provider.for_decision(user_msg)
+                    self._log_ctx_ledger(decision_assembled, f"decision_r{rnd}", trace=trace)
                     decision = await decide_action(
                         user_msg,
                         intent,
-                        history_summary=ctx.digest(),
+                        history_summary=decision_assembled.parts["history_summary"],
                         datasources=available_datasources,
                         subtask_summaries=ctx.turn_summaries,
                         canvas_layout=canvas_layout,
@@ -549,7 +589,8 @@ class LeadAgent:
                     # 决定 stop，避免重复执行同目标；run_analysis memo 幂等兜底）
                 else:
                     async for ev in self._answer_branch(
-                        user_msg, decision, ctx, canvas_layout=canvas_layout, trace=trace
+                        user_msg, decision, ctx, canvas_layout=canvas_layout, trace=trace,
+                        ctx_provider=ctx_provider,
                     ):
                         yield ev
                     # 纯回答路径：答完即代码层收尾，不再开下一轮决策。
@@ -605,13 +646,21 @@ class LeadAgent:
         ctx: LeadContext,
         canvas_layout: str = "",
         trace=None,
+        ctx_provider=None,
     ) -> AsyncIterator[dict]:
         text = (decision.direct_text or "").strip()
         if text:
             async for ev in self._emit_answer(text):
                 yield ev
             return
-        messages = [{"role": "system", "content": _ANSWER_SYSTEM}]
+        if ctx_provider is not None:
+            # 阶段 6：回答路径走四件套装配（messages 与 legacy 逐字节等价）+ 台账落 trace
+            ctx_provider.refresh_canvas(canvas_layout)
+            assembled = ctx_provider.for_answer(user_msg, system_text=_ANSWER_SYSTEM)
+            self._log_ctx_ledger(assembled, "answer", trace=trace)
+            messages = assembled.messages
+        else:
+            messages = [{"role": "system", "content": _ANSWER_SYSTEM}]
         if ctx.history_summary.strip():
             # 长期记忆也要给上限：legacy 摘要可能上千字，原样注入会挤占追问所需的空间
             mem = ctx.history_summary.strip()
