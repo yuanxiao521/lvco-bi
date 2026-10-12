@@ -53,6 +53,32 @@ def test_build_memory_merge_input_empty_old():
     assert "【新增对话】" in text
 
 
+def test_build_memory_merge_input_includes_quantified_numbers():
+    """阶段 4 收尾：合并输入带【本轮关键数字】——补上"工具结果数值不进长期记忆"的缺口。"""
+    text = _build_memory_merge_input("旧口径：含税", [
+        {"role": "user", "content": "华东销售额多少"},
+        {"role": "assistant", "content": "华东 8,640 万（含税），环比增长 23%"},
+    ])
+    assert "【本轮关键数字】" in text
+    assert "8,640 万" in text
+    assert "23%" in text
+
+
+def test_build_memory_merge_input_numbers_dedup_and_cap():
+    numbers = [f"{i} 万" for i in range(30)]
+    msgs = [{"role": "assistant", "content": "、".join(numbers)}]
+    text = _build_memory_merge_input("", msgs * 3)   # 重复消息 → 去重
+    assert text.count("【本轮关键数字】") == 1
+    num_section = text.split("【本轮关键数字】")[1].split("\n\n")[0]
+    assert "0 万" in num_section and "11 万" in num_section   # 上限 12 个
+    assert "29 万" not in num_section                         # 超出上限的不收（原文段不算）
+
+
+def test_build_memory_merge_input_no_numbers_no_section():
+    text = _build_memory_merge_input("", [{"role": "user", "content": "你好呀"}])
+    assert "【本轮关键数字】" not in text              # 没有数字就不给空节
+
+
 def test_build_memory_merge_input_truncates():
     long_line = "长" * 2000
     text = _build_memory_merge_input(

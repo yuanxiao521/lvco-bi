@@ -674,20 +674,25 @@ async def run_analysis(
             ):
                 yield ev
         elif mode == "react":
+            from app.config import settings as _settings
             from app.services.agents.react_agent import ReactGraphAgent
             from app.services.ai_prompts import AGENT_SYSTEM
-            from app.services.context_utils import COMPRESSION_MARKER, compress_history
+            from app.services.context.provider import TurnContextProvider, TurnInputs
 
-            messages: list[dict] = [{"role": "system", "content": AGENT_SYSTEM}]
-            if getattr(lead_ctx, "history_summary", ""):
-                messages.append({
-                    "role": "assistant",
-                    "content": f"{COMPRESSION_MARKER}【历史记忆】{lead_ctx.history_summary}",
-                })
-            for h in history[-30:]:  # AB-B: 20->30
-                if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
-                    messages.append({"role": h["role"], "content": str(h.get("content", ""))})
-            messages = compress_history(messages, keep=40, max_chars=150000)  # AB-B: 60->40
+            # 阶段 4 收口：Worker 消息装配走四件套（唯一实现 build_worker_messages）。
+            # 窗口口径与决策/回答统一为轮（WINDOW_MAX_ROUNDS*2 条），消除 history[-30:] 特例。
+            _provider = TurnContextProvider.for_turn(TurnInputs(
+                user_id=str(getattr(lead_ctx, "user_id", "")),
+                session_id=str(getattr(lead_ctx, "session_id", "")),
+                entry=getattr(lead_ctx, "entry", "chat"),
+                turns=list(history or []),
+                history_summary=getattr(lead_ctx, "history_summary", "") or "",
+            ))
+            messages = _provider.for_worker(
+                args.goal,
+                system_text=AGENT_SYSTEM,
+                max_messages=int(getattr(_settings, "WINDOW_MAX_ROUNDS", 8) or 8) * 2,
+            ).messages
 
             is_canvas = args.entry == "canvas"
             if is_canvas:

@@ -243,6 +243,37 @@ def test_for_answer_window_tokens_are_counted():
     assert assembled.ledger.entries.get("window", 0) > 0
 
 
+def test_for_worker_messages_structure():
+    """阶段 4 收口：Worker 消息装配走四件套（system → 压缩标记记忆 → 窗口）。"""
+    from app.services.context_utils import COMPRESSION_MARKER
+
+    turns = _turns(3)
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id="u1", session_id="s1", entry="chat",
+        turns=turns, history_summary="【口径与规则】含税",
+    ))
+    assembled = provider.for_worker("华东销售额多少", system_text="SYS", max_messages=30)
+
+    assert assembled.messages[0] == {"role": "system", "content": "SYS"}
+    assert assembled.messages[1]["content"].startswith(f"{COMPRESSION_MARKER}【历史记忆】")
+    assert any("第1问" in str(m.get("content")) for m in assembled.messages)   # 窗口原文进来了
+    assert assembled.parts["goal"] == "华东销售额多少"
+    assert assembled.ledger.entries.get("window_messages", 0) == len(turns)
+
+
+def test_for_worker_window_rounds_cap():
+    """窗口口径统一：worker 的 history[-30:] 条数特例已被 WINDOW_MAX_ROUNDS*2 取代。"""
+    turns = _turns(20)
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id="u1", entry="chat", turns=turns,
+    ))
+    assembled = provider.for_worker("看一眼", system_text="SYS", max_messages=16)  # 8 轮
+    window_msgs = [m for m in assembled.messages if m["role"] in ("user", "assistant")]
+    assert len(window_msgs) <= 16
+    assert any("第20问" in str(m.get("content")) for m in assembled.messages)  # 保最近
+    assert not any("第1问" in str(m.get("content")) for m in assembled.messages)  # 滑出
+
+
 def test_provider_refresh_canvas_updates_block():
     provider = TurnContextProvider.for_turn(TurnInputs(user_id="u1", entry="canvas", canvas_layout="旧"))
     before = provider.for_decision("看一眼")

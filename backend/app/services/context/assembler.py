@@ -84,6 +84,38 @@ def render_window_for_decision(
     return out
 
 
+def build_worker_messages(
+    *,
+    system_text: str,
+    history_summary: str,
+    turns: list[dict],
+    max_messages: int,
+    keep: int | None = None,
+    max_chars: int | None = None,
+) -> list[dict]:
+    """Worker（执行层）的消息装配——legacy lead_tools 三段式的唯一实现。
+
+    结构（ReAct 需要结构化消息，与 for_answer 的纯问答不同）：
+      system → 【压缩摘要】【历史记忆】（长期记忆，COMPRESSION_MARKER 标记沿用）→ 窗口原文
+    最后过 MessageListPolicy 兜底折叠（keep 条 + 字符上限）。
+
+    窗口口径：max_messages 由调用方按 WINDOW_MAX_ROUNDS*2 传入（阶段 3 统一，
+    消除 worker 漏网的 history[-30:] 条数特例）。
+    """
+    from app.services.context_utils import COMPRESSION_MARKER, compress_history
+
+    messages: list[dict] = [{"role": "system", "content": system_text}]
+    if (history_summary or "").strip():
+        messages.append({
+            "role": "assistant",
+            "content": f"{COMPRESSION_MARKER}【历史记忆】{history_summary.strip()}",
+        })
+    for h in turns[-max(1, max_messages):]:
+        if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
+            messages.append({"role": h["role"], "content": str(h.get("content", ""))})
+    return compress_history(messages, keep=keep or 40, max_chars=max_chars or 150000)
+
+
 def first_block(blocks: list[Block], kind: BlockKind) -> Block | None:
     """取第一个非空的同种块；空内容块视为不存在（不注入占位）。"""
     for b in blocks:
