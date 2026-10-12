@@ -181,6 +181,56 @@ def test_compressor_skips_uncompressible_blocks():
     assert out.text == text and reason is None
 
 
+# ── 阶段 4：StructuredMemoryPolicy 四节分区配额 ─────────────────────────────
+
+def _four_section_memory(pad: int = 0) -> str:
+    return (
+        "【口径与规则】销售额按全公司含税口径计算\n"
+        + "口" * pad
+        + "\n【关键数字与结论】华东 8,640 万（含税，2026Q3）\n"
+        "【数据源与字段】Ecommerce Orders（region / total_amount）\n"
+        "【未决问题】华南数据源未接入，待用户确认"
+    )
+
+
+def test_memory_policy_keeps_all_four_sections():
+    """核心语义：分区裁剪后四节都还在——旧实现的尾部硬切会整节砍掉【未决问题】。"""
+    from app.services.context.compress import StructuredMemoryPolicy
+    from app.services.context.types import Block, BlockKind
+
+    long_summary = _four_section_memory(pad=2000)     # 超长摘要
+    block, reason = StructuredMemoryPolicy().compress(
+        Block(kind=BlockKind.MEMORY, text=long_summary), 600
+    )
+    for sec in ("【口径与规则】", "【关键数字与结论】", "【数据源与字段】", "【未决问题】"):
+        assert sec in block.text, sec                 # 每节都活着
+    assert reason == "memory_section_capped"
+
+
+def test_memory_policy_noop_within_budget():
+    from app.services.context.compress import StructuredMemoryPolicy
+    from app.services.context.types import Block, BlockKind
+
+    short = _four_section_memory(pad=0)
+    block, reason = StructuredMemoryPolicy().compress(
+        Block(kind=BlockKind.MEMORY, text=short), 600
+    )
+    assert block.text == short and reason is None
+
+
+def test_memory_policy_plain_text_falls_back_to_hard_cap():
+    """legacy 纯文本摘要（无节标记）→ 整体硬切兜底。"""
+    from app.services.context.compress import StructuredMemoryPolicy
+    from app.services.context.types import Block, BlockKind
+
+    plain = "记" * 3000
+    block, reason = StructuredMemoryPolicy().compress(
+        Block(kind=BlockKind.MEMORY, text=plain), 600
+    )
+    assert block.text.startswith("记") and block.text.endswith("…")
+    assert reason == "memory_section_capped"
+
+
 def test_compressor_measure_matches_estimate_tokens():
     from app.services.context_utils import estimate_tokens
     assert Compressor.measure("中文四字") == estimate_tokens("中文四字") == 4

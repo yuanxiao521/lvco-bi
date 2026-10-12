@@ -676,13 +676,13 @@ async def run_analysis(
         elif mode == "react":
             from app.services.agents.react_agent import ReactGraphAgent
             from app.services.ai_prompts import AGENT_SYSTEM
-            from app.services.context_utils import compress_history
+            from app.services.context_utils import COMPRESSION_MARKER, compress_history
 
             messages: list[dict] = [{"role": "system", "content": AGENT_SYSTEM}]
             if getattr(lead_ctx, "history_summary", ""):
                 messages.append({
                     "role": "assistant",
-                    "content": f"【压缩摘要】【历史记忆】{lead_ctx.history_summary}",
+                    "content": f"{COMPRESSION_MARKER}【历史记忆】{lead_ctx.history_summary}",
                 })
             for h in history[-30:]:  # AB-B: 20->30
                 if isinstance(h, dict) and h.get("role") in ("user", "assistant"):
