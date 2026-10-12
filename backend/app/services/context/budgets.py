@@ -9,8 +9,9 @@
 阶段说明：
 - **P0（当前）**：使用 EQUIVALENT_* 表（由现有 *_CHARS 配置等价换算而来），
   仅用于**台账与观测**，尚未强制生效——装配行为与原实现逐字节一致；
-- **P2（阶段 2）**：把配置项统一改成 *_TOKENS，由 Assembler 按 TARGET_* 表裁剪，
-  届时只需把 ACTIVE 指向 TARGET。
+- **阶段 2**：配置项统一改成 *_TOKENS（等价换算，行为不变）；
+- **阶段 4**：Compressor 收口后，把 ACTIVE 指向 TARGET_* 并置 enforced=True，
+  由 Assembler 按目标表裁剪。
 
 固定开销块（SYSTEM / TOOL_SCHEMA）在等价表中记为 0（即"此前从未纳入预算"）——
 台账仍会记录它们的真实 token，这正是要暴露的问题。

@@ -154,12 +154,20 @@ class Assembler:
                     if reason:
                         ledger.degrade(reason)
             parts[b.kind.value] = text
-            ledger.record(b.kind.value, estimate_tokens(text))
+            ledger.record(b.kind.value, b.tokens())   # WINDOW 是 messages 型，必须用 b.tokens()
 
         if parts.get(BlockKind.SYSTEM.value):
             messages.append({"role": "system", "content": parts[BlockKind.SYSTEM.value]})
         if parts.get(BlockKind.MEMORY.value):
-            messages.append({"role": "assistant", "content": f"【历史记忆】{parts[BlockKind.MEMORY.value]}"})
+            # legacy 等价（lead_agent._answer_branch）：长期记忆也要给上限，
+            # 否则 legacy 摘要可能上千字，原样注入会挤占追问所需的空间。
+            # P0：精确复刻 legacy 的字符截断；阶段 4 由 Compressor 的记忆策略接管。
+            mem = parts[BlockKind.MEMORY.value]
+            mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_CHARS", 4000) or 4000) // 3)
+            if len(mem) > mem_cap:
+                mem = mem[:mem_cap] + "…"
+                ledger.degrade("memory_capped_for_answer")
+            messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
         if parts.get(BlockKind.METRICS.value):
             messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{parts[BlockKind.METRICS.value]}"})
         if parts.get(BlockKind.CANVAS.value):

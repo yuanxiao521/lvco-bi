@@ -199,6 +199,50 @@ def test_provider_answer_empty_blocks_produce_minimal_messages():
     assert all("画布布局" not in str(m.get("content")) for m in assembled.messages)
 
 
+def test_assembled_history_summary_reads_correct_key():
+    """回归：Assembled.history_summary() 此前读错 key（window），永远返回空串。"""
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id="u1", entry="chat",
+        turns=_turns(2), history_summary="【口径与规则】含税",
+    ))
+    assembled = provider.for_decision("看一眼")
+    assert assembled.history_summary() != ""
+    assert assembled.history_summary() == assembled.parts["history_summary"]
+
+
+def test_for_answer_caps_long_memory_like_legacy():
+    """等价性：for_answer 必须复刻 legacy 的记忆上限（LEAD_CTX_MAX_CHARS//3）。
+
+    legacy（lead_agent._answer_branch）对超长摘要截到 4000//3=1333 字 + "…"，
+    缺了这一步，长摘要场景新路径会比 legacy 多注入上千字。
+    """
+    from app.services.agents.lead.lead_agent import LeadContext, _ANSWER_SYSTEM
+
+    long_mem = "记" * 3000
+    ctx = LeadContext(user_id="u1", session_id="s1", history_summary=long_mem)
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id="u1", session_id="s1", entry="chat",
+        turns=list(ctx.turns), history_summary=long_mem,
+    ))
+    assembled = provider.for_answer("你好", system_text=_ANSWER_SYSTEM)
+
+    mem_cap = max(200, 4000 // 3)
+    mem_msg = [m for m in assembled.messages if m.get("content", "").startswith("【历史记忆】")]
+    assert len(mem_msg) == 1
+    content = mem_msg[0]["content"]
+    assert content == f"【历史记忆】{'记' * mem_cap}…"      # 与 legacy 截断逐字节一致
+    assert "memory_capped_for_answer" in assembled.ledger.degraded
+
+
+def test_for_answer_window_tokens_are_counted():
+    """台账回归：WINDOW 是 messages 型块，tokens 不能记成 0。"""
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id="u1", entry="chat", turns=_turns(3),
+    ))
+    assembled = provider.for_answer("你好")
+    assert assembled.ledger.entries.get("window", 0) > 0
+
+
 def test_provider_refresh_canvas_updates_block():
     provider = TurnContextProvider.for_turn(TurnInputs(user_id="u1", entry="canvas", canvas_layout="旧"))
     before = provider.for_decision("看一眼")
