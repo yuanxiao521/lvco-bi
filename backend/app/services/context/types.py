@@ -162,5 +162,9 @@ class Assembled:
     parts: dict[str, str] = field(default_factory=dict)
 
     def history_summary(self) -> str:
-        """兼容旧调用点：决策/回答仍需要一个 `history_summary` 字符串。"""
-        return self.parts.get(BlockKind.WINDOW.value, "")
+        """兼容旧调用点：决策/回答仍需要一个 `history_summary` 字符串。
+
+        注意 key：决策路径的窗口渲染（extra+记忆+近端）存在 "history_summary" 下；
+        这里同时兼容未来按块拆分后的 "window"。
+        """
+        return self.parts.get("history_summary") or self.parts.get(BlockKind.WINDOW.value, "")

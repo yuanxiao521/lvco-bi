@@ -99,7 +99,7 @@ class TurnContextProvider:
             blocks.append(source.load())   # type: ignore[attr-defined]
         return blocks
 
-    def for_decision(self, user_msg: str, *, prev_action: str | None = None) -> Assembled:
+    def for_decision(self, user_msg: str) -> Assembled:
         """决策上下文：parts["history_summary"] 与旧 ctx.digest() 逐字节等价。"""
         return self._assembler.for_decision(self._base_blocks(), user_msg=user_msg)
 
