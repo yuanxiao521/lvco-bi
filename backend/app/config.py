@@ -130,8 +130,12 @@ class Settings(BaseSettings):
     # 旧 *_CHARS 字段已降级为 @property 兼容别名（从 token 反推），仅剩少量旧调用点使用，
     # 全部改读 token 后删除。
 
-    # 注入决策上下文的最近消息条数上限（短期记忆窗口；阶段 3 改为"轮"口径 WINDOW_MAX_ROUNDS）
-    LEAD_MAX_TURNS_IN_CTX: int = 30  # AB-B: 20->30
+    # 服务端窗口（阶段 3）：注入决策上下文的最近轮数上限（1 轮 = user+assistant 成对）。
+    # 8 轮 ≈ 4 问 4 答，覆盖追问与指代消解的常见深度；窗口所有权收归服务端，
+    # 前端 slice(-10) 的定义权废除。旧 LEAD_MAX_TURNS_IN_CTX(30 条) 保留为
+    # LeadContext.add_turn 的内存裁剪上限（30 条 × 2 = 60 条硬顶）。
+    WINDOW_MAX_ROUNDS: int = 8
+    LEAD_MAX_TURNS_IN_CTX: int = 30  # AB-B: 20->30（内存裁剪硬顶，非注入窗口）
     # 记忆合并节流：未并入长期记忆的用户轮数达到该阈值才触发一次累积合并
     LEAD_MEMORY_MERGE_ROUNDS: int = 6  # AB-B: 4->6
     # 单次合并最多并入的消息条数：超出部分不会被丢弃，而是留到下一轮继续并（水位驱动）。
