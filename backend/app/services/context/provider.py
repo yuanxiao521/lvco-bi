@@ -118,6 +118,32 @@ class TurnContextProvider:
             ))
         return self._assembler.for_answer(blocks, user_msg=user_msg)
 
-    def for_worker(self, goal: str, *, mode: str = "react") -> Assembled:
-        """Worker 上下文（阶段 1 仅占位：与决策同构，阶段 4 接 ToolResult/Schema 预算）。"""
-        return self._assembler.for_decision(self._base_blocks(), user_msg=goal)
+    def for_worker(
+        self,
+        goal: str,
+        *,
+        system_text: str,
+        max_messages: int,
+    ) -> Assembled:
+        """Worker（执行层）上下文：结构化 messages（system + 记忆 + 窗口 + 折叠兜底）。
+
+        goal 本身不进 messages——Worker 把 goal 作为任务指令单独传给编排器，
+        这里只供它"知道之前聊过什么、确立了什么口径"。
+        """
+        from app.services.context.assembler import build_worker_messages
+
+        ledger = Ledger(purpose="worker")
+        window = self._window.load()
+        memory = self._memory.load()
+        messages = build_worker_messages(
+            system_text=system_text,
+            history_summary=memory.text,
+            turns=list(window.messages),
+            max_messages=max_messages,
+        )
+        # 台账速记：Worker 消息混合 tool 结构，字符口径足够定位大头；
+        # 精确 token 计量在 Worker 侧接入 LLM usage 后自然补齐。
+        ledger.record("worker_messages_chars", sum(len(str(m.get("content", ""))) for m in messages))
+        ledger.record("window_messages", len(window.messages))
+        parts = {"goal": goal, "history_summary": memory.text}
+        return Assembled(messages=messages, ledger=ledger, parts=parts)

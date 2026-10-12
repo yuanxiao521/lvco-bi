@@ -142,13 +142,40 @@ def _should_merge_memory(
     return unmerged >= min_rounds
 
 
+_QUANTIFIED_NUMBER_RE = re.compile(r"[\d,.]+\s*(?:%|万|亿|元|条|人|单|笔)")
+
+
+def _extract_quantified_numbers(messages: list[dict], per_msg: int = 5) -> list[str]:
+    """从合并段消息里抽带量纲的数字（华东 8,640 万 / 23% / 1.2万 条）。
+
+    为什么进合并输入：工具结果里的原始数值在当轮被压缩丢弃（L0 用完即弃），
+    只有写进报告的部分会回流。合并时显式喂【本轮关键数字】，让 LLM 把它们
+    提炼进摘要的【关键数字与结论】节——否则"查了但没进报告"的中间数值
+    会随窗口滑出而永久丢失。
+    """
+    seen: list[str] = []
+    for m in messages or []:
+        content = str(m.get("content", "") or "")
+        for tok in _QUANTIFIED_NUMBER_RE.findall(content):
+            tok = tok.strip()
+            if tok and tok not in seen:
+                seen.append(tok)
+            if len(seen) >= 12:
+                return seen
+    return seen
+
+
 def _build_memory_merge_input(
     old_summary: str,
     new_messages: list[dict],
     per_msg_limit: int = 800,
     total_limit: int = 6000,
 ) -> str:
-    """组装记忆合并输入：【已有长期记忆】+【新增对话】（逐条截断 + 总量封顶）。"""
+    """组装记忆合并输入：【已有长期记忆】+【新增对话】+【本轮关键数字】。
+
+    【本轮关键数字】是带量纲数值的确定性抽取（不依赖 LLM 记得看），引导合并
+    把它们收进摘要的【关键数字与结论】节——补上"工具结果数值不进长期记忆"的缺口。
+    """
     parts: list[str] = []
     if (old_summary or "").strip():
         parts.append(f"【已有长期记忆】\n{old_summary.strip()}")
@@ -162,6 +189,9 @@ def _build_memory_merge_input(
     if lines:
         new_text = "\n".join(lines)[:total_limit]
         parts.append(f"【新增对话】\n{new_text}")
+    numbers = _extract_quantified_numbers(new_messages or [])
+    if numbers:
+        parts.append("【本轮关键数字】" + "、".join(numbers))
     return "\n\n".join(parts)
 
 
