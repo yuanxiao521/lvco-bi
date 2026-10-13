@@ -137,3 +137,8 @@ class ChatStreamRegistry:
                 yield ev
         finally:
             rt.queues.discard(q)
+
+
+# 进程级单例。放在本模块（而非 API 模块）是为了让 services/chat_task.py 也能引用它——
+# 否则 chat_task → ai.py → chat_task 会形成循环导入。
+chat_registry = ChatStreamRegistry()
