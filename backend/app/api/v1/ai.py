@@ -200,26 +200,9 @@ def _build_chart_summary_note(prior_msgs, budget: int) -> str:
     return "【上一轮已生成的图表，请勿重复生成同类型图表】\n" + "\n".join(parts)
 
 
-async def _lead_stream_guard(lead_stream):
-    """主导 Agent 流式消费护栏。
-
-    主导 Agent 是唯一执行路径（旧双路径已整体移除）——异常时**不再静默降级**，
-    而是补发 status + done(degraded=True)，让失败被看见。理由：静默兜底会掩盖真实
-    问题，且长期不跑的旧路径本身大概率已腐坏，降级只是虚假的安全感。
-    """
-    emitted = False
-    try:
-        async for ev in lead_stream:
-            emitted = True
-            yield ev
-    except Exception as exc:  # noqa: BLE001
-        _log.exception(f"lead_agent_stream_failed: {exc}")
-        message = (
-            "主导 Agent 执行异常，本轮已中断。" if emitted
-            else "主导 Agent 不可用，本轮未能处理。"
-        )
-        yield {"type": "status", "message": message, "degradation": "lead_agent_error"}
-        yield {"type": "done", "degraded": True}
+# _lead_stream_guard 已移到 services/chat_task.py（执行内核的一部分）：
+# 队列模式下 agent 异常必须同样被转成 done 事件，否则事件日志没有终止信号、前端会一直转圈。
+from app.services.chat_task import lead_stream_guard as _lead_stream_guard  # noqa: E402
 
 
 # 事件流空闲看门狗阈值（秒）：超过这么久没有任何事件，判定 Agent 内部停住
@@ -258,7 +241,9 @@ def _sse_line(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
 
-async def _stream_from_event_log(task_sid: object, *, max_seconds: float = 1800.0):
+async def _stream_from_event_log(
+    task_sid: object, *, max_seconds: float = 1800.0, idle_stop=None
+):
     """（订阅侧）纯事件日志读取：回放历史 + 阻塞续读，直到 done 或超时。
 
     队列模式（TASK_QUEUE_ENABLED）与断线续收共用这套读取逻辑——两者的共同点是
@@ -285,16 +270,20 @@ async def _stream_from_event_log(task_sid: object, *, max_seconds: float = 1800.
         yield _sse_line(ev)
     if text_buf:
         yield _sse_line({"type": "message", "delta": "".join(text_buf)})
-    if saw_done:
-        return
+    if not saw_done:
+        # 退出条件：调用方给了 idle_stop 就用它（如"任务是否还在跑"），否则用时间兜底
+        deadline = time.monotonic() + max_seconds
+        stop = idle_stop if idle_stop is not None else (lambda: time.monotonic() > deadline)
+        async for _eid, ev in event_stream.tail(task_sid, cursor, idle_stop=stop):
+            yield _sse_line(ev)
+            if ev.get("type") == "done":
+                saw_done = True
+                break
 
-    deadline = time.monotonic() + max_seconds
-    async for _eid, ev in event_stream.tail(
-        task_sid, cursor, idle_stop=lambda: time.monotonic() > deadline
-    ):
-        yield _sse_line(ev)
-        if ev.get("type") == "done":
-            return
+    if not saw_done:
+        # 兜底终止信号：日志里没有 done（任务硬崩溃/超时被掐），也要让前端解锁输入框，
+        # 否则前端会一直停在"思考中"。
+        yield _sse_line({"type": "done"})
 
 
 # ── 对话后台续跑：任务主体 ───────────────────────────────────────
@@ -688,50 +677,37 @@ async def data_chat_stream(
             # 缝隙里产生的事件（工作台步骤/决策/落块）永远看不到，且只有文本能补发。
             # 新实现：事件已持久化为日志（Redis Stream），从游标 0 回放到最新，
             # 再从**同一游标**继续阻塞读增量——回放与实时无缝衔接，所有事件类型都在。
-            running = bool(session_id) and chat_registry.is_running(str(session_id))
-            if not running:
-                # 任务已结束/未启动：终态已在 DB（含落块），前端拉取会话消息即可
-                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            # 判定"这一轮还在不在跑"必须**模式无关**（审查修复）：
+            #   · 进程内模式：任务在 chat_registry 里，可以查它；
+            #   · 队列模式：任务在 **worker 进程**里，本进程的注册表根本不知道它——
+            #     用 is_running 判断会永远为 False，导致"只回 done、不回放不续读"（续收失效）。
+            # 所以统一改为：**以事件日志为准**——日志里有 done 就是跑完了，没有就继续等。
+            inprocess_running = bool(session_id) and chat_registry.is_running(str(session_id))
+
+            if not inprocess_running and not await event_stream.has_events(task_sid):
+                # 日志为空：两种可能
+                #   a) 这一轮压根没执行过（或日志已过期）→ 直接收尾；
+                #   b) 队列模式刚投递、worker 还没产出第一个事件（LLM 首包要几秒）
+                #      → 给一个短窗口等首事件，避免刷新即"空答复"。
+                from app.worker import worker_alive
+
+                if not await worker_alive():
+                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                    return
+                async for line in _stream_from_event_log(task_sid, max_seconds=60.0):
+                    yield line
                 return
 
-            cursor = "0"
-            saw_done = False
-            text_buf: list[str] = []
-
-            def _emit_text(buf: list[str]) -> str:
-                """文本 delta 合并成一条下发（几百个 delta 逐个发既慢又刷屏）。"""
-                joined = "".join(buf)
-                buf.clear()
-                return f"data: {json.dumps({'type': 'message', 'delta': joined}, ensure_ascii=False)}\n\n"
-
-            for eid, ev in await event_stream.read_after(task_sid, "0"):
-                cursor = eid
-                et = ev.get("type")
-                if et == "canvas_action":
-                    # 非幂等副作用：回放会让前端重复落块。画布真值已在 DB
-                    # （CANVAS_BACKEND_PERSIST=true 时后端直接落库），重连后重载画布即可。
-                    continue
-                if et == "message":
-                    text_buf.append(str(ev.get("delta") or ""))
-                    continue
-                if text_buf:
-                    yield _emit_text(text_buf)
-                if et == "done":
-                    saw_done = True
-                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
-            if text_buf:
-                yield _emit_text(text_buf)
-
-            if not saw_done:
-                # 回放终点即实时起点：从 cursor 继续阻塞读，任务结束（idle_stop）自然退出
-                async for _eid, ev in event_stream.tail(
-                    task_sid,
-                    cursor,
-                    idle_stop=lambda: not chat_registry.is_running(str(session_id)),
-                ):
-                    yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
-                    if ev.get("type") == "done":
-                        break
+            # 回放 + 续读：与队列模式共用同一段实现（_stream_from_event_log）。
+            # idle_stop 只在进程内模式下有意义（注册表没了＝跑完了）；队列模式传 None，
+            # 靠日志里的 done 或时间兜底退出。
+            idle_stop = (
+                (lambda: not chat_registry.is_running(str(session_id)))
+                if inprocess_running
+                else None
+            )
+            async for line in _stream_from_event_log(task_sid, idle_stop=idle_stop):
+                yield line
             return
 
         # ── 新消息分支：抢锁 → 落占位行 → 启动后台任务 → 本连接订阅 ──
@@ -964,6 +940,21 @@ async def data_chat_stream(
                     )
                 )
 
+            # ── 清上一轮残留（必须在"启动执行"**之前**）──────────────────────────
+            # 为什么顺序重要：
+            #   · 队列模式：worker 是独立进程、已在轮询队列，入队后毫秒级就可能开始写事件；
+            #   · 进程内模式：create_task 也会在下一个 await 点被调度执行。
+            # 若把清空放在启动之后，新任务刚写入的事件可能立刻被 clear 擦掉——
+            # 日志缺开头，续收回放就不完整（这是审查中发现的真实竞态）。
+            try:
+                get_cache_repository().delete(_chat_text_key(task_sid))
+            except Exception:
+                _log.debug("chat streamed text cache clear failed", exc_info=True)
+            try:
+                await event_stream.clear(task_sid)
+            except Exception:
+                _log.debug("chat event stream clear failed", exc_info=True)
+
             # ── 启动执行（两条路，由 TASK_QUEUE_ENABLED 选择）────────────────────
             # A) 队列模式：投递到 ARQ，由**独立 worker 进程**执行——API 进程重启不影响
             #    已入队任务；事件仍写同一份事件日志，本连接只读日志（见 _stream_from_event_log）。
@@ -1016,21 +1007,6 @@ async def data_chat_stream(
                 yield f"data: {json.dumps({'type': 'error', 'message': _SESSION_BUSY_MSG}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                 return
-            # 新一轮已启动：清掉上一轮遗留的文本快照。
-            # 快照键按会话维度（TTL=redis_ttl，跨轮不清），新一轮此刻尚未产出任何文本，
-            # 若不清，下面 _yield_streamed_text_snapshot 会把上一轮全文当作本轮的
-            # 首个 message delta 补发 → 前端 append delta，本轮回答开头会粘上一轮答案。
-            # start 成功即注册表内无在跑任务，此处清键不会影响断线续收（续收走 resume 分支，
-            # 不经过这里，靠运行中任务持续写入的快照补发）。
-            try:
-                get_cache_repository().delete(_chat_text_key(task_sid))
-            except Exception:
-                _log.debug("chat streamed text cache clear failed", exc_info=True)
-            # 事件日志同理：本轮开始即清空上一轮，否则续收回放会把上一轮的事件重放一遍。
-            try:
-                await event_stream.clear(task_sid)
-            except Exception:
-                _log.debug("chat event stream clear failed", exc_info=True)
         finally:
             # 任务未启动（构建中途异常 / 连接断开取消 / start 竞态被拒）→ 清理本轮占位副作用：
             # 锁还由本请求持有（任务没接手），running 任务态也是本轮写的，一并清掉。

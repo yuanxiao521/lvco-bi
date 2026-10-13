@@ -98,7 +98,7 @@ async def run_chat_task_job(
     import uuid
 
     from app.services.agents.lead import LeadAgent, LeadContext
-    from app.services.chat_task import run_chat_task
+    from app.services.chat_task import lead_stream_guard, run_chat_task
     from app.services.llm_client import LLMClient
     from app.services.observability import get_observer
 
@@ -121,8 +121,12 @@ async def run_chat_task_job(
     agent_message = payload.get("agent_message") or ""
 
     def event_factory(db_session):
-        return LeadAgent(llm=LLMClient(settings), observer=get_observer()).stream(
-            agent_message, ctx=lead_ctx, db_session=db_session
+        # 必须与 API 进程用同一套护栏：agent 异常要转成 status + done(degraded)，
+        # 否则事件日志里没有终止信号，SSE 侧会一直阻塞续读到超时（前端永远转圈）。
+        return lead_stream_guard(
+            LeadAgent(llm=LLMClient(settings), observer=get_observer()).stream(
+                agent_message, ctx=lead_ctx, db_session=db_session
+            )
         )
 
     await run_chat_task(

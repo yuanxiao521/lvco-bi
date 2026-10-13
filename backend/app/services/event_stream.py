@@ -50,6 +50,9 @@ STREAM_BLOCK_MS = 10000
 # （症状：续收连接在阻塞读处静默断开，前端表现为"流突然结束、收不到 done"）。
 # 这里显式给 30s，让 BLOCK 的语义真正生效。
 STREAM_SOCKET_TIMEOUT = 30.0
+# 事件日志的存活时间（秒）：一轮结束后日志仍需保留一段时间供"刷新续收"，
+# 但不能永久驻留（每个会话一个 key）。1 小时足够覆盖续收场景，超时由 DB 兜底展示。
+STREAM_TTL_SECONDS = 3600
 
 
 def stream_key(session_id: object) -> str:
@@ -85,12 +88,17 @@ class EventStream:
         if client is None or session_id is None:
             return None
         try:
-            return await client.xadd(
-                stream_key(session_id),
+            key = stream_key(session_id)
+            eid = await client.xadd(
+                key,
                 {"d": json.dumps(event, ensure_ascii=False, default=str)},
                 maxlen=STREAM_MAXLEN,
                 approximate=True,
             )
+            # 续期 TTL：日志是"每会话一个 key"，不设过期会无限累积。
+            # 用 expire 而非 pipeline 是够用的（失败只影响回收时机，不影响正确性）。
+            await client.expire(key, STREAM_TTL_SECONDS)
+            return eid
         except Exception:  # noqa: BLE001
             logger.debug("event_stream_publish_failed", exc_info=True)
             return None
@@ -150,6 +158,17 @@ class EventStream:
             # 阻塞窗口内没有新事件
             if idle_stop is not None and idle_stop():
                 return
+
+    async def has_events(self, session_id: object) -> bool:
+        """日志里是否已有事件（用于判断"这一轮到底有没有跑过"）。"""
+        client = self._conn()
+        if client is None or session_id is None:
+            return False
+        try:
+            return int(await client.xlen(stream_key(session_id))) > 0
+        except Exception:  # noqa: BLE001
+            logger.debug("event_stream_xlen_failed", exc_info=True)
+            return False
 
     # ── 维护 ────────────────────────────────────────────────────────────────
     async def clear(self, session_id: object) -> None:
