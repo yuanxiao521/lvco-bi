@@ -46,9 +46,15 @@ from app.services.ai_prompts import CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
 from app.services.session_lock import acquire_session_lock, release_session_lock
 from app.services.chat_stream_registry import ChatStreamRegistry
+from app.services.event_stream import event_stream
 
 # 对话入口后台续跑注册表（进程内单例）+ Redis 文本快照 key 前缀。
 # Agent 任务与 SSE 连接解耦：断开只退订、不杀任务，刷新后带同一 session_id 重连续收。
+#
+# 续收有两层（见 services/event_stream.py 的原理说明）：
+#   1) **事件日志（Redis Stream，主）**：所有对外事件按序 XADD，前端带游标重连即回放，
+#      canvas_action/decision/progress 等刷新不再丢失；
+#   2) **文本快照（旧路径，兜底）**：单个字符串，Stream 不可用时仍能补发可见文本。
 chat_registry = ChatStreamRegistry()
 CHAT_STREAM_TEXT_PREFIX = "ai:chat:stream:"
 # 任务每收到一次可见文本 delta 就把全量文本节流刷进 Redis（0.5s），供重连兜底补发
@@ -464,8 +470,33 @@ async def _run_chat_task(
         full_content += visible_delta
         return visible_delta
 
+    # ── 事件日志（Redis Stream）：所有对外事件按序落盘，供断线/刷新后按游标回放 ──
+    # 为什么用"缓冲 + 单写入者"而不是每个 _publish 直接 await：
+    #   _publish 是同步函数、调用点有 18 处；若各自 create_task 去 XADD，
+    #   多个网络往返会交错，日志顺序可能与事件产生顺序不一致（回放就会错乱）。
+    #   单写入者按 FIFO 顺序写，天然保序。
+    _log_buffer: list[dict] = []
+    _log_stop = asyncio.Event()
+
+    async def _log_writer() -> None:
+        while True:
+            if _log_buffer:
+                await event_stream.publish(session_id, _log_buffer.pop(0))
+                continue
+            if _log_stop.is_set():
+                return
+            try:
+                await asyncio.wait_for(_log_stop.wait(), timeout=0.05)
+            except asyncio.TimeoutError:
+                pass
+
+    _log_task = asyncio.create_task(
+        _log_writer(), name=f"chat-eventlog-{session_id}"
+    ) if session_id else None
+
     def _publish(ev: dict) -> None:
         if session_id:
+            _log_buffer.append(ev)   # 事件日志（保序缓冲）
             # 注意：f"{session_id}" 转为注册表 key（str），否则 UUID 对象查不到任务
             chat_registry.publish(str(session_id), ev)
 
@@ -584,7 +615,17 @@ async def _run_chat_task(
             # 只有正常跑完事件流（含 Agent 内部 error 事件）才算完成
             completed = True
         finally:
-            # 收尾（任何退出路径都执行）：落库占位行 → 文本快照最终写 → 任务态 → 释放锁
+            # 收尾（任何退出路径都执行）：**冲刷事件日志** → 落库占位行 → 文本快照 → 任务态 → 释放锁
+            # 事件日志必须最先冲刷：续收方靠日志里的 done 判断"这一轮结束了"，
+            # 若 done 还没落盘就退出，重连者会一直阻塞等新事件。
+            if _log_task is not None:
+                _log_stop.set()
+                try:
+                    await asyncio.wait_for(_log_task, timeout=3.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    _log_task.cancel()
+                except Exception:  # noqa: BLE001
+                    _log.debug("chat event log flush failed", exc_info=True)
             if assistant_msg_id is not None:
                 try:
                     row = await db.get(AIMessage, assistant_msg_id)
@@ -1003,14 +1044,55 @@ async def data_chat_stream(
         # ── 续收分支：刷新/断线后带同一 session_id 重连 → 命中运行中的任务则纯订阅 ──
         # （不抢锁、不落新消息；任务结束在后端继续跑，本连接只负责补发快照 + 续收事件）
         if body.resume:
-            if session_id and chat_registry.is_running(str(session_id)):
-                async for line in _yield_streamed_text_snapshot(task_sid):
-                    yield line
-                async for line in _yield_subscription_events(task_sid):
-                    yield line
-            else:
-                # 任务已结束/从未启动：空收尾，前端拉取会话消息即可看到最终落库结果
+            # ── 续收（阶段 B：事件日志按游标回放）────────────────────────────────
+            # 旧实现：先补发"文本快照"，再订阅**实时队列**——两步之间有缝隙，
+            # 缝隙里产生的事件（工作台步骤/决策/落块）永远看不到，且只有文本能补发。
+            # 新实现：事件已持久化为日志（Redis Stream），从游标 0 回放到最新，
+            # 再从**同一游标**继续阻塞读增量——回放与实时无缝衔接，所有事件类型都在。
+            running = bool(session_id) and chat_registry.is_running(str(session_id))
+            if not running:
+                # 任务已结束/未启动：终态已在 DB（含落块），前端拉取会话消息即可
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                return
+
+            cursor = "0"
+            saw_done = False
+            text_buf: list[str] = []
+
+            def _emit_text(buf: list[str]) -> str:
+                """文本 delta 合并成一条下发（几百个 delta 逐个发既慢又刷屏）。"""
+                joined = "".join(buf)
+                buf.clear()
+                return f"data: {json.dumps({'type': 'message', 'delta': joined}, ensure_ascii=False)}\n\n"
+
+            for eid, ev in await event_stream.read_after(task_sid, "0"):
+                cursor = eid
+                et = ev.get("type")
+                if et == "canvas_action":
+                    # 非幂等副作用：回放会让前端重复落块。画布真值已在 DB
+                    # （CANVAS_BACKEND_PERSIST=true 时后端直接落库），重连后重载画布即可。
+                    continue
+                if et == "message":
+                    text_buf.append(str(ev.get("delta") or ""))
+                    continue
+                if text_buf:
+                    yield _emit_text(text_buf)
+                if et == "done":
+                    saw_done = True
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+            if text_buf:
+                yield _emit_text(text_buf)
+
+            if not saw_done:
+                # 回放终点即实时起点：从 cursor 继续阻塞读，任务结束（idle_stop）自然退出
+                async for _eid, ev in event_stream.tail(
+                    task_sid,
+                    cursor,
+                    idle_stop=lambda: not chat_registry.is_running(str(session_id)),
+                ):
+                    yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+                    if ev.get("type") == "done":
+                        break
             return
 
         # ── 新消息分支：抢锁 → 落占位行 → 启动后台任务 → 本连接订阅 ──
@@ -1270,6 +1352,11 @@ async def data_chat_stream(
                 get_cache_repository().delete(_chat_text_key(task_sid))
             except Exception:
                 _log.debug("chat streamed text cache clear failed", exc_info=True)
+            # 事件日志同理：本轮开始即清空上一轮，否则续收回放会把上一轮的事件重放一遍。
+            try:
+                await event_stream.clear(task_sid)
+            except Exception:
+                _log.debug("chat event stream clear failed", exc_info=True)
         finally:
             # 任务未启动（构建中途异常 / 连接断开取消 / start 竞态被拒）→ 清理本轮占位副作用：
             # 锁还由本请求持有（任务没接手），running 任务态也是本轮写的，一并清掉。
