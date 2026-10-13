@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
     LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
 
+    # 任务队列（ARQ）：True = 对话任务投递到 Redis 队列、由独立 worker 进程执行
+    # （API 进程重启不影响已入队任务）；False = 沿用进程内 asyncio.Task（默认，行为不变）。
+    # worker 启动：.venv/Scripts/python.exe -m arq app.worker.WorkerSettings
+    TASK_QUEUE_ENABLED: bool = False
+
     # Insight 调度（dashboard-scheduler-and-insight-activation Task 5）
     # （阶段 2 迁移 token 口径时曾被区间替换误删，端到端启动探针抓出后恢复——
     #   单测不覆盖 startup 路径，这类字段只能靠真机启动验证兜底。）
