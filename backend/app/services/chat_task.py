@@ -25,8 +25,8 @@ from typing import Any, AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_cache_repository
 from app.config import settings
+from app.core.cache import get_cache_repository
 from app.core.database import async_session_factory
 from app.models.ai_message import AIMessage
 from app.services.chat_stream_registry import chat_registry

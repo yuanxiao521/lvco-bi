@@ -5,17 +5,21 @@ import time
 
 import pytest
 
-from app.api import deps
 from app.config import settings
+from app.core import cache as cache_module
 from app.repositories.in_memory_cache import InMemoryCacheRepository
 from app.services.session_lock import acquire_session_lock, release_session_lock
 
 
 @pytest.fixture()
 def memory_cache(monkeypatch) -> InMemoryCacheRepository:
-    """把 API 层缓存单例换成纯内存实现（不依赖真实 Redis）。"""
+    """把缓存单例换成纯内存实现（不依赖真实 Redis）。
+
+    单例已从 app/api/deps.py 下沉到 app/core/cache.py（services 层也要用，
+    避免 services → api 反向依赖），因此这里 patch 的是 core 模块的私有单例。
+    """
     cache = InMemoryCacheRepository()
-    monkeypatch.setattr(deps, "_cache_repo", cache)
+    monkeypatch.setattr(cache_module, "_cache_repo", cache)
     return cache
 
 
@@ -64,7 +68,7 @@ def test_cache_failure_fails_open(monkeypatch) -> None:
         def delete(self, key):
             raise RuntimeError("cache down")
 
-    monkeypatch.setattr(deps, "_cache_repo", BrokenRepo())
+    monkeypatch.setattr(cache_module, "_cache_repo", BrokenRepo())
     token = acquire_session_lock("s1")
     assert token
     release_session_lock("s1", token)  # 不应抛异常

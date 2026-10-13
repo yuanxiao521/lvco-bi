@@ -242,7 +242,11 @@ def _sse_line(payload: dict) -> str:
 
 
 async def _stream_from_event_log(
-    task_sid: object, *, max_seconds: float = 1800.0, idle_stop=None
+    task_sid: object,
+    *,
+    max_seconds: float = 1800.0,
+    idle_stop=None,
+    max_idle_seconds: float | None = None,
 ):
     """（订阅侧）纯事件日志读取：回放历史 + 阻塞续读，直到 done 或超时。
 
@@ -271,10 +275,20 @@ async def _stream_from_event_log(
     if text_buf:
         yield _sse_line({"type": "message", "delta": "".join(text_buf)})
     if not saw_done:
-        # 退出条件：调用方给了 idle_stop 就用它（如"任务是否还在跑"），否则用时间兜底
         deadline = time.monotonic() + max_seconds
-        stop = idle_stop if idle_stop is not None else (lambda: time.monotonic() > deadline)
-        async for _eid, ev in event_stream.tail(task_sid, cursor, idle_stop=stop):
+        # 「无进展」计时：最后一条事件的时刻。worker 中途被杀时日志不会再有新事件，
+        # 若不设上限，读者会一直阻塞到 max_seconds（30 分钟）——用户干等。
+        last_activity = time.monotonic()
+
+        def _stop() -> bool:
+            if idle_stop is not None and idle_stop():
+                return True
+            if max_idle_seconds is not None and (time.monotonic() - last_activity) > max_idle_seconds:
+                return True
+            return time.monotonic() > deadline
+
+        async for _eid, ev in event_stream.tail(task_sid, cursor, idle_stop=_stop):
+            last_activity = time.monotonic()
             yield _sse_line(ev)
             if ev.get("type") == "done":
                 saw_done = True
@@ -706,7 +720,13 @@ async def data_chat_stream(
                 if inprocess_running
                 else None
             )
-            async for line in _stream_from_event_log(task_sid, idle_stop=idle_stop):
+            async for line in _stream_from_event_log(
+                task_sid,
+                idle_stop=idle_stop,
+                # 队列模式（idle_stop 为 None）时用"无进展上限"兜底：
+                # worker 被杀 → 日志不再更新 → 4 分钟后收尾，而不是干等到 30 分钟。
+                max_idle_seconds=None if inprocess_running else 240.0,
+            ):
                 yield line
             return
 
@@ -1022,8 +1042,10 @@ async def data_chat_stream(
 
         # 本连接作为首个订阅者。
         if queued:
-            # 队列模式：执行在另一个进程，只能从事件日志读（回放 + 续读直到 done）
-            async for line in _stream_from_event_log(task_sid):
+            # 队列模式：执行在另一个进程，只能从事件日志读（回放 + 续读直到 done）。
+            # max_idle_seconds：worker 中途被杀时日志不会再有事件，靠它兜底退出
+            # （LLM 超时 120s、流空闲看门狗 90s，正常任务不会 4 分钟毫无动静）。
+            async for line in _stream_from_event_log(task_sid, max_idle_seconds=240.0):
                 yield line
         else:
             # 进程内模式：先补发一次文本快照（新任务通常为空），再实时转发任务事件

@@ -83,20 +83,12 @@ async def get_current_user(
 
 # ── Repository 依赖注入 ──────────────────────────────────────────────────────
 
-_cache_repo: FallbackCacheRepository | None = None
-
-
-def get_cache_repository() -> FallbackCacheRepository:
-    """获取缓存仓库单例（优先 Redis，降级到内存）。"""
-    global _cache_repo
-    if _cache_repo is None:
-        _cache_repo = FallbackCacheRepository()
-    return _cache_repo
-
-
-def get_test_cache_repository() -> InMemoryCacheRepository:
-    """测试用：返回纯内存缓存。"""
-    return InMemoryCacheRepository()
+# 缓存单例已下沉到 app/core/cache.py：services 层（如 chat_task.py 执行内核）也要用它，
+# 而 services → api 是反向依赖。这里 re-export 保持既有调用点零改动。
+from app.core.cache import (  # noqa: E402
+    get_cache_repository,
+    get_test_cache_repository,
+)
 
 
 # ── 画布 Repository ──────────────────────────────────────────────────────────
