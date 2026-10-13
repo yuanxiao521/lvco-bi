@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
+from app.config import settings
 from app.services.agents.lead.lead_intent import (
     IntentResult,
     IntentType,
@@ -304,7 +305,7 @@ async def decide_action(
                         decision_messages,
                         response_format={"type": "json_object"},
                         enable_thinking=False,
-                        max_tokens=400,
+                        max_tokens=int(getattr(settings, "LEAD_DECISION_MAX_TOKENS", 1200)),
                         return_usage=True,
                     ),
                     timeout=timeout,
@@ -318,7 +319,7 @@ async def decide_action(
                     decision_messages,
                     response_format={"type": "json_object"},
                     enable_thinking=False,
-                    max_tokens=400,
+                    max_tokens=int(getattr(settings, "LEAD_DECISION_MAX_TOKENS", 1200)),
                 ),
                 timeout=timeout,
             )
@@ -403,7 +404,7 @@ async def decide_action_merged(
                         merged_messages,
                         response_format={"type": "json_object"},
                         enable_thinking=False,
-                        max_tokens=600,
+                        max_tokens=int(getattr(settings, "LEAD_MERGED_MAX_TOKENS", 1500)),
                         return_usage=True,
                     ),
                     timeout=timeout,
@@ -417,7 +418,7 @@ async def decide_action_merged(
                     merged_messages,
                     response_format={"type": "json_object"},
                     enable_thinking=False,
-                    max_tokens=600,
+                    max_tokens=int(getattr(settings, "LEAD_MERGED_MAX_TOKENS", 1500)),
                 ),
                 timeout=timeout,
             )
