@@ -160,6 +160,17 @@ class Settings(BaseSettings):
     LEAD_CTX_CHART_SUMMARY_TOKENS: int = 1200
     # 答案生成时喂入的历史轮次总 token 预算（取最近若干"整条"消息，超预算即停；等价旧 2000 字）
     LEAD_CTX_ANSWER_HISTORY_TOKENS: int = 2000
+    # ── 结构化 JSON 输出的 token 预算（推理模型感知） ────────────────────────
+    # 背景：deepseek-v4.1-flash 这类**推理模型**先输出 reasoning_content 再输出正文，
+    # 两者**共用** max_tokens。旧值（决策 400 / 意图 300）在复杂 prompt 下会被推理吃光，
+    # 导致 JSON 截断 → extract_json_object 返回 None → 退化成确定性兜底
+    # （实测出现 [lead_decider] empty_or_unparsable fallback=deterministic）。
+    # 注意：决策调用已传 enable_thinking=False，但该模型**并未完全遵守**（仍产 reasoning），
+    # 所以只能靠放宽预算覆盖「推理开销 + JSON 正文」。多给不额外计费。
+    LEAD_DECISION_MAX_TOKENS: int = 1200      # 单轮决策 JSON
+    LEAD_MERGED_MAX_TOKENS: int = 1500        # 意图+决策合并调用（输出更长）
+    LEAD_INTENT_MAX_TOKENS: int = 800         # 独立意图识别 JSON
+
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）

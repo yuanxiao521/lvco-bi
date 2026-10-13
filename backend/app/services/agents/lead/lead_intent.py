@@ -195,7 +195,7 @@ async def classify_intent(
                 ],
                 response_format={"type": "json_object"},
                 enable_thinking=False,
-                max_tokens=300,
+                max_tokens=int(getattr(settings, "LEAD_INTENT_MAX_TOKENS", 800)),
             ),
             timeout=timeout,
         )
