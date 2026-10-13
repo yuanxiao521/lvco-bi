@@ -59,6 +59,11 @@ class ReportFailLLM:
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         yield {"type": "text", "content": "步骤完成"}
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 class ReportOkLLM:
     """Planner / 报告均正常。"""
@@ -71,6 +76,11 @@ class ReportOkLLM:
 
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         yield {"type": "text", "content": "步骤完成"}
+
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
 
 
 class _MockTool:
@@ -134,6 +144,11 @@ class StepTimeoutLLM:
         else:
             yield {"type": "text", "content": "步骤2完成"}
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 class SlowStepLLM:
     """Planner 正常；每个执行步骤 sleep 很久，触发整体超时。"""
@@ -147,6 +162,11 @@ class SlowStepLLM:
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         await asyncio.sleep(5.0)
         yield {"type": "text", "content": "不应到达"}
+
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
 
 
 async def _collect_events(orch: AgentOrchestrator) -> list[dict]:

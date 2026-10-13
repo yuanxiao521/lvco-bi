@@ -77,6 +77,11 @@ class MockOrchestratorLLM:
             else:
                 yield {"type": "text", "content": ""}  # 纯文本（空）结束查询步骤
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 class MockReactLLM:
     """ReAct Mock：第一轮工具调用，第二轮最终文本。"""
@@ -91,6 +96,11 @@ class MockReactLLM:
                    "arguments": json.dumps({"datasource_id": "ds1", "sql": "SELECT region, amount FROM data"})}
         else:
             yield {"type": "text", "content": "## 分析结果\n\n**金额 100**"}
+
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
 
 
 class FakeQueryTool:
@@ -445,6 +455,11 @@ class CallOnceLLM:
         else:
             yield {"type": "text", "content": "完成"}
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 @pytest.mark.asyncio
 async def test_react_tool_result_compacted_into_messages(monkeypatch):
@@ -518,6 +533,11 @@ class FailingPlannerLLM:
 
     async def stream_chat_with_tools(self, messages, tools, **kwargs):
         yield {"type": "text", "content": ""}  # 空文本立即结束步骤
+
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
 
 
 @pytest.mark.asyncio

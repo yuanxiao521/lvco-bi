@@ -300,3 +300,95 @@ class LLMClient:
                     content = delta.get("content")
                     if isinstance(content, str) and content:
                         yield {"type": "text", "content": content}
+
+    async def complete_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        *,
+        temperature: float = 0.3,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
+    ) -> dict:
+        """非流式补全 + tool_calls 解析（与 stream_chat_with_tools 语义等价，但不分片）。
+
+        返回 {"content": str, "tool_calls": [{"type","id","name","arguments"}]}。
+        用途：执行器的文本不需要逐字展示时，**省掉流式分片拼接**（id 只来一次、
+        name 可能被拆、arguments 逐块拼——这套累积逻辑可以直接不要）。
+
+        注意：非流式下整个生成期间没有任何数据回传，**读超时必须覆盖完整生成时间**，
+        因此这里默认给比流式更宽的 timeout（流式的超时只兜"块与块之间的间隔"）。
+        """
+        self._check_configured()
+        url = f"{self._base_url}/chat/completions"
+        body = self._payload(
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+            tools=tools,
+        )
+        read_timeout = timeout if timeout is not None else max(self._timeout, 300.0)
+        async with httpx.AsyncClient(timeout=read_timeout) as client:
+            response = await client.post(url, headers=self._headers(), json=body)
+        if response.status_code < 200 or response.status_code >= 300:
+            text = response.text or ""
+            raise AIUpstreamError(f"LLM {response.status_code}: {text[:200]}")
+        data = response.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise AIUpstreamError("LLM empty choices")
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        content = content if isinstance(content, str) else ""
+        reasoning = message.get("reasoning_content") or ""
+        tool_calls: list[dict] = []
+        for tc in message.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            tool_calls.append({
+                "type": "tool_call",
+                "id": tc.get("id") or "",
+                "name": fn.get("name") or "",
+                "arguments": fn.get("arguments") or "",
+                "reasoning_content": reasoning,
+            })
+        self._log_usage(data.get("usage") or {})
+        return {"content": content, "tool_calls": tool_calls}
+
+    @property
+    def tool_streaming_enabled(self) -> bool:
+        """工具调用是否走流式（配置开关，默认 True 保持历史行为）。"""
+        return bool(getattr(self._settings, "LLM_TOOL_STREAMING", True))
+
+    async def tool_call_round(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        *,
+        temperature: float = 0.3,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[dict]:
+        """工具调用轮次的**统一入口**：按配置在「流式」与「非流式」之间切换。
+
+        对调用方完全透明——两种模式 yield 的事件形状一致：
+            {"type": "text", "content": "..."}   （非流式时一次性给出全部文本）
+            {"type": "tool_call", "id", "name", "arguments", ...}
+            {"type": "done"}
+
+        为什么要有这个入口：执行器不该关心"传输方式"。关掉流式后，tool_calls 的
+        分片拼接逻辑（id 只来一次 / name 可能被拆开 / arguments 逐块拼）就完全用不到了。
+        """
+        if self.tool_streaming_enabled:
+            async for event in self.stream_chat_with_tools(
+                messages, tools, temperature=temperature, max_tokens=max_tokens,
+            ):
+                yield event
+            return
+        res = await self.complete_with_tools(
+            messages, tools, temperature=temperature, max_tokens=max_tokens,
+        )
+        if res.get("content"):
+            yield {"type": "text", "content": res["content"]}
+        for tc in res.get("tool_calls") or []:
+            yield tc
+        yield {"type": "done"}

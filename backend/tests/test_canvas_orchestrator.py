@@ -39,6 +39,11 @@ class MockLLM:
     async def complete(self, messages, **kw):
         return "{}"
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 def _make_orch(extra: set[str] | None = None):
     """用 __new__ 构造（绕过 yaml/LLM 依赖），注入画布工具白名单。"""

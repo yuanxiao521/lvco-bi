@@ -126,6 +126,11 @@ class MockLLM:
     async def complete(self, messages, **kw) -> str:
         return "mock report"
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 # ───────────────────────── Fixtures ─────────────────────────
 
@@ -319,6 +324,11 @@ async def test_fail_twice_then_force_tool_change(monkeypatch, mock_llm, orchestr
             captured_messages.append([dict(m) for m in messages])
             async for ev in super().stream_chat_with_tools(messages, tools, **kw):
                 yield ev
+
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
 
     watching_llm = WatchingLLM()
     watching_llm.push_tool_call("bad_tool", {"y": 2})

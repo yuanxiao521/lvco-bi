@@ -46,6 +46,11 @@ class MockLLM:
         else:
             yield {"type": "text", "content": "完成"}
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 class _FakeTool:
     """模拟工具：execute 返回固定结果。"""
