@@ -588,7 +588,7 @@ class AgentOrchestrator:
                     )
                     _obs_cm.__enter__()
                 try:
-                    async for event in self.llm.stream_chat_with_tools(
+                    async for event in self.llm.tool_call_round(
                         messages, all_tools, temperature=0.3, max_tokens=2000,
                     ):
                         if event["type"] == "text":

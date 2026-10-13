@@ -40,6 +40,11 @@ class StubLLM:
         self.last_complete_prompt = messages
         return self.complete_reply
 
+    async def tool_call_round(self, messages, tools, **kwargs):
+        # 测试桩: 委托给流式实现(与 LLMClient 默认行为一致)
+        async for ev in self.stream_chat_with_tools(messages, tools, **kwargs):
+            yield ev
+
 
 class StubExecutor:
     instances = 0

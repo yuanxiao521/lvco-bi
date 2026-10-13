@@ -147,7 +147,7 @@ class ReactGraphAgent:
         text_chunks: list[str] = []
         has_text_output = False
         try:
-            async for event in self.llm.stream_chat_with_tools(
+            async for event in self.llm.tool_call_round(
                 messages, tools, temperature=0.3, max_tokens=3000,
             ):
                 if event["type"] == "text":
