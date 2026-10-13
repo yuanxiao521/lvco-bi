@@ -41,6 +41,30 @@ STREAM_TEXT_SNAPSHOT_INTERVAL = 0.5
 STREAM_IDLE_TIMEOUT = 90.0
 
 
+async def lead_stream_guard(lead_stream):
+    """主导 Agent 流式消费护栏（执行内核的一部分，API 进程与 worker 共用）。
+
+    主导 Agent 是唯一执行路径——异常时**不静默降级**，而是补发 status + done(degraded=True)，
+    让失败被看见。
+
+    为什么必须两端共用：队列模式下 agent 异常若没被转成 done 事件，事件日志里就永远
+    没有终止信号，SSE 侧会一直阻塞续读到超时（前端表现：永远转圈）。
+    """
+    emitted = False
+    try:
+        async for ev in lead_stream:
+            emitted = True
+            yield ev
+    except Exception as exc:  # noqa: BLE001
+        _log.exception(f"lead_agent_stream_failed: {exc}")
+        message = (
+            "主导 Agent 执行异常，本轮已中断。" if emitted
+            else "主导 Agent 不可用，本轮未能处理。"
+        )
+        yield {"type": "status", "message": message, "degradation": "lead_agent_error"}
+        yield {"type": "done", "degraded": True}
+
+
 async def _save_memory(db: AsyncSession, session_id, event: dict) -> None:
     """持久化记忆合并事件（消费主导 Agent 的 compressed_history 事件）。
 
