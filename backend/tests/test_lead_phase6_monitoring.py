@@ -41,7 +41,12 @@ def test_execution_summary_success_with_tool_chain():
     result = RunAnalysisResult(
         success=True,
         report="报告：总销售额 100 元，环比增长 5%。",
-        steps=[{"title": "查询总销售额"}, {"title": "绘制柱状图"}],
+        # 用 planner 的**真实产出结构**（goal/purpose）。历史测试误用了 title——
+        # 生产从不产出该字段，于是掩盖了"渲染器字段名对不上、规划段全变占位符"的 bug。
+        steps=[
+            {"step_id": 1, "goal": "查询总销售额", "tool": "query_sql", "purpose": "取数"},
+            {"step_id": 2, "goal": "绘制柱状图", "tool": "render_chart", "purpose": "可视化"},
+        ],
         blocks_added=2,
         report_source="orchestrator",
         elapsed_ms=350,
@@ -93,6 +98,48 @@ def test_execution_summary_failure_case():
     assert "[子任务产出报告]" not in summary
 
 
+def test_execution_summary_plan_reads_real_planner_fields():
+    """回归守卫：步骤标题必须读 planner 的真实字段（goal / purpose）。
+
+    历史 bug：渲染器读 title / content / objective，而 planner 产出 goal / purpose，
+    导致摘要的「规划」一段全部 fallback 成占位符——**不报错、只是静默失去信息量**，
+    主管看不到计划内容，只能靠工具链猜。
+    """
+    steps = [
+        {"step_id": 1, "goal": "查询各地区销售额", "tool": "query_engine", "purpose": "取数"},
+        {"step_id": 2, "goal": "生成地区对比柱状图", "tool": "render_chart", "purpose": "可视化"},
+    ]
+    summary = build_execution_summary(RunAnalysisResult(success=True, report="r", steps=steps))
+
+    assert "查询各地区销售额" in summary
+    assert "生成地区对比柱状图" in summary
+    assert "步骤 → 步骤" not in summary, "不得再出现占位符"
+
+    # 只有 purpose 时也要能取到（goal 缺失的降级）
+    only_purpose = [{"step_id": 1, "purpose": "取数"}]
+    assert "取数" in build_execution_summary(
+        RunAnalysisResult(success=True, report="r", steps=only_purpose)
+    )
+
+
+def test_execution_summary_plan_cap_aligns_with_planner_limit():
+    """规划展示上限与 planner 动态上限（12 步）对齐：满配计划要能完整展示。
+
+    历史不自洽：工具链展示 12 条，规划却只给 6 步——而计划上限本来就是 12。
+    """
+    steps = [{"step_id": i, "goal": f"第{i}步"} for i in range(1, 16)]   # 15 步 > 上限
+    summary = build_execution_summary(RunAnalysisResult(success=True, report="r", steps=steps))
+
+    assert "规划[15步]" in summary, "总数照实显示"
+    assert "第12步" in summary, "上限内的最后一步要可见"
+    assert "第13步" not in summary, "超出上限的应截断"
+
+    # 12 步以内完整展示
+    twelve = [{"step_id": i, "goal": f"第{i}步"} for i in range(1, 13)]
+    s12 = build_execution_summary(RunAnalysisResult(success=True, report="r", steps=twelve))
+    assert "第12步" in s12
+
+
 # ── 3. 真实 run_analysis 主循环：工具链收集 / 落块 / 数值 / memo ─────────────
 
 class _FakeOrchestrator:
@@ -102,7 +149,11 @@ class _FakeOrchestrator:
 
     def __init__(self, llm, db_session, extra_plannable_tools=None) -> None:  # noqa: ANN001
         self._events = [
-            {"type": "plan", "plan": {"steps": [{"title": "查总销售额"}, {"title": "画柱状图"}]}},
+            # 用 planner 真实字段（goal），别用生产不产出的 title——否则测不到真实路径
+            {"type": "plan", "plan": {"steps": [
+                {"step_id": 1, "goal": "查总销售额", "tool": "query_sql", "purpose": "取数"},
+                {"step_id": 2, "goal": "画柱状图", "tool": "render_chart", "purpose": "可视化"},
+            ]}},
             {"type": "tool_call", "name": "query_sql",
              "args": {"sql": "SELECT sum(amount) FROM orders", "limit": 5}},
             {"type": "tool_result", "name": "query_sql",
@@ -215,7 +266,7 @@ async def test_lead_agent_backfills_structured_execution_summary(monkeypatch):
         return RunAnalysisResult(
             success=True,
             report="报告：总销售额 100 元。",
-            steps=[{"title": "查数"}],
+            steps=[{"step_id": 1, "goal": "查数", "purpose": "取数"}],
             blocks_added=1,
             report_source="orchestrator",
             elapsed_ms=9,

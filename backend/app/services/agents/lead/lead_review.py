@@ -14,6 +14,32 @@ from __future__ import annotations
 
 from app.services.agents.lead.lead_tools import RunAnalysisResult, assess_subtask
 
+# 规划步骤的展示上限：与 planner 的动态上限（_MAX_PLAN_STEPS=12）对齐——
+# 工具链都展示 12 条了，规划没理由只给 6 步；满配计划必须能完整展示。
+_MAX_PLAN_SHOWN = 12
+# 单步标题截断长度。planner 的 goal ≤200 字、purpose ≤120 字，只取前 40 字做索引。
+_STEP_CHARS = 40
+
+
+def _step_label(step: dict) -> str:
+    """取步骤标题。
+
+    **字段名以 planner 的真实产出为准**：规范化后产出的步骤字段是
+    step_id / goal / tool / depends_on / purpose / granularity。
+    历史上这里读的是 title / content / objective——生产从不产出这三个字段，
+    导致摘要里的「规划」一段全部 fallback 成占位符「步骤」（静默失去信息量）。
+    保留旧字段名只为向后兼容外部构造的 steps。
+    """
+    text = (
+        step.get("goal")
+        or step.get("purpose")
+        or step.get("title")
+        or step.get("content")
+        or step.get("objective")
+        or "步骤"
+    )
+    return str(text)[:_STEP_CHARS]
+
 
 def review_subtask(result: RunAnalysisResult, *, entry: str, user_goal: str) -> str:
     """对一次子任务做确定性评估（成功/失败都评），产出可注入决策器的评估文本。"""
@@ -53,10 +79,7 @@ def build_execution_summary(
         lines.append(f"  动作：分析未完成。原因：{result.error or '未知'}。")
     # 2. 规划步骤（若有）
     if result.steps:
-        plan_text = " → ".join(
-            str(s.get("title") or s.get("content") or s.get("objective") or "步骤")[:40]
-            for s in result.steps[:6]
-        )
+        plan_text = " → ".join(_step_label(s) for s in result.steps[:_MAX_PLAN_SHOWN])
         lines.append(f"  规划[{len(result.steps)}步]：{plan_text}")
     # 3. 执行链路（工具 + 参数摘要 + 行数 + 成败）
     if result.tool_chain:
