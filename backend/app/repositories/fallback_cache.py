@@ -49,6 +49,24 @@ class FallbackCacheRepository:
             self._redis.delete(key)
         self._memory.delete(key)
 
+    # ── 跨进程共享状态专用（不写进程内存副本）──────────────────────────────
+
+    def set_shared(self, key: str, value: str, ttl: int | None = None) -> None:
+        """**跨进程共享键**专用写入：只写 Redis，不写本进程内存副本。
+
+        适用：一个进程写、另一个进程读/删的键（如任务态 ai:chat:task:{sid}——
+        API 进程写 running、worker 进程删）。若走通用 set 的「双写」，其他进程
+        删除 Redis 后，本进程的内存副本会残留旧值，而 get 的 Redis-miss 回退
+        会命中它——表现为「状态已结束但接口仍报 running」（幽灵数据）。
+        """
+        if self._use_redis:
+            self._redis.set(key, value, ttl)
+
+    def delete_shared(self, key: str) -> None:
+        """**跨进程共享键**专用删除：只删 Redis（见 set_shared 的说明）。"""
+        if self._use_redis:
+            self._redis.delete(key)
+
     def delete_by_prefix(self, prefix: str) -> int:
         """按前缀清除两个层（Redis + 内存）。"""
         total = 0

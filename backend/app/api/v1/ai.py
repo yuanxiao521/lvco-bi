@@ -324,18 +324,23 @@ async def list_sessions(
     data = []
     for s in items:
         d = AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True)
-        # 进程内后台任务是否在跑：前端用它判断"刷新后自动续收"（只对对话入口有意义）
-        try:
-            d["running"] = bool(chat_registry.is_running(str(s.id))) if entry == "chat" else False
-        except Exception:
-            d["running"] = False
-        # Redis 任务态标记：供前端提示「上次对话未完成」（正常完成时 key 已被删除）
+        # 任务态：**一次读取、两个字段**（running / interrupted）。
+        # 为什么必须合并读取：
+        #   · 进程内模式（TASK_QUEUE_ENABLED=False）任务在本进程的 chat_registry 里；
+        #   · arq 模式任务跑在**独立 worker 进程**，本进程注册表里没有它 → running 恒为
+        #     False → 前端不会自动续收（刷新后看不到"正在执行"）。
+        #   ai:chat:task:{sid} 在**两种模式下都会写**（启动 running / 完成 delete /
+        #   中断 interrupted），所以用它补上跨进程的真实状态。
         try:
             task_json = cache_repo.get(f"ai:chat:task:{s.id}")
-            d["interrupted"] = bool(
-                task_json and json.loads(task_json).get("status") == "interrupted"
-            )
+            status = (json.loads(task_json).get("status") if task_json else None)
+            in_proc = bool(chat_registry.is_running(str(s.id))) if entry == "chat" else False
+            d["running"] = in_proc or status == "running"
+            d["interrupted"] = status == "interrupted"
         except Exception:
+            # 任一环节异常（Redis 不可用 / JSON 损坏）都退化为"无任务"：
+            # 绝不因此让 /sessions 500——前端只是不自动续收，手动 resume 仍可用。
+            d["running"] = False
             d["interrupted"] = False
         data.append(d)
     return SuccessResponse(data=data)
@@ -772,7 +777,9 @@ async def data_chat_stream(
             assistant_msg_id = assistant_msg.id
             task_key = f"ai:chat:task:{session_id}"
             try:
-                get_cache_repository().set(
+                # 跨进程共享键：只写 Redis（API 写 running、worker 删——
+                # 若双写内存副本，其他进程删 Redis 后本进程会读到幽灵 running）
+                get_cache_repository().set_shared(
                     task_key,
                     json.dumps({
                         "status": "running",

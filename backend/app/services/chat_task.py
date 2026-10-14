@@ -465,9 +465,11 @@ async def run_chat_task(
                 try:
                     repo = get_cache_repository()
                     if completed:
-                        repo.delete(task_key)  # 正常完成：清除 running 标记
+                        # 跨进程共享键：只删 Redis（worker 删、API 读——若双写内存副本，
+                        # 其他进程删 Redis 后本进程会读到幽灵 running）
+                        repo.delete_shared(task_key)
                     elif not repo.exists(task_key):
-                        repo.set(
+                        repo.set_shared(
                             task_key,
                             json.dumps({
                                 "status": "interrupted",
