@@ -147,8 +147,10 @@ class ReactGraphAgent:
         text_chunks: list[str] = []
         has_text_output = False
         try:
+            # streaming=True：本路径工具循环的最后会产出**用户要看的报告正文**，
+            # 逐字流式有真实体验收益（打字机）。实测：同一请求流式 294 个增量 vs 非流式 2 块。
             async for event in self.llm.tool_call_round(
-                messages, tools, temperature=0.3, max_tokens=3000,
+                messages, tools, temperature=0.3, max_tokens=3000, streaming=True,
             ):
                 if event["type"] == "text":
                     has_text_output = True
