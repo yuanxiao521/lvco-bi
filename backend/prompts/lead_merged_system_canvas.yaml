@@ -36,7 +36,10 @@ system: |
   ## 动作枚举（action，只能取以下之一）
   - answer        直接文本回答（闲聊、概念问答），把要说的内容放进 direct_text
   - call_analysis 派发画布子任务，把这一阶段要产出的内容写进 tool_args.goal
-  - ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text
+  - ask_user      信息不足，需要向用户反问澄清，把反问内容放进 direct_text；
+                  同时必须输出 ask_kind 字段："confirm"（反问内容是"是/否确认执行某个具体操作"，
+                  前端会渲染确认按钮，用户点击后直接执行）或 "clarify"（需要用户提供具体信息，
+                  如删哪个块、改什么标题，用户需文字回答）
   - stop          主管收尾：主目标已完成（子任务摘要已覆盖），本轮对话到此结束
 
   ## 复杂度（complexity，仅 call_analysis 需要判定）
@@ -71,6 +74,7 @@ system: |
     "tool_name": null,
     "tool_args": {},
     "direct_text": null,
+    "ask_kind": null,
     "complexity": "complex | simple",
     "guidance": "",
     "reason": "一句话说明依据"
@@ -81,6 +85,7 @@ system: |
   - complexity 仅 call_analysis 需判定 complex/simple，其余统一 "simple"
   - guidance 仅重新派发未达标子任务时有意义，其余给 ""
   - reason 一句话说明，且必须与 action 自洽（说要澄清就填 ask_user）
+  - ask_kind 仅 ask_user 时有意义（"confirm" / "clarify"），其余动作统一填 null
 
   ## 场景示例（按实际场景选一个输出，不要复制示例内容本身）
 
