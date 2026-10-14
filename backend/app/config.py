@@ -167,16 +167,17 @@ class Settings(BaseSettings):
     # （实测出现 [lead_decider] empty_or_unparsable fallback=deterministic）。
     # 注意：决策调用已传 enable_thinking=False，但该模型**并未完全遵守**（仍产 reasoning），
     # 所以只能靠放宽预算覆盖「推理开销 + JSON 正文」。多给不额外计费。
-    # 执行器的工具调用是否走流式。
-    #   True（默认）＝ 流式 + 自己拼 tool_calls 分片；
-    #   False ＝ 非流式，直接拿完整 tool_calls（省掉分片拼接逻辑）。
-    # 关掉的影响：ReactAgent 的文本是**实时展示给用户的**（打字机效果），关掉会丢失；
-    #   两个编排器的每步文本本就不展示给用户（只 emit 最终报告），关掉无 UX 损失。
-    LLM_TOOL_STREAMING: bool = True
-
     LEAD_DECISION_MAX_TOKENS: int = 1200      # 单轮决策 JSON
     LEAD_MERGED_MAX_TOKENS: int = 1500        # 意图+决策合并调用（输出更长）
     LEAD_INTENT_MAX_TOKENS: int = 800         # 独立意图识别 JSON
+
+    # ── 工具调用是否走流式的**全局默认值** ──────────────────────────────────
+    # 三个执行器已各自显式指定，此处只在调用方传 streaming=None 时兜底：
+    #   ReactAgent         → streaming=True （工具循环末轮产出**用户要看的报告**，保留打字机）
+    #   AgentOrchestrator  → streaming=False（中间文字不展示，省掉 tool_calls 分片拼接）
+    #   CanvasOrchestrator → streaming=False（同上）
+    # 原则：**给人看的用流式，给程序用的用非流式**。
+    LLM_TOOL_STREAMING: bool = True
 
     # 是否输出细粒度进度汇报（False 仅关键节点汇报，减少 SSE 噪声）
     LEAD_PROGRESS_VERBOSE: bool = False

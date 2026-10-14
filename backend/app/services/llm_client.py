@@ -367,6 +367,7 @@ class LLMClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        streaming: bool | None = None,
     ) -> AsyncIterator[dict]:
         """工具调用轮次的**统一入口**：按配置在「流式」与「非流式」之间切换。
 
@@ -377,8 +378,15 @@ class LLMClient:
 
         为什么要有这个入口：执行器不该关心"传输方式"。关掉流式后，tool_calls 的
         分片拼接逻辑（id 只来一次 / name 可能被拆开 / arguments 逐块拼）就完全用不到了。
+
+        参数 streaming：
+            None  → 沿用全局配置 LLM_TOOL_STREAMING
+            True  → 强制流式（**输出要给用户实时看**的路径，如 ReAct 的报告正文）
+            False → 强制非流式（**输出只给程序消费**的路径，如编排器的工具循环中间输出）
+        判断标准：这条输出有人盯着屏幕等它一个字一个字出来吗？
         """
-        if self.tool_streaming_enabled:
+        use_stream = self.tool_streaming_enabled if streaming is None else streaming
+        if use_stream:
             async for event in self.stream_chat_with_tools(
                 messages, tools, temperature=temperature, max_tokens=max_tokens,
             ):

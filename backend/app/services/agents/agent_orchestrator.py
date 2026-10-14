@@ -588,8 +588,11 @@ class AgentOrchestrator:
                     )
                     _obs_cm.__enter__()
                 try:
+                    # streaming=False：本路径工具循环的中间文字**不展示给用户**
+                    # （只攒进 text_parts，最终报告在末尾一次性 emit），流式零收益，
+                    # 非流式可省掉 tool_calls 分片拼接。
                     async for event in self.llm.tool_call_round(
-                        messages, all_tools, temperature=0.3, max_tokens=2000,
+                        messages, all_tools, temperature=0.3, max_tokens=2000, streaming=False,
                     ):
                         if event["type"] == "text":
                             text_parts.append(event.get("content", ""))

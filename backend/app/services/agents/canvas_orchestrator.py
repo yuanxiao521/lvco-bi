@@ -390,8 +390,9 @@ class CanvasOrchestrator:
                 _obs_cm.__enter__()
             try:
                 try:
+                    # streaming=False：同通用编排器——中间文字不展示，报告末尾整块 emit。
                     async for event in self.llm.tool_call_round(
-                        messages, all_tools, temperature=0.3, max_tokens=2000,
+                        messages, all_tools, temperature=0.3, max_tokens=2000, streaming=False,
                     ):
                         if event["type"] == "text":
                             text_parts.append(event.get("content", ""))
