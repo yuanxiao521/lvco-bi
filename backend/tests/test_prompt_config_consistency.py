@@ -86,7 +86,24 @@ def test_decision_prompts_declare_ask_kind():
 
 
 def test_prompts_loaded_from_yaml_not_fallback():
-    """yaml 必须真的被加载到（否则一直在用 Python fallback，yaml 改了也不生效）。"""
+    """生效的提示词必须来自 yaml，而不是 Python 的容灾备份常量。
+
+    机制：_load(name, fallback) = get_prompt(name).system or fallback。
+    PromptRegistry.get() 对缺失/解析失败的 yaml **不抛异常**，返回空 system——
+    于是静默落到 fallback。这条守卫用"逐字节比对 yaml 与生效常量"把它钉住：
+    一旦 yaml 加载失败，改 yaml 就会毫无效果而没人发现。
+    """
+    import textwrap
+
+    import yaml
+
     from app.services.ai_prompts import LEAD_MERGED_SYSTEM
-    # yaml 版本包含"输出 Schema"标题；fallback 版式不同——用长度做粗判（yaml > 3000 字）
-    assert len(LEAD_MERGED_SYSTEM) > 1000, "疑似加载到了空的/异常的提示词"
+
+    yaml_path = Path(__file__).resolve().parents[1] / "prompts" / "lead_merged_system.yaml"
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    yaml_system = textwrap.dedent(data["system"]).strip("\n")
+
+    assert yaml_system == LEAD_MERGED_SYSTEM, (
+        "生效的 lead_merged_system 与 prompts/lead_merged_system.yaml 不一致——"
+        "yaml 可能加载失败，正在跑 Python fallback（改 yaml 不会生效）"
+    )
