@@ -532,7 +532,9 @@ class LeadAgent:
             }
 
             # ── 2) Supervisor 循环：第 0 轮复用合并决策，后续轮次独立决策，直到 stop / 轮次上限 ──
-            max_rounds = getattr(settings, "LEAD_MAX_SUPERVISOR_ROUNDS", 4)
+            # 默认值必须与 config.LEAD_MAX_SUPERVISOR_ROUNDS 一致（3）——写成 4 的话，
+            # 一旦有人删掉那条配置，行为会从"3 轮上限"悄悄变成"4 轮上限"。
+            max_rounds = getattr(settings, "LEAD_MAX_SUPERVISOR_ROUNDS", 3)
             stopped = False        # 是否经决策器 STOP 收敛
             had_analysis = False   # 本轮回是否已派发过分析（用于轮次耗尽提示）
             prev_action: str | None = None  # 上一轮动作（决策输入，prompt 据此硬化 stop）
@@ -820,7 +822,9 @@ class LeadAgent:
           后熔断不再重试，下次成功合并时清零。
         返回 None = 本轮未触发或已熔断，不产生任何落库事件。
         """
-        min_rounds = max(1, int(getattr(settings, "LEAD_MEMORY_MERGE_ROUNDS", 4) or 4))
+        # 默认值必须与 config.LEAD_MEMORY_MERGE_ROUNDS 一致（6；该值曾在 AB-B 由 4 调到 6，
+        # 但这里的兜底没跟着改——配置一旦被删，合并触发门槛会悄悄退回 4 轮）。
+        min_rounds = max(1, int(getattr(settings, "LEAD_MEMORY_MERGE_ROUNDS", 6) or 6))
         max_failures = max(1, int(getattr(settings, "LEAD_MEMORY_MAX_FAILURES", 3) or 3))
         max_messages = max(2, int(getattr(settings, "LEAD_MEMORY_MAX_MERGE_MESSAGES", 24) or 24))
 
