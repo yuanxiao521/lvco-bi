@@ -41,6 +41,30 @@ STREAM_TEXT_SNAPSHOT_INTERVAL = 0.5
 STREAM_IDLE_TIMEOUT = 90.0
 
 
+def _owns_task_state(task_json: str | None, assistant_msg_id) -> bool:
+    """判断任务态 key 是否**属于本轮**（收尾时避免覆盖新一轮写的状态）。
+
+    旧实现用 `not repo.exists(key)` 判断该不该写终态——后果是：
+    任务异常结束时 key 还在（本轮写的 running）→ 条件为假 → **不写终态**
+    → key 停在 running → 前端每次刷新都误判「还在跑」并自动续收（空续收，
+    队列模式下每次还要空等 max_idle 才兜底）。
+
+    改为按「本轮标识」归属判定：
+      · key 不存在 / 无标识（历史数据、已被清）→ 视为可处置；
+      · key 的标识 == 本轮 assistant_msg_id → 本轮自己的 → 可处置；
+      · 否则是新一轮写的 → 不动它（避免把新轮的 running 改成 interrupted）。
+    """
+    if not task_json:
+        return True
+    try:
+        owner = json.loads(task_json).get("assistant_msg_id")
+    except Exception:  # noqa: BLE001
+        return True
+    if owner is None:
+        return True
+    return str(owner) == str(assistant_msg_id)
+
+
 async def lead_stream_guard(lead_stream):
     """主导 Agent 流式消费护栏（执行内核的一部分，API 进程与 worker 共用）。
 
@@ -429,11 +453,17 @@ async def run_chat_task(
                     await _save_memory(db, session_id, event)
         except AINotConfiguredError:
             _publish({"type": "error", "message": "AI 未配置"})
+            _publish({"type": "done", "degraded": True})
         except AIUpstreamError as e:
             _publish({"type": "error", "message": str(e)})
+            _publish({"type": "done", "degraded": True})
         except Exception:
             _log.exception("Agent chat task error")
             _publish({"type": "error", "message": "服务异常，请查看日志"})
+            # 任务级异常必须补终止信号：前端只在 done 上解锁输入框（error 不解锁），
+            # 而队列模式下续收方靠日志里的 done 判断"这轮结束了"——缺 done 会一直
+            # 阻塞到 max_idle 兜底（实测最长 4 分钟），期间输入框锁死。
+            _publish({"type": "done", "degraded": True})
         else:
             # 只有正常跑完事件流（含 Agent 内部 error 事件）才算完成
             completed = True
@@ -464,20 +494,22 @@ async def run_chat_task(
             if task_key:
                 try:
                     repo = get_cache_repository()
-                    if completed:
-                        # 跨进程共享键：只删 Redis（worker 删、API 读——若双写内存副本，
-                        # 其他进程删 Redis 后本进程会读到幽灵 running）
-                        repo.delete_shared(task_key)
-                    elif not repo.exists(task_key):
-                        repo.set_shared(
-                            task_key,
-                            json.dumps({
-                                "status": "interrupted",
-                                "chars": len(full_content),
-                                "interrupted_at": datetime.now(timezone.utc).isoformat(),
-                            }),
-                            ttl=settings.redis_ttl,
-                        )
+                    # 只处置「属于本轮」的状态：跨进程共享键只碰 Redis（见 set_shared 说明）
+                    if _owns_task_state(repo.get(task_key), assistant_msg_id):
+                        if completed:
+                            repo.delete_shared(task_key)   # 正常完成 → 无 key = 前端读历史
+                        else:
+                            # 未完成（任务级异常）→ 写明确终态。
+                            # 旧实现只在 key 不存在时才写，导致异常后 key 停在 running。
+                            repo.set_shared(
+                                task_key,
+                                json.dumps({
+                                    "status": "interrupted",
+                                    "chars": len(full_content),
+                                    "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                                }),
+                                ttl=settings.redis_ttl,
+                            )
                 except Exception:
                     pass
             # 会话锁：任务结束才释放（连接断开不释放，让任务继续独占到跑完）
