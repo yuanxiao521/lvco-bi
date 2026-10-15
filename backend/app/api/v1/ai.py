@@ -1065,7 +1065,8 @@ async def data_chat_stream(
                     release_session_lock(session_id, lock_token)
                 if task_key:
                     try:
-                        get_cache_repository().delete(task_key)
+                        # 跨进程共享键：只删 Redis（与写入侧 set_shared 对称）
+                        get_cache_repository().delete_shared(task_key)
                     except Exception:
                         pass
 
@@ -2101,7 +2102,8 @@ async def canvas_ai_chat(
                     await db.rollback()
                 # 任务正常结束：清除 running 标记，避免误报"未完成"
                 try:
-                    get_cache_repository().delete(f"ai:canvas:task:{session_id}")
+                    # 跨进程共享键：只删 Redis（不碰本进程内存副本）
+                    get_cache_repository().delete_shared(f"ai:canvas:task:{session_id}")
                 except Exception:
                     pass
 
@@ -2133,7 +2135,7 @@ async def canvas_ai_chat(
                 try:
                     repo = get_cache_repository()
                     if repo.exists(task_key):
-                        repo.set(
+                        repo.set_shared(
                             task_key,
                             json.dumps({
                                 "status": "interrupted",
@@ -2294,7 +2296,10 @@ async def canvas_ai_chat(
                 current_user_msg_id = user_msg_model.id
                 # Redis 任务态：标记 running（供"上次未完成"提示）
                 try:
-                    get_cache_repository().set(
+                    # 跨进程共享键：只写 Redis（连接段写 running、任务体删/改——
+                    # 若双写内存副本，任务体删掉 Redis 后本进程 get 会回退命中
+                    # 旧副本，表现为"任务已结束但接口仍报 running"的幽灵态）
+                    get_cache_repository().set_shared(
                         f"ai:canvas:task:{session_id}",
                         json.dumps({
                             "status": "running",

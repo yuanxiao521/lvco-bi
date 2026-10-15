@@ -58,6 +58,12 @@ class FallbackCacheRepository:
         API 进程写 running、worker 进程删）。若走通用 set 的「双写」，其他进程
         删除 Redis 后，本进程的内存副本会残留旧值，而 get 的 Redis-miss 回退
         会命中它——表现为「状态已结束但接口仍报 running」（幽灵数据）。
+
+        Redis 不可用时的取舍：**不写任何副本**（含内存）。共享键的价值在于跨进程
+        一致，内存副本是进程私有的——写它只会制造「本进程看得到、别的进程看不到」
+        的假象，并在 Redis 恢复后重新引入幽灵态。因此宁可让状态"缺失"（前端不自动
+        续收，手动 resume 仍可用），也不给出一份可能错的答案。
+        注：FallbackCacheRepository 是进程级单例，_use_redis 在首次构造时确定。
         """
         if self._use_redis:
             self._redis.set(key, value, ttl)
