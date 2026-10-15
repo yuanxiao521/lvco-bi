@@ -300,6 +300,24 @@ async def _stream_from_event_log(
         yield _sse_line({"type": "done"})
 
 
+async def _queue_idle_cap() -> float:
+    """队列模式的「无进展」上限（秒）——执行者已死时快速收尾，不让用户干等。
+
+    为什么要动态：
+      · **有在线 worker** → 120s（与 LLM 超时对齐；Agent 自身还有 90s 空闲看门狗，
+        因此 >120s 完全无事件即可判定执行者已死）；
+      · **无在线 worker** → 15s（任务不可能再有任何进展，没必要等满 120s）。
+    """
+    try:
+        from app.worker import worker_alive
+
+        if not await worker_alive():
+            return 15.0
+    except Exception:  # noqa: BLE001
+        pass
+    return 120.0
+
+
 # ── 对话后台续跑：任务主体 ───────────────────────────────────────
 @router.get("/sessions")
 async def list_sessions(
@@ -728,9 +746,9 @@ async def data_chat_stream(
             async for line in _stream_from_event_log(
                 task_sid,
                 idle_stop=idle_stop,
-                # 队列模式（idle_stop 为 None）时用"无进展上限"兜底：
-                # worker 被杀 → 日志不再更新 → 4 分钟后收尾，而不是干等到 30 分钟。
-                max_idle_seconds=None if inprocess_running else 240.0,
+                # 队列模式（idle_stop 为 None）：worker 崩溃/被杀后日志不再有新事件，
+                # 靠「无进展上限」兜底退出（有 worker 120s / 无 worker 15s）。
+                max_idle_seconds=None if inprocess_running else await _queue_idle_cap(),
             ):
                 yield line
             return
@@ -783,6 +801,10 @@ async def data_chat_stream(
                     task_key,
                     json.dumps({
                         "status": "running",
+                        # 本轮标识：任务收尾时据此判断「这个 key 还是不是我的」，
+                        # 避免把新一轮写的 running 误改成 interrupted（见 chat_task
+                        # 的 _owns_task_state）。
+                        "assistant_msg_id": str(assistant_msg_id) if assistant_msg_id else None,
                         "started_at": datetime.now(timezone.utc).isoformat(),
                     }),
                     ttl=settings.redis_ttl,
@@ -1051,8 +1073,10 @@ async def data_chat_stream(
         if queued:
             # 队列模式：执行在另一个进程，只能从事件日志读（回放 + 续读直到 done）。
             # max_idle_seconds：worker 中途被杀时日志不会再有事件，靠它兜底退出
-            # （LLM 超时 120s、流空闲看门狗 90s，正常任务不会 4 分钟毫无动静）。
-            async for line in _stream_from_event_log(task_sid, max_idle_seconds=240.0):
+            # （有在线 worker 120s / 无在线 worker 15s，见 _queue_idle_cap）。
+            async for line in _stream_from_event_log(
+                task_sid, max_idle_seconds=await _queue_idle_cap()
+            ):
                 yield line
         else:
             # 进程内模式：先补发一次文本快照（新任务通常为空），再实时转发任务事件
