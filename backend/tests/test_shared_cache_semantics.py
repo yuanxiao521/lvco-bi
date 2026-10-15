@@ -68,6 +68,31 @@ def test_shared_roundtrip_and_overwrite(two_repos):
     assert json.loads(worker_repo.get(K))["status"] == "interrupted"
 
 
+def test_shared_writes_are_noop_when_redis_unavailable():
+    """Redis 不可用时共享键**不写任何副本**（含内存）——这是刻意的取舍，不是 bug。
+
+    为什么不用内存兜底：内存副本是进程私有的，写它会造成"本进程看得到、
+    别的进程看不到"的假象，并在 Redis 恢复后重新引入幽灵态。
+    代价：Redis 全程不可用时 running/interrupted 标记缺失（前端不自动续收，
+    手动 resume 仍可用）——宁可状态缺失，也不给一份可能错的答案。
+    注：FallbackCacheRepository 是进程级单例，_use_redis 在首次构造时确定。
+    """
+    repo = FallbackCacheRepository()
+    repo._use_redis = False  # 强制模拟 Redis 不可用（新实例，不影响单例）
+    ks, kg = K + ":shared", K + ":generic"
+
+    repo.set_shared(ks, "v")
+    assert repo._memory.get(ks) is None, "Redis 不可用时 set_shared 不应写内存副本"
+    assert repo.get(ks) is None, "共享键在 Redis 不可用时读不到（刻意：宁可缺失）"
+
+    repo.set(kg, "v")
+    assert repo._memory.get(kg) == "v", "通用 set 的降级语义必须保持不变"
+    assert repo.get(kg) == "v"
+
+    repo.delete_shared(ks)   # 不应抛异常，也不应误删别的键
+    assert repo.get(kg) == "v"
+
+
 def test_legacy_set_delete_semantics_unchanged(two_repos):
     """通用 set/delete 的双写语义保持不变（session_lock 等单进程场景依赖它）。"""
     api_repo, _ = two_repos
