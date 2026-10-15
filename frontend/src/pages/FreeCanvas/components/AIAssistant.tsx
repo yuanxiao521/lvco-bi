@@ -343,7 +343,8 @@ export default memo(function AIAssistant({
 
   // 会话列表就绪后：默认选中最近一条会话并加载其历史（刷新页面/切回画布时恢复）
   useEffect(() => {
-    void useCanvasAssistantStore.getState().onCanvasReady(canvasId ?? null);
+    // 传 ctx：会话列表里该会话 running=true 时，onCanvasReady 会自动续收后台任务
+    void useCanvasAssistantStore.getState().onCanvasReady(canvasId ?? null, buildCtx());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasId, canvasSessions]);
 

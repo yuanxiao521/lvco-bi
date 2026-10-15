@@ -395,13 +395,20 @@ async def list_canvas_sessions(
     data = []
     for s in items:
         d = AISessionResponse.model_validate(s).model_dump(mode="json", by_alias=True)
-        # Redis 任务态标记：供前端提示「上次对话未完成」（正常完成时 key 已被删除）
+        # 任务态：**一次读取、两个字段**（running / interrupted），与对话入口同一契约。
+        #   · running 是前端"刷新自动续收"的触发条件（缺失则刷新后不会续收）；
+        #   · interrupted 供提示「上次对话未完成」（正常完成时 key 已被删除）。
+        # running 取「本进程注册表 or Redis」：进程内模式靠注册表兜底；画布接队列后
+        # 任务在 worker 进程，本进程注册表不知道它，只能靠 Redis 任务态。
         try:
             task_json = cache_repo.get(f"ai:canvas:task:{s.id}")
-            d["interrupted"] = bool(
-                task_json and json.loads(task_json).get("status") == "interrupted"
-            )
+            status = (json.loads(task_json).get("status") if task_json else None)
+            d["running"] = bool(chat_registry.is_running(str(s.id))) or status == "running"
+            d["interrupted"] = status == "interrupted"
         except Exception:
+            # 任一环节异常（Redis 不可用 / JSON 损坏）都退化为"无任务"：
+            # 绝不因此让接口 500——前端只是不自动续收，手动 resume 仍可用。
+            d["running"] = False
             d["interrupted"] = False
         data.append(d)
     return SuccessResponse(data=data)
@@ -1960,9 +1967,17 @@ async def canvas_ai_chat(
             canvas_owner_ok = True
 
     async def _consume_canvas_task(gen, task_sid: str):
-        """消费任务体的 async generator：文本快照 + 事件广播给订阅者。"""
+        """消费任务体的 async generator：落事件日志 + 文本快照 + 广播给订阅者。
+
+        顺序刻意是"先日志、后注册表"：
+          注册表广播是**实时**的，日志是**可回放**的。若先广播后写日志，断线重连
+          的读者可能刚好在"已广播、未落日志"的缝隙里读到旧游标，那条事件就永久丢了。
+          反过来（先落日志）最坏只是重连时多回放一条，不会丢。
+        """
         acc = ""
         async for ev in gen:
+            # 事件日志：断线续收 / 换进程（队列模式）后按游标回放的唯一依据
+            await event_stream.publish(task_sid, ev)
             if ev.get("type") == "message" and ev.get("delta"):
                 acc += ev["delta"]
                 chat_registry.update_text(task_sid, acc)
@@ -2110,13 +2125,19 @@ async def canvas_ai_chat(
             # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
             yield ({"type": "done", "degraded": stream_degraded})
 
+        # 任务级异常：error 之后必须补一个 done。
+        # 前端只在收到 done 时才解锁输入框（error 不解锁）——只发 error 会让用户
+        # 一直停在"思考中"，直到连接关闭/空闲超时才恢复。画布接队列后尤其明显。
         except AINotConfiguredError:
             yield ({"type": "error", "message": "AI 未配置"})
+            yield ({"type": "done", "degraded": True})
         except AIUpstreamError as e:
             yield ({"type": "error", "message": str(e)})
+            yield ({"type": "done", "degraded": True})
         except Exception as e:
             _log.exception("Canvas AI chat error")
             yield ({"type": "error", "message": f"服务异常: {str(e)}"})
+            yield ({"type": "done", "degraded": True})
         finally:
             # 兜底：客户端断开（CancelledError/GeneratorExit）或异常中断时，
             # 把已产出的文本补存进占位行，并将 Redis 任务态标记为 interrupted。
@@ -2161,16 +2182,34 @@ async def canvas_ai_chat(
         # resume：带 session_id 且有运行中任务 → 不重发消息，直接续收
         if getattr(body, "resume", False) and body.session_id:
             task_sid = str(body.session_id)
-            rt = chat_registry.get(task_sid)
-            if rt is None:
+            # 判定"这一轮还在不在跑"必须**模式无关**（与对话入口同一套逻辑）：
+            #   · 进程内模式：任务在本进程的 chat_registry 里，查得到；
+            #   · 队列模式（画布接队列后）：任务在 **worker 进程**，本进程注册表
+            #     根本不知道它 → 用 is_running 判断会永远为 False，
+            #     表现为"刷新即报已结束、不续收"。
+            # 所以统一以**事件日志**为准：日志里有 done 就是跑完了，没有就继续等。
+            inprocess_running = chat_registry.is_running(task_sid)
+            if not inprocess_running and not await event_stream.has_events(task_sid):
                 yield _sse({"type": "status", "message": "后台任务已结束，画布内容以画布为准", "resumed": True, "finished": True})
                 yield _sse({"type": "done"})
                 return
             yield _sse({"type": "status", "message": "已恢复连接，正在续收后台任务", "resumed": True})
-            if rt.full_text:
-                yield _sse({"type": "message", "delta": rt.full_text})
-            async for ev in chat_registry.subscribe(task_sid):
-                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+            # 回放 + 续读：与对话入口/队列模式共用同一段实现（_stream_from_event_log）。
+            # idle_stop 只在进程内模式下有意义（注册表没了＝跑完了）；否则靠日志里的
+            # done 或「无进展上限」兜底退出。
+            # 注意：canvas_action 在**回放**时会被跳过（非幂等副作用，重复落块）——
+            # 画布真值已在 DB，前端收到 resumed 时会 refreshCanvas 对齐。
+            idle_stop = (
+                (lambda: not chat_registry.is_running(task_sid))
+                if inprocess_running
+                else None
+            )
+            async for line in _stream_from_event_log(
+                task_sid,
+                idle_stop=idle_stop,
+                max_idle_seconds=None if inprocess_running else await _queue_idle_cap(),
+            ):
+                yield line
             return
         task_launched = False
         try:
@@ -2313,6 +2352,12 @@ async def canvas_ai_chat(
             assistant_msg_id = assistant_msg.id if assistant_msg is not None else None
             user_msg_id = user_msg_model.id if (session_id and body.message.strip()) else None
             task_sid = str(session_id) if session_id else f"anon-{uuid.uuid4()}"
+            # 清上一轮事件日志（必须在**启动任务之前**，理由同对话入口：
+            # 任务一旦启动就会立刻写日志，先启动后清空会擦掉新事件，回放缺开头）。
+            try:
+                await event_stream.clear(task_sid)
+            except Exception:
+                _log.debug("canvas event stream clear failed", exc_info=True)
             task_launched = chat_registry.start(
                 task_sid,
                 lambda: _consume_canvas_task(_canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token), task_sid),
