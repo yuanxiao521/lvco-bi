@@ -126,6 +126,223 @@ interface CanvasAssistantStore {
   clearPendingConfirm: () => void;
 }
 
+/** 一条流内的可变累积状态（send / resumeStream 各自持有一份）。 */
+interface CanvasStreamState {
+  assistantContent: string;
+  localCanvasActions: number;
+}
+
+/** 事件分发所需的运行时依赖（由调用方按自己的上下文组装）。 */
+interface CanvasEventApi {
+  /** zustand 的 set（本文件内事件处理只用到 partial/updater 两种形态） */
+  set: (partial: any) => void;
+  get: () => CanvasAssistantStore;
+  ctx: CanvasAssistantCtx;
+  /** 当前画布 id：send 里会被 ensureCanvas 改写，故用取值函数而非快照 */
+  effCanvasId: () => string | null;
+  state: CanvasStreamState;
+  patchAssistant: (content: string) => void;
+  /** done 的收尾动作（解锁/释放流锁），由调用方决定 */
+  onDone: () => void;
+  /** send 与 resume 的**极少数**差异点，见下方 message 分支 */
+  mode: "send" | "resume";
+}
+
+/**
+ * 画布 SSE 事件的**唯一**分发实现。
+ *
+ * 【为什么必须只有一份】原先 send 与 resumeStream 各手抄了一份 switch：
+ *   · send 覆盖 intent/decision/progress/tool_call/tool_result/... → 工作台(meta+steps)有内容；
+ *   · resumeStream 只处理 status/message/error/done → **刷新续收后工作台是空的**。
+ * 两份手抄表迟早会跑偏，而且这种跑偏不会报错、只会"少显示点东西"，最难发现。
+ * 所以合并成一份：以后新增事件类型只改这里，两条路径同时生效。
+ *
+ * 两种模式仅允许两处差异（其余必须完全一致）：
+ *   1) message 分支的兜底文案过滤：仅 send（保持既有行为不变）；
+ *   2) done 的收尾：由 onDone 回调交给调用方。
+ */
+function applyCanvasEvent(event: any, api: CanvasEventApi): void {
+  const { set, get, ctx, state, patchAssistant, onDone } = api;
+  switch (event.type) {
+    case "status": {
+      // 续收专用：后端在回放之前先告知"是否真的恢复了后台任务"
+      if (!event.resumed) break;
+      if (event.finished) {
+        patchAssistant("[后台任务已结束，画布内容以画布为准]");
+      } else {
+        patchAssistant("[已恢复连接，正在续收后台任务]");
+        ctx.refreshCanvas?.();
+      }
+      break;
+    }
+    case "intent":
+      set((s: CanvasAssistantStore) => ({ meta: { ...(s.meta ?? {}), intent: event.intent, intentConfidence: event.confidence, degraded: event.degraded ?? s.meta?.degraded } }));
+      break;
+    case "decision":
+      set((s: CanvasAssistantStore) => ({ meta: { ...(s.meta ?? {}), decision: event.action, decisionTool: event.tool, decisionReason: event.reason, degraded: event.degraded ?? s.meta?.degraded } }));
+      break;
+    case "progress": {
+      const pIdx = Number(event.index ?? 0);
+      const pTotal = Number(event.total ?? 0);
+      // 带 round 前缀，避免多轮循环下第二轮 index 覆盖第一轮步骤
+      const pRound = Number(event.round ?? 0);
+      // react 模式的 per-tool progress（total=0）与 tool_call/tool_result 完全冗余：
+      // 每个工具各建一个"执行 xxx"step，把执行记录压成一串无层级平铺行。忽略之，
+      // 工具状态由 tool_call/tool_result 驱动；编排器的 plan 级 progress（total>0，
+      // 有真实的 1/n 步骤语义）仍保留建 step。
+      if (!(pTotal > 0)) break;
+      const stepId = `p${pRound}_${pIdx}`;
+      set((s: CanvasAssistantStore) => {
+        const base = {
+          title: String(event.title ?? "执行中"),
+          // 后端 index 为 1-based（lead_perception idx 从 1 起步），直接展示，不要 +1
+          seq: pTotal > 0 ? `${pIdx}/${pTotal}` : undefined,
+          emphasis: event.status === "start",
+        };
+        const existing = s.steps.find((st) => st.id === stepId);
+        if (existing) {
+          return { steps: s.steps.map((st) => (st.id === stepId ? { ...st, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: st.tools } : st)) };
+        }
+        return { steps: [...s.steps, { id: stepId, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: [] }] };
+      });
+      break;
+    }
+    case "message": {
+      const delta = event.delta ?? "";
+      // 后端在"LLM 没产纯文本"时会补一句兜底文案；send 路径按既有行为过滤掉它。
+      // resume 不过滤：回放时若整轮只有这句兜底文案，过滤掉会让气泡空着（更糟）。
+      if (api.mode === "send" && (delta.includes("已在画布生成分析报告") || delta.includes("图表与叙事段落已就位"))) break;
+      state.assistantContent += delta;
+      patchAssistant(state.assistantContent);
+      break;
+    }
+    case "tool_call": {
+      const name = event?.name ?? "工具";
+      const stage = TOOL_STAGE(name);
+      set((s: CanvasAssistantStore) => {
+        const next = s.steps.slice();
+        // 阶段分桶：找本次流内最后一个同阶段 step 聚合（"阶段 → 工具"两级层级），
+        // 替代旧的"永远 append 到最后一个 step"——那会把所有工具塞进同一个无语义的
+        // "执行 分析执行" step，整个执行记录变成一串平铺的同名行。
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].title === stage) {
+            next[i] = {
+              ...next[i],
+              tools: [...next[i].tools, { name, args: event.args, status: "run" }],
+              status: next[i].status === "done" ? "run" : next[i].status,
+            };
+            return { steps: next };
+          }
+        }
+        runSeq += 1;
+        next.push({ id: `${runSeq}`, title: stage, status: "run", tools: [{ name, args: event.args, status: "run" }] });
+        return { steps: next };
+      });
+      break;
+    }
+    case "tool_result": {
+      const isErr = (() => {
+        try {
+          const r = event.result ? JSON.parse(event.result) : null;
+          return !!(r && r.error);
+        } catch { return false; }
+      })();
+      const tName = event.name ?? "";
+      const settle = (st: FeedStep): FeedStep => {
+        // step 内全部工具已收尾 → step 置 done（不等 done 事件统一收敛，实时反映）
+        const allSettled = st.tools.length > 0 && st.tools.every((t) => t.status !== "run");
+        const anyErr = st.tools.some((t) => t.status === "err");
+        if (allSettled) return { ...st, status: anyErr && st.status === "run" ? "failed" : "done" };
+        return st;
+      };
+      set((s: CanvasAssistantStore) => {
+        for (let si = s.steps.length - 1; si >= 0; si--) {
+          const step = s.steps[si];
+          for (let ti = step.tools.length - 1; ti >= 0; ti--) {
+            if (step.tools[ti].name === tName && step.tools[ti].status === "run") {
+              const next = s.steps.slice();
+              const newTools = step.tools.slice();
+              newTools[ti] = { ...newTools[ti], result: event.result, status: isErr ? "err" : "ok" };
+              next[si] = settle({ ...step, tools: newTools });
+              return { steps: next };
+            }
+          }
+        }
+        return {
+          steps: s.steps.map((st, i) =>
+            i === s.steps.length - 1
+              ? settle({ ...st, tools: st.tools.map((t, j) => (j === st.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t)) })
+              : st,
+          ),
+        };
+      });
+      break;
+    }
+    case "confirm_request": {
+      // HITL 确认卡片：后端 ask_user(ask_kind=confirm) 的载荷。
+      // 用户点按钮 → 带 ui_action 的下一请求由后端守卫短路恢复/取消。
+      set({
+        pendingConfirm: {
+          goal: String(event.goal ?? ""),
+          question: String(event.question ?? ""),
+        },
+      });
+      break;
+    }
+    case "canvas_action": {
+      state.localCanvasActions += 1;
+      // 画布动作不再拼进对话正文：逐条 += 会产出「已删除块: 块 xxx 已删除」
+      // 这类冗余回执（且 ACTION_LABEL 与 desc 表述重复），污染对话观感。
+      // 工具调用本身已由 tool_call / tool_result 记入执行记录（steps），
+      // 画布上的增删改本身也是可见反馈，无需在正文里再念一遍。
+      if (ctx.onCanvasAction) ctx.onCanvasAction(event);
+      break;
+    }
+    case "query_result":
+      patchAssistant(state.assistantContent);
+      break;
+    case "query_error":
+      state.assistantContent += `\n\n> ${event.message}`;
+      patchAssistant(state.assistantContent);
+      break;
+    case "chart_config":
+      state.assistantContent += `\n\n[图表配置已应用]`;
+      patchAssistant(state.assistantContent);
+      if (ctx.onApplyChartConfig && event.config) ctx.onApplyChartConfig(event.config);
+      break;
+    case "chart_config_error":
+      state.assistantContent += `\n\n> ${event.message}`;
+      patchAssistant(state.assistantContent);
+      break;
+    case "error":
+      state.assistantContent += `\n\n> ${event.message}`;
+      patchAssistant(state.assistantContent);
+      break;
+    case "session_created":
+      get().applySession(event.session_id);
+      void get().refreshSessions(api.effCanvasId());
+      break;
+    case "done": {
+      // done 收敛：工作台所有 step 置为完成（run/wait → done），避免残留"执行中"或"2/x"
+      set((s: CanvasAssistantStore) => ({
+        steps: s.steps.map((st) =>
+          st.status === "run" || st.status === "wait"
+            ? {
+                ...st,
+                status: "done",
+                tools: st.tools.map((t) => (t.status === "run" ? { ...t, status: "ok" } : t)),
+              }
+            : st,
+        ),
+      }));
+      onDone();
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get) => ({
   messages: [buildWelcome(null, null)],
   steps: [],
@@ -313,9 +530,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         { id: assistantId, role: "assistant", content: "" },
       ],
     }));
-
-    let assistantContent = "";
-    let localCanvasActions = 0;
+      const streamState: CanvasStreamState = { assistantContent: "", localCanvasActions: 0 };
     // 流空闲看门狗状态：写在 try 外，finally 才能读到（try 块内的 let 不跨块可见）
     let stallTimer: ReturnType<typeof setTimeout> | null = null;
     let stalled = false;
@@ -407,172 +622,13 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         if (!jsonStr) return;
         let event: any;
         try { event = JSON.parse(jsonStr); } catch { return; }
-        switch (event.type) {
-          case "intent":
-            set((s) => ({ meta: { ...(s.meta ?? {}), intent: event.intent, intentConfidence: event.confidence, degraded: event.degraded ?? s.meta?.degraded } }));
-            break;
-          case "decision":
-            set((s) => ({ meta: { ...(s.meta ?? {}), decision: event.action, decisionTool: event.tool, decisionReason: event.reason, degraded: event.degraded ?? s.meta?.degraded } }));
-            break;
-          case "progress": {
-            const pIdx = Number(event.index ?? 0);
-            const pTotal = Number(event.total ?? 0);
-            // 带 round 前缀，避免多轮循环下第二轮 index 覆盖第一轮步骤
-            const pRound = Number(event.round ?? 0);
-            // react 模式的 per-tool progress（total=0）与 tool_call/tool_result 完全冗余：
-            // 每个工具各建一个"执行 xxx"step，把执行记录压成一串无层级平铺行。忽略之，
-            // 工具状态由 tool_call/tool_result 驱动；编排器的 plan 级 progress（total>0，
-            // 有真实的 1/n 步骤语义）仍保留建 step。
-            if (!(pTotal > 0)) break;
-            const stepId = `p${pRound}_${pIdx}`;
-            set((s) => {
-              const base = {
-                title: String(event.title ?? "执行中"),
-                // 后端 index 为 1-based（lead_perception idx 从 1 起步），直接展示，不要 +1
-                seq: pTotal > 0 ? `${pIdx}/${pTotal}` : undefined,
-                emphasis: event.status === "start",
-              };
-              const existing = s.steps.find((st) => st.id === stepId);
-              if (existing) {
-                return { steps: s.steps.map((st) => (st.id === stepId ? { ...st, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: st.tools } : st)) };
-              }
-              return { steps: [...s.steps, { id: stepId, ...base, status: mapProgressStatus(String(event.status ?? "wait")), tools: [] }] };
-            });
-            break;
-          }
-          case "message": {
-            const delta = event.delta ?? "";
-            if (delta.includes("已在画布生成分析报告") || delta.includes("图表与叙事段落已就位")) break;
-            assistantContent += delta;
-            patchAssistant(assistantContent);
-            break;
-          }
-          case "tool_call": {
-            const name = event?.name ?? "工具";
-            const stage = TOOL_STAGE(name);
-            set((s) => {
-              const next = s.steps.slice();
-              // 阶段分桶：找本次流内最后一个同阶段 step 聚合（"阶段 → 工具"两级层级），
-              // 替代旧的"永远 append 到最后一个 step"——那会把所有工具塞进同一个无语义的
-              // "执行 分析执行" step，整个执行记录变成一串平铺的同名行。
-              for (let i = next.length - 1; i >= 0; i--) {
-                if (next[i].title === stage) {
-                  next[i] = {
-                    ...next[i],
-                    tools: [...next[i].tools, { name, args: event.args, status: "run" }],
-                    status: next[i].status === "done" ? "run" : next[i].status,
-                  };
-                  return { steps: next };
-                }
-              }
-              runSeq += 1;
-              next.push({ id: `${runSeq}`, title: stage, status: "run", tools: [{ name, args: event.args, status: "run" }] });
-              return { steps: next };
-            });
-            break;
-          }
-          case "tool_result": {
-            const isErr = (() => {
-              try {
-                const r = event.result ? JSON.parse(event.result) : null;
-                return !!(r && r.error);
-              } catch { return false; }
-            })();
-            const tName = event.name ?? "";
-            const settle = (st: FeedStep): FeedStep => {
-              // step 内全部工具已收尾 → step 置 done（不等 done 事件统一收敛，实时反映）
-              const allSettled = st.tools.length > 0 && st.tools.every((t) => t.status !== "run");
-              const anyErr = st.tools.some((t) => t.status === "err");
-              if (allSettled) return { ...st, status: anyErr && st.status === "run" ? "failed" : "done" };
-              return st;
-            };
-            set((s) => {
-              for (let si = s.steps.length - 1; si >= 0; si--) {
-                const step = s.steps[si];
-                for (let ti = step.tools.length - 1; ti >= 0; ti--) {
-                  if (step.tools[ti].name === tName && step.tools[ti].status === "run") {
-                    const next = s.steps.slice();
-                    const newTools = step.tools.slice();
-                    newTools[ti] = { ...newTools[ti], result: event.result, status: isErr ? "err" : "ok" };
-                    next[si] = settle({ ...step, tools: newTools });
-                    return { steps: next };
-                  }
-                }
-              }
-              return {
-                steps: s.steps.map((st, i) =>
-                  i === s.steps.length - 1
-                    ? settle({ ...st, tools: st.tools.map((t, j) => (j === st.tools.length - 1 ? { ...t, result: event.result, status: isErr ? "err" : "ok" } : t)) })
-                    : st,
-                ),
-              };
-            });
-            break;
-          }
-          case "confirm_request": {
-            // HITL 确认卡片：后端 ask_user(ask_kind=confirm) 的载荷。
-            // 用户点按钮 → 带 ui_action 的下一请求由后端守卫短路恢复/取消。
-            set({
-              pendingConfirm: {
-                goal: String(event.goal ?? ""),
-                question: String(event.question ?? ""),
-              },
-            });
-            break;
-          }
-          case "canvas_action": {
-            localCanvasActions += 1;
-            // 画布动作不再拼进对话正文：逐条 += 会产出「已删除块: 块 xxx 已删除」
-            // 这类冗余回执（且 ACTION_LABEL 与 desc 表述重复），污染对话观感。
-            // 工具调用本身已由 tool_call / tool_result 记入执行记录（steps），
-            // 画布上的增删改本身也是可见反馈，无需在正文里再念一遍。
-            if (ctx.onCanvasAction) ctx.onCanvasAction(event);
-            break;
-          }
-          case "query_result":
-            patchAssistant(assistantContent);
-            break;
-          case "query_error":
-            assistantContent += `\n\n> ${event.message}`;
-            patchAssistant(assistantContent);
-            break;
-          case "chart_config":
-            assistantContent += `\n\n[图表配置已应用]`;
-            patchAssistant(assistantContent);
-            if (ctx.onApplyChartConfig && event.config) ctx.onApplyChartConfig(event.config);
-            break;
-          case "chart_config_error":
-            assistantContent += `\n\n> ${event.message}`;
-            patchAssistant(assistantContent);
-            break;
-          case "error":
-            assistantContent += `\n\n> ${event.message}`;
-            patchAssistant(assistantContent);
-            break;
-          case "session_created":
-            get().applySession(event.session_id);
-            void get().refreshSessions(effCanvasId);
-            break;
-          case "done": {
-            // done 收敛：工作台所有 step 置为完成（run/wait → done），避免残留"执行中"或"2/x"
-            set((s) => ({
-              steps: s.steps.map((st) =>
-                st.status === "run" || st.status === "wait"
-                  ? {
-                      ...st,
-                      status: "done",
-                      tools: st.tools.map((t) => (t.status === "run" ? { ...t, status: "ok" } : t)),
-                    }
-                  : st,
-              ),
-            }));
-            streamingLock = false;
-            set({ isStreaming: false });
-            break;
-          }
-          default:
-            break;
-        }
+        applyCanvasEvent(event, {
+          set, get, ctx, state: streamState,
+          effCanvasId: () => effCanvasId,
+          patchAssistant,
+          onDone: () => { streamingLock = false; set({ isStreaming: false }); },
+          mode: "send",
+        });
       };
 
       while (true) {
@@ -608,9 +664,9 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       patchAssistant(`[连接失败] ${msg}`);
     } finally {
       // 流结束但 AI 没有生成任何文本 → 用本轮画布动作数生成兜底文案
-      if (!assistantContent.trim() && localCanvasActions > 0) {
-        assistantContent = `本次分析通过画布工具完成：在画布执行 ${localCanvasActions} 次落块操作，请查看画布内容与工作台执行记录。`;
-        patchAssistant(assistantContent);
+      if (!streamState.assistantContent.trim() && streamState.localCanvasActions > 0) {
+        streamState.assistantContent = `本次分析通过画布工具完成：在画布执行 ${streamState.localCanvasActions} 次落块操作，请查看画布内容与工作台执行记录。`;
+        patchAssistant(streamState.assistantContent);
       }
       activeCancel = null;
       if (stallTimer) clearTimeout(stallTimer);
@@ -618,10 +674,10 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       if (stalled) {
         // 后端长时间静默：明确告知已中断，而不是让气泡永远停在"思考中"
         patchAssistant(
-          (assistantContent ? assistantContent + "\n\n" : "") +
+          (streamState.assistantContent ? streamState.assistantContent + "\n\n" : "") +
             `> 响应超时：后端 ${Math.round(STREAM_IDLE_MS / 1000)} 秒无输出，已中断本轮。请重试或换个问法。`,
         );
-      } else if (abortRequested && !assistantContent.trim()) {
+      } else if (abortRequested && !streamState.assistantContent.trim()) {
         patchAssistant("> 已停止本轮生成。");
       }
       abortRequested = false;
@@ -649,7 +705,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     const token = tokenStore.getAccess();
     const controller = new AbortController();
     activeCancel = () => { try { controller.abort(); } catch { /* ignore */ } };
-    let assistantContent = "";
+      const streamState: CanvasStreamState = { assistantContent: "", localCanvasActions: 0 };
     try {
       const response = await fetch(`${baseUrl}/ai/canvas/chat`, {
         method: "POST",
@@ -670,29 +726,13 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         if (!line.startsWith("data: ")) return;
         let event: any;
         try { event = JSON.parse(line.slice(6).trim()); } catch { return; }
-        switch (event.type) {
-          case "status":
-            if (event.resumed) {
-              if (event.finished) {
-                patchAssistant("[后台任务已结束，画布内容以画布为准]");
-              } else {
-                patchAssistant("[已恢复连接，正在续收后台任务]");
-                ctx.refreshCanvas?.();
-              }
-            }
-            break;
-          case "message": {
-            const delta = event.delta ?? "";
-            assistantContent += delta;
-            patchAssistant(assistantContent);
-            break;
-          }
-          case "error":
-            patchAssistant(assistantContent ? assistantContent + `\n\n> ${event.message}` : `> ${event.message}`);
-            break;
-          case "done":
-            break;
-        }
+        applyCanvasEvent(event, {
+          set, get, ctx, state: streamState,
+          effCanvasId: () => ctx.canvasId ?? null,
+          patchAssistant,
+          onDone: () => { streamingLock = false; set({ isStreaming: false }); },
+          mode: "resume",
+        });
       };
       while (true) {
         const { done, value } = await reader.read();

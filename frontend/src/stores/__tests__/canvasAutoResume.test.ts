@@ -54,6 +54,18 @@ function sseResponse(): Response {
   return { ok: true, status: 200, body } as unknown as Response;
 }
 
+/** 把任意事件数组拼成一条 SSE 响应（用于验证各类事件在续收路径上的处理）。 */
+function sseFrom(events: Record<string, unknown>[]): Response {
+  const payload = events.map((e) => 'data: ' + JSON.stringify(e) + '\n\n').join('');
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(payload));
+      controller.close();
+    },
+  });
+  return { ok: true, status: 200, body } as unknown as Response;
+}
+
 /** 让 store 处于"刷新后刚进画布"的初始态 */
 async function enterCanvas(canvasId: string, sessionId: string, running: boolean) {
   vi.mocked(listCanvasSessions).mockResolvedValue(
@@ -113,5 +125,36 @@ describe('画布助手：刷新自动续收', () => {
     await useCanvasAssistantStore.getState().onCanvasReady('canvas-C');
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('续收会填充工作台（meta + steps）—— 事件表只有一份，两条路径共享', async () => {
+    // 【回归】原先 resumeStream 只处理 status/message/error/done，
+    // 于是刷新续收后 meta/steps 全空 → 面板里的 agent 工作台整个消失。
+    // 现在 send 与 resumeStream 共用同一个 applyCanvasEvent，这里钉死续收路径也有工作台。
+    await enterCanvas('canvas-W', 'sess-W', true);
+    fetchMock.mockResolvedValue(
+      sseFrom([
+        { type: 'status', resumed: true, message: '已恢复连接' },
+        { type: 'intent', intent: 'data_query', confidence: 0.9 },
+        { type: 'progress', round: 1, index: 1, total: 3, title: '执行查询', status: 'start' },
+        { type: 'tool_call', name: 'run_query', args: { sql: 'select 1' } },
+        { type: 'tool_result', name: 'run_query', result: '{"rows":1}' },
+        { type: 'message', delta: '查询完成' },
+        { type: 'done' },
+      ]),
+    );
+
+    await useCanvasAssistantStore.getState().onCanvasReady('canvas-W', ctxFor('canvas-W'));
+
+    const s = useCanvasAssistantStore.getState();
+    expect(s.meta?.intent).toBe('data_query');
+    expect(s.steps.length).toBeGreaterThan(0);
+    // FeedStep 未声明 seq（生产代码在 progress 分支里动态挂上），故此处按结构断言
+    expect(s.steps.some((st) => (st as unknown as { seq?: string }).seq === '1/3')).toBe(true);
+    expect(
+      s.steps.some((st) => st.tools.some((t) => t.name === 'run_query' && t.status === 'ok')),
+    ).toBe(true);
+    // 文本仍要正常流入
+    expect(s.messages.some((m) => m.content.includes('查询完成'))).toBe(true);
   });
 });
