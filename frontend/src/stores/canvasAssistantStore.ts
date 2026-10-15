@@ -110,8 +110,9 @@ interface CanvasAssistantStore {
   refreshSessions: (canvasId: string | null) => Promise<void>;
   /** 真正切换画布：清空会话状态防串记忆 */
   resetForCanvas: (ctx: CanvasAssistantCtx) => void;
-  /** 挂载/会话列表就绪后恢复最近会话的历史（切回画布时恢复对话） */
-  onCanvasReady: (canvasId: string | null) => Promise<void>;
+  /** 挂载/会话列表就绪后恢复最近会话的历史（切回画布时恢复对话）。
+   *  ctx 可选：传入后若该会话的后端任务仍在跑，会自动续收（刷新不丢进度）。 */
+  onCanvasReady: (canvasId: string | null, ctx?: CanvasAssistantCtx) => Promise<void>;
   /** 轻量切换当前会话引用 */
   applySession: (sid: string | null) => void;
   /** 新对话（1:1 画布会话：清空界面，下一次发送后端复用唯一会话并清空历史） */
@@ -221,7 +222,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     }
   },
 
-  onCanvasReady: async (canvasId) => {
+  onCanvasReady: async (canvasId, ctx) => {
     if (!canvasId || get().sessionsLoaded) return;
     // 流进行中禁止历史恢复：DB 里的 assistant 正文要等流结束才落库，此刻恢复会把
     // 流中的 assistant 占位整体覆盖（patchAssistant 随后全部 MISS，回复整条丢失）。
@@ -253,6 +254,17 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     } catch {
       if (activeCanvasId === canvasId) {
         get().applySession(null);
+      }
+    }
+    // 后台续跑：刷新/断线后该会话后端任务仍在跑 → 自动续收（不新增用户消息）。
+    // 与对话助手同一契约：running 由后端会话列表给出（进程内注册表 or Redis 任务态），
+    // 画布接队列后任务在 worker 进程，同样成立。
+    // 位置必须在历史加载**之后**：先恢复 DB 历史，续收回放的事件才追加在其后；
+    // 反过来的话，续收创建的空 assistant 气泡会被随后的历史 set 覆盖掉。
+    if (ctx) {
+      const sess = get().canvasSessions.find((s) => s.id === sid);
+      if (sess?.running && !get().isStreaming) {
+        await get().resumeStream(ctx);
       }
     }
   },
