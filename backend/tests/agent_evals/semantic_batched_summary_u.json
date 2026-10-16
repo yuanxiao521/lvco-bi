@@ -1,0 +1,297 @@
+{
+  "weighted_hit": 82,
+  "weighted_reachable": 85,
+  "weighted_pct": 96.5,
+  "mean_pct": 96.5,
+  "all_pass": 17,
+  "total": 20,
+  "per_question": {
+    "V011": {
+      "question_id": "V011",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['kpi_card', 'bar', 'line'] 实际['kpi_card', 'line', 'donut', 'horizontal_bar', 'grouped_bar']",
+        "block_count✓ 实际9 期望≥3",
+        "answer✓(1/1)"
+      ]
+    },
+    "V012": {
+      "question_id": "V012",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'line', 'grouped_bar'] 实际['kpi_card', 'line', 'grouped_bar']",
+        "block_count✓ 实际6 期望≥1",
+        "answer✓(1/1)"
+      ]
+    },
+    "V013": {
+      "question_id": "V013",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'line', 'kpi_card'] 实际['kpi_card', 'bar', 'line']",
+        "block_count✓ 实际5 期望≥2",
+        "answer✓(2/2)"
+      ]
+    },
+    "V014": {
+      "question_id": "V014",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['kpi_card', 'bar', 'line'] 实际['kpi_card', 'grouped_bar', 'line', 'bar']",
+        "block_count✓ 实际8 期望≥3",
+        "answer✓(2/2)"
+      ]
+    },
+    "V015": {
+      "question_id": "V015",
+      "score": 0.8,
+      "overall": false,
+      "passed": 4,
+      "reachable": 5,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['line', 'bar'] 实际['line'] 缺['bar']",
+        "block_count✓ 实际3 期望≥1",
+        "update_used✗ (期望出现过 update_chart_block 成功调用)",
+        "answer✓(2/2)"
+      ]
+    },
+    "V016": {
+      "question_id": "V016",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['line', 'bar'] 实际['line'] 缺['bar']",
+        "block_count✓ 实际2 期望≥1",
+        "answer✓(1/1)"
+      ]
+    },
+    "V017": {
+      "question_id": "V017",
+      "score": 1.0,
+      "overall": true,
+      "passed": 5,
+      "reachable": 5,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['line'] 实际['line']",
+        "block_count✓ 实际2 期望≥1",
+        "update_used✓ (期望出现过 update_chart_block 成功调用)",
+        "answer✓(1/1)"
+      ]
+    },
+    "V018": {
+      "question_id": "V018",
+      "score": 1.0,
+      "overall": true,
+      "passed": 5,
+      "reachable": 5,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['line'] 实际['line']",
+        "block_count✓ 实际5 期望≥1",
+        "update_used✓ (期望出现过 update_chart_block 成功调用)",
+        "answer✓(2/2)"
+      ]
+    },
+    "V019": {
+      "question_id": "V019",
+      "score": 0.75,
+      "overall": false,
+      "passed": 3,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'horizontal_bar'] 实际['horizontal_bar']",
+        "block_count✓ 实际2 期望≥2",
+        "回答缺要点(['排名', '产品'])"
+      ]
+    },
+    "V020": {
+      "question_id": "V020",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['pie', 'donut', 'kpi_card'] 实际['kpi_card', 'pie']",
+        "block_count✓ 实际5 期望≥3",
+        "answer✓(2/2)"
+      ]
+    },
+    "P001": {
+      "question_id": "P001",
+      "score": 0.75,
+      "overall": false,
+      "passed": 3,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✗ 期望['kpi_card', 'bar', 'line'] 实际['kpi_card', 'grouped_bar', 'horizontal_bar'] 缺['line']",
+        "block_count✓ 实际9 期望≥3",
+        "answer✓(2/2)"
+      ]
+    },
+    "P002": {
+      "question_id": "P002",
+      "score": 1.0,
+      "overall": true,
+      "passed": 5,
+      "reachable": 5,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar'] 实际['bar']",
+        "block_count✓ 实际4 期望≥1",
+        "update_used✓ (期望出现过 update_chart_block 成功调用)",
+        "answer✓(1/1)"
+      ]
+    },
+    "P003": {
+      "question_id": "P003",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'horizontal_bar'] 实际['bar']",
+        "block_count✓ 实际2 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P004": {
+      "question_id": "P004",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'scatter', 'line'] 实际['kpi_card', 'grouped_bar', 'scatter'] 缺['line']",
+        "block_count✓ 实际10 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P005": {
+      "question_id": "P005",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['pie', 'donut'] 实际['donut']",
+        "block_count✓ 实际2 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P006": {
+      "question_id": "P006",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'grouped_bar'] 实际['grouped_bar']",
+        "block_count✓ 实际6 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P007": {
+      "question_id": "P007",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar', 'line', 'kpi_card'] 实际['kpi_card', 'bar', 'horizontal_bar', 'grouped_bar'] 缺['line']",
+        "block_count✓ 实际7 期望≥2",
+        "answer✓(2/2)"
+      ]
+    },
+    "P008": {
+      "question_id": "P008",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['horizontal_bar', 'bar'] 实际['horizontal_bar']",
+        "block_count✓ 实际2 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P009": {
+      "question_id": "P009",
+      "score": 1.0,
+      "overall": true,
+      "passed": 4,
+      "reachable": 4,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['line', 'bar'] 实际['kpi_card', 'line', 'donut'] 缺['bar']",
+        "block_count✓ 实际7 期望≥1",
+        "answer✓(2/2)"
+      ]
+    },
+    "P010": {
+      "question_id": "P010",
+      "score": 1.0,
+      "overall": true,
+      "passed": 5,
+      "reachable": 5,
+      "details": [
+        "metrics(画布引用): metrics✓",
+        "chart_types✓ 期望['bar'] 实际['bar']",
+        "block_count✓ 实际2 期望≥1",
+        "update_used✓ (期望出现过 update_chart_block 成功调用)",
+        "answer✓(1/1)"
+      ]
+    }
+  },
+  "attempts": {
+    "V011": 1,
+    "V012": 1,
+    "V013": 1,
+    "V014": 1,
+    "V015": 1,
+    "V016": 1,
+    "V017": 1,
+    "V018": 1,
+    "V019": 1,
+    "V020": 1,
+    "P001": 1,
+    "P002": 1,
+    "P003": 1,
+    "P004": 1,
+    "P005": 1,
+    "P006": 1,
+    "P007": 1,
+    "P008": 1,
+    "P009": 1,
+    "P010": 1
+  }
+}

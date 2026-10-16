@@ -26,6 +26,8 @@ BATCHES = [
     ["P009", "P010"],
 ]
 MAX_RETRY = 2
+# 腿标签：legacy / unified 两条腿的输出必须分开，否则互相覆盖
+TAG = (sys.argv[1] if len(sys.argv) > 1 else "b")
 LLM_FAIL_MARKS = ("LLM 502", "LLM 503", "LLM 429", "upstream unreachable")
 
 
@@ -36,6 +38,10 @@ def run(ids: list[str], tag: str):
     p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     log = (p.stdout or "") + (p.stderr or "")
+    # 留存原始输出：调用次数（[llm] call model=）要从这里数，评测本身不报
+    logdir = ROOT / "eval_logs"
+    logdir.mkdir(exist_ok=True)
+    (logdir / f"{tag}.log").write_text(log, encoding="utf-8")
     res = OUTDIR / f"semantic_results_{tag}.jsonl"
     rows = []
     if res.exists():
@@ -48,6 +54,7 @@ def run(ids: list[str], tag: str):
 
 
 def main() -> int:
+    print(f"腿标签 = {TAG}", flush=True)
     best: dict[str, dict] = {}
     attempts: dict[str, int] = {}
 
@@ -56,7 +63,7 @@ def main() -> int:
         for attempt in range(MAX_RETRY + 1):
             if not todo:
                 break
-            tag = f"b{bi}" if attempt == 0 else f"b{bi}r{attempt}"
+            tag = f"{TAG}{bi}" if attempt == 0 else f"{TAG}{bi}r{attempt}"
             print(f"批次 {bi} 第 {attempt+1} 次：{todo}", flush=True)
             rows, llm_failed = run(todo, tag)
             still = []
@@ -100,7 +107,7 @@ def main() -> int:
     print(f"平均达成 = {mean_pct:.1f}%")
     print(f"全过 = {allpass}/{len(order)}")
     print(f"需重试的题 = {[q for q in order if attempts.get(q,0) > 1]}")
-    (OUTDIR / "semantic_batched_summary.json").write_text(json.dumps({
+    (OUTDIR / f"semantic_batched_summary_{TAG}.json").write_text(json.dumps({
         "weighted_hit": hit, "weighted_reachable": reach,
         "weighted_pct": round(hit / reach * 100, 1) if reach else None,
         "mean_pct": round(mean_pct, 1),
@@ -108,7 +115,7 @@ def main() -> int:
         "per_question": {q: best.get(q) for q in order},
         "attempts": attempts,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
-    print("明细: tests/agent_evals/semantic_batched_summary.json")
+    print(f"明细: tests/agent_evals/semantic_batched_summary_{TAG}.json")
     return 0
 
 
