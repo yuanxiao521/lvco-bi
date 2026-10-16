@@ -58,6 +58,26 @@ class RunAnalysisResult:
     tool_chain: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class SubtaskAssessment:
+    """结构化评审结果（P0 抽出的「能力接口」）。
+
+    为什么需要分级：P2 的评审阶段要区分「事实性失败」与「存疑」——
+      · HARD 是**硬闸**：非空则 verdict 强制 fail，Lead **不得翻案**（零 LLM）；
+      · SOFT 才需要 Lead 裁量（仅 SOFT 非空时触发一次裁量调用）。
+    同时保留 text：旧通道（写入 turn_summaries）的文本格式**逐字节不变**。
+    """
+
+    text: str
+    hard: list[str] = field(default_factory=list)
+    soft: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        """既无 HARD 也无 SOFT → 达标。"""
+        return not self.hard and not self.soft
+
+
 def make_idempotency_key(args: RunAnalysisArgs) -> str:
     """同目标 + 同数据源/画布 + 同入口 → 同一幂等键。"""
     raw = f"{args.goal}|{args.datasource_id}|{args.canvas_id}|{args.entry}"
@@ -65,33 +85,36 @@ def make_idempotency_key(args: RunAnalysisArgs) -> str:
     return f"run_analysis:{digest}"
 
 
-def assess_subtask(result: RunAnalysisResult, *, entry: str = "chat", user_goal: str = "") -> str:
-    """确定性评审：从子任务产物判定「是否达标」，返回一行带前缀的评估文本。
+def assess_subtask_detail(
+    result: RunAnalysisResult, *, entry: str = "chat", user_goal: str = ""
+) -> SubtaskAssessment:
+    """确定性评审的**结构化**版本：text 与旧 assess_subtask 逐字节一致，另附 HARD/SOFT 分级。
 
-    不达标判定（任一命中即不达标，纯规则、零 LLM）：
-      - 执行失败（success=False）
-      - 报告数字未通过后验（verified=False）
-      - 工具链中存在失败项（ok=False）
-      - 画布入口但成功却零落块（该干活的没落到画布上）
-      - 画布入口且用户点名了多个维度，但已落图表的维度覆盖不全（如点名
-        品类/品牌/季节，只落了品类）——防止 Supervisor 看到"缺维度"却因
-        "工具全成功"判达标而提前 stop（P001 实测踩坑）
-    输出写入 turn_summaries（前缀 [子任务评估]），由决策器单独注入 prompt，
-    促使 Lead 在"未达标"时带 guidance 重新派发，而不是盲目重复。
+    HARD（事实性失败，Lead 不得翻案）：
+      ① 执行失败（success=False）
+      ② 工具链中存在失败项（ok=False）
+      ③ 画布入口成功却零落块
+    SOFT（存疑，需质量判断）：
+      ④ 报告数字未过后验（画布且已产出内容块时豁免，照旧）
+      ⑤ 画布入口且用户点名多个维度但覆盖不全
+
+    实现要点：用**单一有序列表**记录判定，再按级别分流。
+    若先维护 hard/soft 两个列表再拼接，text 里各条的**顺序会与旧实现不同**，
+    就破坏了「文本逐字节兼容」——这是本次重构唯一的真正风险点。
     """
-    reasons: list[str] = []
+    items: list[tuple[str, str]] = []  # (级别, 原因)，追加顺序与旧实现完全一致
     if not result.success:
-        reasons.append(f"执行失败({result.error or 'unknown'})")
+        items.append(("hard", f"执行失败({result.error or 'unknown'})"))
     if not result.verified:
         # 画布主交付是"块成功落盘"。若已产出内容块，叙事里"无法严格后验"的数字只属
         # 软存疑，不应把整体敲成失败触发重派级联；纯对话才把数字存疑当硬失败。
         if entry != "canvas" or result.blocks_added == 0:
-            reasons.append("报告数字存疑")
+            items.append(("soft", "报告数字存疑"))
     failed = [t.get("name") for t in result.tool_chain if not t.get("ok")]
     if failed:
-        reasons.append("存在失败工具: " + ", ".join(str(n) for n in failed[:3]))
+        items.append(("hard", "存在失败工具: " + ", ".join(str(n) for n in failed[:3])))
     if entry == "canvas" and result.success and result.blocks_added == 0:
-        reasons.append("未在画布上产出内容块")
+        items.append(("hard", "未在画布上产出内容块"))
     # 维度覆盖检查：画布 + 用户点名 ≥2 维度 + 有图表落块记录
     if entry == "canvas" and result.success and result.blocks_added > 0:
         try:
@@ -101,15 +124,29 @@ def assess_subtask(result: RunAnalysisResult, *, entry: str = "chat", user_goal:
         if named_dims >= 2:
             covered = _dimensions_covered(result.tool_chain)
             if covered < named_dims:
-                reasons.append(f"维度覆盖不全（用户点名{named_dims}个维度，仅落{covered}个）")
+                items.append(("soft", f"维度覆盖不全（用户点名{named_dims}个维度，仅落{covered}个）"))
+    reasons = [r for _lvl, r in items]  # 保持旧实现的顺序
+    hard = [r for lvl, r in items if lvl == "hard"]
+    soft = [r for lvl, r in items if lvl == "soft"]
     if reasons:
-        return (
+        text = (
             "[子任务评估] 上轮未达标："
             + "；".join(reasons)
             + "。建议重新派发并附带改进指导意见，或 stop 后向用户说明情况。"
         )
-    extra = "，画布已产出内容块" if result.blocks_added > 0 else ""
-    return "[子任务评估] 上轮达标：工具调用全部成功，报告数字已验证" + extra + "。"
+    else:
+        extra = "，画布已产出内容块" if result.blocks_added > 0 else ""
+        text = "[子任务评估] 上轮达标：工具调用全部成功，报告数字已验证" + extra + "。"
+    return SubtaskAssessment(text=text, hard=hard, soft=soft)
+
+
+def assess_subtask(result: RunAnalysisResult, *, entry: str = "chat", user_goal: str = "") -> str:
+    """确定性评审：从子任务产物判定「是否达标」，返回一行带前缀的评估文本。
+
+    薄封装：text 与重构前逐字节一致（既有测试断言直接对字符串做 in 判断，不得改）。
+    需要 HARD/SOFT 分级请用 assess_subtask_detail。
+    """
+    return assess_subtask_detail(result, entry=entry, user_goal=user_goal).text
 
 
 def _dimensions_covered(tool_chain: list[dict]) -> int:

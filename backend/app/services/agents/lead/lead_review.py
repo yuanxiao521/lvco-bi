@@ -12,7 +12,12 @@
 """
 from __future__ import annotations
 
-from app.services.agents.lead.lead_tools import RunAnalysisResult, assess_subtask
+from app.services.agents.lead.lead_tools import (
+    RunAnalysisResult,
+    SubtaskAssessment,
+    assess_subtask,
+    assess_subtask_detail,
+)
 
 # 规划步骤的展示上限：与 planner 的动态上限（_MAX_PLAN_STEPS=12）对齐——
 # 工具链都展示 12 条了，规划没理由只给 6 步；满配计划必须能完整展示。
@@ -44,6 +49,16 @@ def _step_label(step: dict) -> str:
 def review_subtask(result: RunAnalysisResult, *, entry: str, user_goal: str) -> str:
     """对一次子任务做确定性评估（成功/失败都评），产出可注入决策器的评估文本。"""
     return assess_subtask(result, entry=entry, user_goal=user_goal)
+
+
+def review_subtask_detail(
+    result: RunAnalysisResult, *, entry: str, user_goal: str
+) -> SubtaskAssessment:
+    """评审的**结构化**出口（HARD/SOFT 分级）——P2 评审阶段使用。
+
+    review_subtask 保持原样（返回文本、写入 turn_summaries 的通道不动）。
+    """
+    return assess_subtask_detail(result, entry=entry, user_goal=user_goal)
 
 
 def compose_result_text(*, blocks: int, canvas_highlight: str) -> str:
