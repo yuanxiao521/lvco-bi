@@ -94,6 +94,90 @@ def test_passed_semantics():
     assert "上轮达标" in ok.text
 
 
+async def test_get_canvas_layout_degrades_to_empty():
+    """观察能力：无画布上下文 / provider 抛错 → 空串。
+
+    §6 不变量 4：每个新环节都要有确定性降级——观察失败绝不能把主循环带崩。
+    """
+    from app.services.agents.lead.lead_observe import get_canvas_layout
+
+    class _NoCanvas:
+        canvas_state = None
+
+    class _Boom:
+        async def layout(self, force: bool = False):
+            raise RuntimeError("db down")
+
+    class _Ok:
+        async def layout(self, force: bool = False):
+            return "画布：1 个图表块"
+
+    assert await get_canvas_layout(_NoCanvas()) == ""
+    assert await get_canvas_layout(type("C", (), {"canvas_state": _Boom()})()) == ""
+    assert await get_canvas_layout(type("C", (), {"canvas_state": _Ok()})()) == "画布：1 个图表块"
+
+
+async def test_list_datasources_and_fields_degrade_to_empty():
+    """数据源/字段观察：底层失败 → 空列表（不抛）。"""
+    from app.services.agents.lead.lead_observe import list_datasources, list_fields
+
+    # user_id 不是合法 UUID → 底层抛错 → 必须被吞掉并返回空
+    assert await list_datasources(object(), "not-a-uuid") == []
+    assert await list_fields(object(), "not-a-uuid", 1) == []
+
+
+def test_run_worker_uses_the_single_dispatch_core():
+    """派发路径唯一性守卫。
+
+    P0 把派发内核抽成 dispatch_analysis；run_worker（流式路径）必须复用它，
+    而不是自己再调一次 run_analysis——两份派发实现必然跑偏
+    （本项目已在"画布事件表"上踩过一次同样的坑）。
+    """
+    import ast
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "app/services/agents/lead/lead_dispatch.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next(n for n in tree.body
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "run_worker")
+    body = ast.unparse(fn)
+    assert "dispatch_analysis(" in body, "run_worker 必须复用派发内核"
+    assert "run_analysis(" not in body, "run_worker 不得绕过 dispatch_analysis 直接调 run_analysis"
+
+
+def test_for_agent_loop_is_a_noop_alias_of_for_decision():
+    """P0 装配出口：for_agent_loop(step) 的行为必须与 for_decision 完全一致。
+
+    P4 才会让它「按循环步装配」；在那之前它只是占位出口——任何行为差异都说明
+    有人在 P0 阶段偷偷改了装配语义（这正是本用例要拦住的事）。
+    """
+    from app.services.context.provider import TurnContextProvider, TurnInputs
+
+    inputs = TurnInputs(
+        user_id="u", session_id="s", entry="canvas",
+        turns=[{"role": "user", "content": "你好"}, {"role": "assistant", "content": "在"}],
+        history_summary="历史摘要",
+        subtask_summaries=["[子任务评估] 上轮达标：工具调用全部成功。"],
+        datasources=[{"id": "d1", "name": "DS"}],
+        metrics_ctx="指标口径",
+        canvas_layout="画布：1 个图表块",
+        artifact_note="产物说明",
+    )
+    p = TurnContextProvider.for_turn(inputs)
+    base = p.for_decision("按品类分析")
+
+    same = p.for_agent_loop("按品类分析")
+    assert same.messages == base.messages
+    assert same.parts == base.parts
+    assert same.ledger == base.ledger
+
+    # step 在 P0 被忽略：换 step 也必须给出同一装配结果
+    stepped = p.for_agent_loop("按品类分析", step=3)
+    assert stepped.messages == base.messages
+    assert stepped.parts == base.parts
+
+
 def test_review_subtask_detail_is_exported_from_review_module():
     """P2 会从评审模块取结构化结果，这里钉住出口存在且与底层一致。"""
     r = _res(verified=False)

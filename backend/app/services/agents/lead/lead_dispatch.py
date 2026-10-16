@@ -33,6 +33,59 @@ if TYPE_CHECKING:  # 仅类型标注用：避免与 lead_agent 形成运行时�
 logger = logging.getLogger("lvco.lead.dispatch")
 
 
+async def dispatch_analysis(
+    *,
+    goal: str,
+    ctx: "LeadContext",
+    worker: WorkerSpec,
+    constraints: dict | None = None,
+    db_session,
+    available_datasources: list[dict],
+    llm,
+    memo: dict | None,
+    memo_lock,
+    extra_plannable_tools,
+    emit=None,
+    on_progress=None,
+    trace=None,
+    guidance: str = "",
+) -> RunAnalysisResult:
+    """派发的**内核**：组装 RunAnalysisArgs → 在 memo_lock 下执行 run_analysis。
+
+    P0 抽出的「能力接口」。为什么必须只有一份：run_worker 是流式路径（派发 + 事件
+    转发 + emit + 写验收记录），P1/P2 会把"派发"注册成 Lead 的工具——如果工具层
+    自己再写一遍派发，就会出现"工具派发"和"流式派发"两套实现，迟早跑偏
+    （本项目已经在事件表上踩过一次同样的坑）。
+
+    形状刻意做成 goal + 内核进、RunAnalysisResult 出：
+    P1 的工具层要的正是这个（不需要事件流那套 plumbing）。
+
+    行为与抽出前逐字节一致——constraints 的合并方式、memo_lock 的持有时机、
+    传给 run_analysis 的参数全部原样保留。
+    """
+    args = RunAnalysisArgs(
+        goal=goal,
+        datasource_id=ctx.datasource_id,
+        canvas_id=ctx.canvas_id,
+        entry=ctx.entry,
+        constraints={"mode": worker.mode, **(constraints or {})},
+    )
+    async with memo_lock:
+        return await run_analysis(
+            args,
+            db_session=db_session,
+            emit=emit,
+            llm=llm,
+            trace=trace,
+            lead_ctx=ctx,
+            extra_plannable_tools=extra_plannable_tools,
+            on_progress=on_progress,
+            memo=memo,
+            available_datasources=available_datasources,
+            worker_guidance=guidance,
+        )
+
+
 async def run_worker(
     *,
     user_msg: str,
@@ -53,13 +106,7 @@ async def run_worker(
     goal = str(tool_args.get("goal") or user_msg)
     constraints = dict(tool_args.get("constraints") or {})
     mode = worker.mode
-    args = RunAnalysisArgs(
-        goal=goal,
-        datasource_id=ctx.datasource_id,
-        canvas_id=ctx.canvas_id,
-        entry=ctx.entry,
-        constraints={"mode": mode, **constraints},
-    )
+    # args 的组装已下沉到 dispatch_analysis（派发内核），此处不再重复一份
     yield {"type": "tool_call", "name": "run_analysis", "round": round_idx, "args": {
         "goal": goal, "entry": ctx.entry, "mode": mode,
     }}
@@ -97,20 +144,22 @@ async def run_worker(
 
     async def _runner() -> None:
         try:
-            async with memo_lock:
-                holder["result"] = await run_analysis(
-                    args,
-                    db_session=db_session,
-                    emit=_forward,
-                    llm=llm,
-                    trace=trace,
-                    lead_ctx=ctx,
-                    extra_plannable_tools=extra_plannable_tools,
-                    on_progress=_on_progress,
-                    memo=memo,
-                    available_datasources=available_datasources,
-                    worker_guidance=getattr(decision, "guidance", "") or "",
-                )
+            holder["result"] = await dispatch_analysis(
+                goal=goal,
+                ctx=ctx,
+                worker=worker,
+                constraints=constraints,
+                db_session=db_session,
+                available_datasources=available_datasources,
+                llm=llm,
+                memo=memo,
+                memo_lock=memo_lock,
+                extra_plannable_tools=extra_plannable_tools,
+                emit=_forward,
+                on_progress=_on_progress,
+                trace=trace,
+                guidance=getattr(decision, "guidance", "") or "",
+            )
         except Exception as e:  # noqa: BLE001
             logger.exception(f"[lead_agent] run_analysis_failed: {e}")
             holder["error"] = e

@@ -103,6 +103,19 @@ class TurnContextProvider:
         """决策上下文：parts["history_summary"] 与旧 ctx.digest() 逐字节等价。"""
         return self._assembler.for_decision(self._base_blocks(), user_msg=user_msg)
 
+    def for_agent_loop(self, user_msg: str, *, step: int = 0) -> Assembled:
+        """单 Agent 循环的装配出口（**P0 空实现**：内部先复用 for_decision）。
+
+        为什么要先占住这个出口：P1 会把 Lead 从「四个工位」合并成「一个 system + 循环」，
+        P4 再把它变成「按循环步装配」（step0 全量；后续步只追加工具结果增量，
+        并把决策路径手拼的四块全部搬进 Source）。先把出口立起来，
+        调用方就能提前切过去而**不改行为**，把风险留在一个可回滚的小提交里。
+
+        P0 契约：行为与 for_decision **完全一致**（step 参数暂被忽略）——
+        由 tests/test_lead_p0_capabilities.py 对拍钉住。
+        """
+        return self.for_decision(user_msg)
+
     def for_answer(
         self,
         user_msg: str,
