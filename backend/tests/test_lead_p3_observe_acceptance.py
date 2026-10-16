@@ -1,0 +1,155 @@
+# -*- coding: utf-8 -*-
+"""P3：观察工具（recon_tool / list_metrics）+ Lead 声明的验收标准（acceptance）。
+
+任务书 §4 P3：
+  · 注册只读工具，每轮 ≤2 次，独立 trace 名 lead_recon；
+  · 失败即降级（拿不到就按现有路径走）；
+  · Decision 增 acceptance（结构化、可核验）；
+  · assess_subtask 增第 6 项「Lead 声明的标准未满足」（**声明缺失时跳过**，向后兼容）；
+  · acceptance **不进幂等键**（否则改声明就击穿 memo）。
+"""
+from __future__ import annotations
+
+from app.services.agents.lead.lead_observe import list_metrics, recon_tool
+from app.services.agents.lead.lead_review_stage import run_review_stage
+from app.services.agents.lead.lead_tools import (
+    RunAnalysisArgs,
+    RunAnalysisResult,
+    assess_subtask_detail,
+    effective_memo_key,
+    make_idempotency_key,
+)
+
+
+def _ok(**kw) -> RunAnalysisResult:
+    base = dict(success=True, report="r", steps=[], blocks_added=2,
+                error=None, verified=True, tool_chain=[{"name": "run_query", "ok": True}])
+    base.update(kw)
+    return RunAnalysisResult(**base)
+
+
+class _Ctx:
+    entry = "chat"
+    session_id = "s1"
+    user_id = "u1"
+    datasource_id = None
+    canvas_state = None
+
+    def __init__(self) -> None:
+        self.history_summary = ""
+        self.metrics_ctx = "【销售额】= SUM(amount) 单位：元"
+        self.turn_summaries: list[str] = []
+
+
+class _LLM:
+    def __init__(self, reply='{"verdict": "pass"}'):
+        self.reply = reply
+        self.calls = 0
+
+    async def complete(self, messages, **kw):
+        self.calls += 1
+        return self.reply
+
+
+# ── acceptance：第 6 项核验 ────────────────────────────────────────────────
+
+def test_acceptance_absent_keeps_legacy_verdict():
+    """**向后兼容**：不声明 acceptance 时，判定与以前完全一致。"""
+    d = assess_subtask_detail(_ok(), entry="chat", user_goal="查一下")
+    assert d.hard == [] and d.soft == []
+    assert d.passed is True
+
+
+def test_acceptance_min_blocks_unmet_goes_soft():
+    d = assess_subtask_detail(
+        _ok(blocks_added=1), entry="canvas", user_goal="画图",
+        acceptance={"min_blocks": 3},
+    )
+    assert any("Lead 声明的标准未满足" in s for s in d.soft), "第 6 项没生效"
+    assert d.hard == [], "声明未满足属 SOFT（需判断），不是 ①②③ 那种事实性失败"
+    assert d.passed is False
+
+
+def test_acceptance_min_blocks_met_is_silent():
+    d = assess_subtask_detail(
+        _ok(blocks_added=3), entry="canvas", user_goal="画图",
+        acceptance={"min_blocks": 3},
+    )
+    assert not any("Lead 声明的标准" in s for s in d.soft + d.hard)
+
+
+def test_acceptance_require_verified():
+    d = assess_subtask_detail(_ok(verified=False), entry="chat", user_goal="查一下",
+                              acceptance={"require_verified": True})
+    assert any("要求报告数字经过后验" in s for s in d.soft)
+
+
+def test_unknown_acceptance_keys_are_ignored():
+    """认不出来的键一律忽略——不猜、不臆断用户意图。"""
+    d = assess_subtask_detail(_ok(), entry="chat", user_goal="查一下",
+                              acceptance={"must_be_beautiful": True})
+    assert d.hard == [] and d.soft == []
+
+
+def test_acceptance_does_not_enter_memo_key():
+    """§4 P3：acceptance **不进幂等键**——改声明不该击穿 memo（与 guidance 相反）。"""
+    args = RunAnalysisArgs(goal="G", datasource_id=1, canvas_id=None, entry="chat")
+    # effective_memo_key 只吃 args + guidance，签名里根本没有 acceptance
+    assert effective_memo_key(args, "") == make_idempotency_key(args)
+    assert effective_memo_key(args, "补维度") != make_idempotency_key(args)
+
+
+async def test_review_stage_verifies_acceptance():
+    """评审阶段要把 Lead 声明的标准算进去（声明未满足 → 至少 SOFT 非空）。"""
+    llm = _LLM('{"verdict": "fail", "reason": "块数不够", "guidance": "再补一块"}')
+    outcome = await run_review_stage(
+        _ok(blocks_added=1), entry="canvas", user_goal="画图", llm=llm,
+        acceptance={"min_blocks": 2},
+    )
+    assert any("Lead 声明的标准未满足" in s for s in outcome.soft)
+    assert outcome.verdict == "fail"
+
+
+# ── 观察工具 ───────────────────────────────────────────────────────────────
+
+def test_list_metrics_reads_injected_metrics_context():
+    """同一事实只有一个来源：直接读已注入上下文的受治理指标清单。"""
+    assert list_metrics(_Ctx()) == "【销售额】= SUM(amount) 单位：元"
+    assert list_metrics(object()) == ""
+
+
+async def test_recon_tool_unimplemented_returns_none_and_degrades():
+    """未接的工具返回 None 并记降级——**绝不假装成功**。"""
+    degradation: list[str] = []
+    got = await recon_tool("query_sample", ctx=_Ctx(), args={}, db_session=None,
+                           degradation=degradation)
+    assert got is None
+    assert "lead_agent_observe_unimplemented_query_sample" in degradation
+
+
+async def test_recon_tool_unknown_name_degrades():
+    degradation: list[str] = []
+    got = await recon_tool("no_such_tool", ctx=_Ctx(), args={}, db_session=None,
+                           degradation=degradation)
+    assert got is None
+    assert any("observe_unimplemented" in d for d in degradation)
+
+
+async def test_recon_tool_failure_degrades_and_returns_none():
+    """观察失败 → None + 降级（§6 不变量 4：拿不到就按现有路径走）。"""
+    class Boom:  # canvas_state.layout 抛错 → get_canvas_layout 内部已吞，返回 ""
+        async def layout(self, force: bool = False):
+            raise RuntimeError("db down")
+
+    ctx = _Ctx()
+    ctx.canvas_state = Boom()
+    degradation: list[str] = []
+    got = await recon_tool("get_canvas_layout", ctx=ctx, args={}, db_session=None,
+                           degradation=degradation)
+    assert got == ""            # 内部降级为空串，不抛
+    assert degradation == []
+
+
+async def test_recon_tool_list_metrics_works_without_db():
+    got = await recon_tool("list_metrics", ctx=_Ctx(), args={}, db_session=None)
+    assert "销售额" in got

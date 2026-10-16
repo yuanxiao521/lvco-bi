@@ -96,9 +96,15 @@ async def run_review_stage(
     execution_summary: str = "",
     trace=None,
     degradation: list[str] | None = None,
+    acceptance: dict | None = None,
 ) -> ReviewOutcome:
-    """固定执行的评审阶段（见模块说明）。"""
-    detail = assess_subtask_detail(result, entry=entry, user_goal=user_goal)
+    """固定执行的评审阶段（见模块说明）。
+
+    acceptance：Lead 在派发时**自己声明**的验收标准（P3）。声明缺失 → 跳过该检查。
+    """
+    detail = assess_subtask_detail(
+        result, entry=entry, user_goal=user_goal, acceptance=acceptance
+    )
     outcome = ReviewOutcome(
         text=detail.text, hard=list(detail.hard), soft=list(detail.soft),
         verdict="fail" if detail.hard else "pass",

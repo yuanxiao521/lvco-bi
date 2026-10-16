@@ -321,26 +321,19 @@ async def stream_unified(
                 from app.services.agents.lead import lead_observe
 
                 yield {"type": "tool_call", "name": name, "round": step, "args": args}
-                try:
-                    if name == "get_canvas_layout":
-                        result = await lead_observe.get_canvas_layout(ctx)
-                    elif name == "list_datasources":
-                        result = await lead_observe.list_datasources(
-                            db_session, str(ctx.user_id), datasource_id=ctx.datasource_id)
-                    elif name == "list_fields":
-                        result = await lead_observe.list_fields(
-                            db_session, str(ctx.user_id), args.get("datasource_id"))
-                    else:
-                        # list_metrics / query_sample：P3 才接语义层与取数，P1 先确定性降级
-                        degradation.append("lead_agent_observe_unimplemented_" + name)
-                        result = []
-                except Exception:  # noqa: BLE001
-                    logger.warning("[lead_unified] observe_failed name=%s", name, exc_info=True)
-                    degradation.append("lead_agent_observe_failed_" + name)
-                    result = []
-                payload = result if isinstance(result, str) else json.dumps(
-                    result, ensure_ascii=False, default=str)
-                yield {"type": "tool_result", "name": name, "ok": True, "result": payload[:4000]}
+                # P3：观察执行收敛到 lead_observe.recon_tool —— 独立 trace 名 lead_recon、
+                # 失败即降级、未接的工具返回 None（由调用方记降级，绝不假装成功）
+                result = await lead_observe.recon_tool(
+                    name, ctx=ctx, args=args, db_session=db_session,
+                    trace=trace, degradation=degradation,
+                )
+                if result is None:
+                    payload, ok = f"（{name} 暂时不可用，请按现有信息判断）", False
+                else:
+                    payload = result if isinstance(result, str) else json.dumps(
+                        result, ensure_ascii=False, default=str)
+                    ok = True
+                yield {"type": "tool_result", "name": name, "ok": ok, "result": payload[:4000]}
                 history.append({"role": "tool", "tool_call_id": call_id,
                                 "content": payload[:4000]})
                 continue
@@ -416,9 +409,12 @@ async def stream_unified(
                 from app.services.agents.lead.lead_review_stage import run_review_stage
 
                 exec_summary = build_execution_summary(result, canvas_layout=canvas_layout)
+                # P3：把 Lead **自己声明**的验收标准交给评审阶段核验（声明缺失则跳过）
+                _accept = args.get("acceptance")
                 outcome = await run_review_stage(
                     result, entry=ctx.entry, user_goal=goal, llm=llm,
                     execution_summary=exec_summary, trace=trace, degradation=degradation,
+                    acceptance=_accept if isinstance(_accept, dict) else None,
                 )
                 ctx.turn_summaries.append(outcome.text)
                 if outcome.passed:

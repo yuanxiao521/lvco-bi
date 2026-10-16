@@ -85,8 +85,28 @@ def make_idempotency_key(args: RunAnalysisArgs) -> str:
     return f"run_analysis:{digest}"
 
 
+def _check_acceptance(result: RunAnalysisResult, acceptance: dict | None) -> str:
+    """核验 Lead **自己声明**的验收标准（结构化、可核验）。
+
+    只认代码真能核的键；认不出来的键一律忽略——不猜、不臆断用户意图。
+    返回未满足的说明；全部满足 / 无可核项 → 空串（向后兼容）。
+    """
+    if not isinstance(acceptance, dict) or not acceptance:
+        return ""
+    problems: list[str] = []
+    min_blocks = acceptance.get("min_blocks")
+    if isinstance(min_blocks, int) and result.blocks_added < min_blocks:
+        problems.append(f"要求至少 {min_blocks} 个内容块，实际 {result.blocks_added}")
+    if acceptance.get("require_verified") is True and not result.verified:
+        problems.append("要求报告数字经过后验，实际未通过")
+    if not problems:
+        return ""
+    return "Lead 声明的标准未满足：" + "；".join(problems)
+
+
 def assess_subtask_detail(
-    result: RunAnalysisResult, *, entry: str = "chat", user_goal: str = ""
+    result: RunAnalysisResult, *,
+    entry: str = "chat", user_goal: str = "", acceptance: dict | None = None,
 ) -> SubtaskAssessment:
     """确定性评审的**结构化**版本：text 与旧 assess_subtask 逐字节一致，另附 HARD/SOFT 分级。
 
@@ -125,7 +145,13 @@ def assess_subtask_detail(
             covered = _dimensions_covered(result.tool_chain)
             if covered < named_dims:
                 items.append(("soft", f"维度覆盖不全（用户点名{named_dims}个维度，仅落{covered}个）"))
-    reasons = [r for _lvl, r in items]  # 保持旧实现的顺序
+    # ⑥ Lead 声明的验收标准未满足（**声明缺失 → 跳过**，向后兼容）
+    # 归 SOFT：它是"标准是否达成"的质量判断，不是 ①②③ 那种事实性失败
+    accept_problem = _check_acceptance(result, acceptance)
+    if accept_problem:
+        items.append(("soft", accept_problem))
+
+    reasons = [r for _lvl, r in items]  # 保持旧实现的顺序（含第 ⑥ 项追加顺序）
     hard = [r for lvl, r in items if lvl == "hard"]
     soft = [r for lvl, r in items if lvl == "soft"]
     if reasons:

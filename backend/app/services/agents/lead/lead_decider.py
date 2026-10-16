@@ -62,6 +62,10 @@ class Decision:
     #   redo  = 重做      → orchestrator（需要重新规划/重新取数）
     # 第 0 轮不该输出它（那时还没有上轮评审，谈不上补/重做）。
     repair_kind: str = ""
+    # P3：Lead **自己声明**的验收标准（结构化、可核验）。缺失 = 不声明（跳过该项检查）。
+    # 例：{"min_blocks": 2, "require_verified": true}
+    # 注意：它**不进幂等键**——改声明不该击穿 memo（与 guidance 的取舍相反）。
+    acceptance: dict | None = None
 
 
 def _guess_complexity(intent: IntentResult) -> str:
@@ -224,6 +228,10 @@ def _parse_decision(
     raw_repair_kind = str(obj.get("repair_kind") or "").strip().lower()
     if raw_repair_kind not in ("patch", "redo"):
         raw_repair_kind = ""
+    # P3：验收声明（结构化、可核验）。非 dict / 空 dict 一律视为"未声明"。
+    _acc = obj.get("acceptance")
+    raw_acceptance = _acc if isinstance(_acc, dict) and _acc else None
+
     degraded_flag = False
     if raw_repair_kind and obj.get("complexity"):
         # 两者同时出现 = 模型输出不自洽。**以 repair_kind 为准**并记降级 + 告警：
@@ -247,6 +255,7 @@ def _parse_decision(
         guidance=guidance,
         ask_kind=raw_ask_kind,
         repair_kind=raw_repair_kind,
+        acceptance=raw_acceptance,
     )
     logger.info(
         f"[lead_decider] action={action.value} tool={tool_name} "
