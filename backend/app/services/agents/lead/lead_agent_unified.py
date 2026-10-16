@@ -208,13 +208,20 @@ async def stream_unified(
             return
 
     ctx.add_turn("user", user_msg)
-    messages = build_lead_messages(
-        user_msg=user_msg, ctx=ctx,
-        available_datasources=available_datasources, canvas_layout=canvas_layout,
-    )
+    # 循环内的对话历史（assistant 的 tool_calls + 各工具结果）。
+    # messages 每步**重建**：上下文块（画布快照 / 子任务摘要 / 评审结论）在循环里会变，
+    # 只建一次的话，模型看不到"落块后画布变成什么样""上轮评审说缺什么"。
+    history: list[dict] = []
+
+    def _messages() -> list[dict]:
+        return build_lead_messages(
+            user_msg=user_msg, ctx=ctx,
+            available_datasources=available_datasources, canvas_layout=canvas_layout,
+        ) + history
 
     finished = False
     for step in range(limit):
+        messages = _messages()
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         try:
@@ -250,8 +257,8 @@ async def stream_unified(
             finished = True
             break
 
-        # 把 assistant 的 tool_calls 回写进 messages（OpenAI 协议要求）
-        messages.append({
+        # 把 assistant 的 tool_calls 回写进 history（OpenAI 协议要求）
+        history.append({
             "role": "assistant",
             "content": model_text or None,
             "tool_calls": [
@@ -297,15 +304,15 @@ async def stream_unified(
             if cls is None:
                 degradation.append("lead_agent_unknown_tool")
                 logger.warning("[lead_unified] rejected_tool name=%s", name)
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": f"工具 {name} 不可用（不在你的工具表里）。"})
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": f"工具 {name} 不可用（不在你的工具表里）。"})
                 continue
 
             # ── 配额闸（§2.3）──
             if remaining.get(cls, 0) <= 0:
                 degradation.append(f"lead_agent_quota_{cls}")
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
                 continue
             remaining[cls] -= 1
 
@@ -333,8 +340,8 @@ async def stream_unified(
                 payload = result if isinstance(result, str) else json.dumps(
                     result, ensure_ascii=False, default=str)
                 yield {"type": "tool_result", "name": name, "ok": True, "result": payload[:4000]}
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": payload[:4000]})
+                history.append({"role": "tool", "tool_call_id": call_id,
+                                "content": payload[:4000]})
                 continue
 
             # ── 派发：复用 run_worker（子任务摘要/评审/画布刷新与 legacy 同路径）──
@@ -366,22 +373,55 @@ async def stream_unified(
                 guidance=guidance,
             )
             worker = resolve_worker(ctx.entry, complexity)
+            captured: dict = {}   # 接住 RunAnalysisResult，供随后的评审阶段使用
             async for ev in run_worker(
                 user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                 db_session=db_session, available_datasources=available_datasources or [],
                 llm=llm, memo=memo, memo_lock=memo_lock,
                 extra_plannable_tools=extra_plannable_tools,
                 round_idx=step, degradation=degradation, trace=trace,
+                # 评审交给下面的"评审阶段"统一做（do_review=False），
+                # 否则同一次派发会写两条 [子任务评估]
+                do_review=False,
+                on_result=lambda r: captured.setdefault("result", r),
             ):
                 yield ev
-            # 派发后刷新画布快照，供下一步观察/判断
+            # 派发后刷新画布快照：后续步骤的上下文与评审输入都要用最新布局
             if getattr(ctx, "canvas_state", None) is not None:
                 try:
                     canvas_layout = await ctx.canvas_state.layout(force=True) or canvas_layout
                 except Exception:  # noqa: BLE001
                     pass
-            messages.append({"role": "tool", "tool_call_id": call_id,
-                             "content": "已派发子任务，执行摘要见上文。"})
+
+            # ── P2 评审阶段：固定执行、由代码触发（不是模型按需调用的工具）──
+            #   · HARD 非空 → 硬闸直接 fail，不花 LLM（也绝不允许被翻案）
+            #   · 仅 SOFT 非空 → 一次裁量；裁量失败退回纯代码结论
+            # 结论写 turn_summaries（沿用 [子任务评估] 前缀，零通道改动），
+            # 并作为**本次派发的工具结果**回给模型——它靠这个决定 repair / 重派 / 收尾。
+            result = captured.get("result")
+            review_note = "已派发子任务，执行摘要见上文。"
+            if result is not None:
+                from app.services.agents.lead.lead_review import build_execution_summary
+                from app.services.agents.lead.lead_review_stage import run_review_stage
+
+                exec_summary = build_execution_summary(result, canvas_layout=canvas_layout)
+                outcome = await run_review_stage(
+                    result, entry=ctx.entry, user_goal=goal, llm=llm,
+                    execution_summary=exec_summary, trace=trace, degradation=degradation,
+                )
+                ctx.turn_summaries.append(outcome.text)
+                if outcome.passed:
+                    review_note = (
+                        "子任务评审通过。已满足用户诉求就收尾（answer / stop），"
+                        "否则继续下一步。"
+                    )
+                else:
+                    degradation.append("lead_review_fail")
+                    review_note = "子任务评审未通过：" + (outcome.reason or "存在缺口")
+                    if outcome.guidance:
+                        review_note += "。改进指导：" + outcome.guidance
+                    review_note += "。小缺口用 repair 补；方向错或执行失败则重新 dispatch_analysis。"
+            history.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
         if finished:
             break
     else:
