@@ -213,3 +213,4 @@ backend/_check_fields.py
 **/check_login.py
 **/gen_hash.py
 **/verify_check.py
+backend/eval_logs/
