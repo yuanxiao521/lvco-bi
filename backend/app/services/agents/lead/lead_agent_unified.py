@@ -39,56 +39,9 @@ from app.services.agents.lead.lead_agent_tools import (
 logger = logging.getLogger("lvco.lead.unified")
 
 
-def _render_datasources(datasources: list[dict]) -> str:
-    """数据源清单渲染（id / 名称 / 类型 / 字段）。id 原样给出，禁止模型编造。"""
-    lines: list[str] = []
-    for ds in datasources:
-        head = f"- id={ds.get('id')} 名称={ds.get('name')} 类型={ds.get('type')}"
-        fields = ds.get("fields") or []
-        if fields:
-            names = [str(f.get("name") if isinstance(f, dict) else f) for f in fields][:40]
-            head += " 字段=" + ",".join(names)
-        lines.append(head)
-    return "\n".join(lines)
-
-
-def build_lead_messages(
-    *,
-    user_msg: str,
-    ctx,
-    available_datasources: list[dict] | None,
-    canvas_layout: str = "",
-    system_text: str = "",
-) -> list[dict]:
-    """把上下文拼成 messages（P1 版本）。
-
-    P4 会把这一段搬进 TurnContextProvider.for_agent_loop（单出口装配）；
-    先做成模块函数，便于单测与替换——这正是 P4 存在的理由。
-    """
-    from app.services.ai_prompts import LEAD_AGENT_SYSTEM
-
-    system = system_text or LEAD_AGENT_SYSTEM
-    blocks: list[str] = []
-    if str(getattr(ctx, "history_summary", "") or "").strip():
-        blocks.append("【历史记忆】\n" + ctx.history_summary.strip())
-    if str(getattr(ctx, "metrics_ctx", "") or "").strip():
-        blocks.append("【受治理指标清单】\n" + ctx.metrics_ctx.strip())
-    if available_datasources:
-        blocks.append("【可用数据源】\n" + _render_datasources(available_datasources))
-    if canvas_layout.strip():
-        blocks.append("【当前画布布局（已落盘，以此为准）】\n" + canvas_layout.strip())
-    if getattr(ctx, "turn_summaries", None):
-        blocks.append("【已完成子任务摘要 / 评审结论】\n" + "\n".join(ctx.turn_summaries))
-    if blocks:
-        system = system + "\n\n" + "\n\n".join(blocks)
-
-    messages: list[dict] = [{"role": "system", "content": system}]
-    for t in ctx.recent_turns(max_turns=12):
-        role = t.get("role")
-        if role in ("user", "assistant") and str(t.get("content") or "").strip():
-            messages.append({"role": role, "content": t["content"]})
-    messages.append({"role": "user", "content": user_msg})
-    return messages
+# 上下文装配已**收归** TurnContextProvider.for_agent_loop（P4 装配统一）：
+# 原先这里的 build_lead_messages / _render_datasources 是 P1 的临时实现，
+# 现由 provider（Source 出块）+ assembler（排序/渲染/台账）承担，本模块不再拼上下文。
 
 
 # 多产物 / 多步的文本特征：模型判 simple、但目标明显不止一步时，抬回 complex。
@@ -207,22 +160,40 @@ async def stream_unified(
                 yield _finish()
             return
 
-    ctx.add_turn("user", user_msg)
-    # 循环内的对话历史（assistant 的 tool_calls + 各工具结果）。
-    # messages 每步**重建**：上下文块（画布快照 / 子任务摘要 / 评审结论）在循环里会变，
-    # 只建一次的话，模型看不到"落块后画布变成什么样""上轮评审说缺什么"。
-    history: list[dict] = []
+    # ── P4：装配统一（唯一出口）─────────────────────────────────────────────
+    # 首步装配一次（含全部状态块），之后只把工具结果**增量**追加进 messages——不重建：
+    #   · 重复注入状态块既白烧 token，也会让模型看到两份互相矛盾的画布快照；
+    #   · 派发后的新画布/评审结论**由工具结果承载**（build_execution_summary 内含最新布局），
+    #     所以"不重建"不会让模型失去最新事实。
+    # 构造必须在 ctx.add_turn 之前（否则本轮用户消息会在窗口里出现两次）。
+    from app.services.ai_prompts import LEAD_AGENT_SYSTEM
+    from app.services.context.provider import TurnContextProvider, TurnInputs
 
-    def _messages() -> list[dict]:
-        return build_lead_messages(
-            user_msg=user_msg, ctx=ctx,
-            available_datasources=available_datasources, canvas_layout=canvas_layout,
-        ) + history
+    provider = TurnContextProvider.for_turn(TurnInputs(
+        user_id=str(ctx.user_id),
+        session_id=ctx.session_id or "",
+        entry=ctx.entry,
+        turns=list(ctx.turns),
+        history_summary=ctx.history_summary,
+        subtask_summaries=list(ctx.turn_summaries),
+        datasources=available_datasources,
+        metrics_ctx=ctx.metrics_ctx,
+        canvas_layout=canvas_layout,
+        artifact_note=str(getattr(ctx, "extra_context", "") or ""),
+    ))
+    assembled = provider.for_agent_loop(user_msg, step=0, system_text=LEAD_AGENT_SYSTEM)
+    messages = list(assembled.messages)
+    logger.info("[lead_unified] %s", assembled.ledger.summary())
+    if trace is not None:
+        try:
+            trace.update(metadata={"agent_loop_ledger": assembled.ledger.as_dict()})
+        except Exception:  # noqa: BLE001
+            pass
+    ctx.add_turn("user", user_msg)
 
     finished = False
     seen_goals: set[str] = set()   # 本请求内派发过的 goal（用于识别"重做"）
     for step in range(limit):
-        messages = _messages()
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         try:
@@ -258,8 +229,8 @@ async def stream_unified(
             finished = True
             break
 
-        # 把 assistant 的 tool_calls 回写进 history（OpenAI 协议要求）
-        history.append({
+        # 把 assistant 的 tool_calls 回写进 messages（OpenAI 协议要求）
+        messages.append({
             "role": "assistant",
             "content": model_text or None,
             "tool_calls": [
@@ -305,15 +276,15 @@ async def stream_unified(
             if cls is None:
                 degradation.append("lead_agent_unknown_tool")
                 logger.warning("[lead_unified] rejected_tool name=%s", name)
-                history.append({"role": "tool", "tool_call_id": call_id,
-                                "content": f"工具 {name} 不可用（不在你的工具表里）。"})
+                messages.append({"role": "tool", "tool_call_id": call_id,
+                                 "content": f"工具 {name} 不可用（不在你的工具表里）。"})
                 continue
 
             # ── 配额闸（§2.3）──
             if remaining.get(cls, 0) <= 0:
                 degradation.append(f"lead_agent_quota_{cls}")
-                history.append({"role": "tool", "tool_call_id": call_id,
-                                "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
+                messages.append({"role": "tool", "tool_call_id": call_id,
+                                 "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
                 continue
             remaining[cls] -= 1
 
@@ -334,8 +305,8 @@ async def stream_unified(
                         result, ensure_ascii=False, default=str)
                     ok = True
                 yield {"type": "tool_result", "name": name, "ok": ok, "result": payload[:4000]}
-                history.append({"role": "tool", "tool_call_id": call_id,
-                                "content": payload[:4000]})
+                messages.append({"role": "tool", "tool_call_id": call_id,
+                                 "content": payload[:4000]})
                 continue
 
             # ── 派发：复用 run_worker（子任务摘要/评审/画布刷新与 legacy 同路径）──
@@ -428,7 +399,7 @@ async def stream_unified(
                     if outcome.guidance:
                         review_note += "。改进指导：" + outcome.guidance
                     review_note += "。小缺口用 repair 补；方向错或执行失败则重新 dispatch_analysis。"
-            history.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
+            messages.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
         if finished:
             break
     else:

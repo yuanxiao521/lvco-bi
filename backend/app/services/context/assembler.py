@@ -124,6 +124,20 @@ def first_block(blocks: list[Block], kind: BlockKind) -> Block | None:
     return None
 
 
+# 单 Agent 循环的上下文块标题。
+# 与决策路径**共用同一批渲染函数**（sources/state.py）——统一装配的意义就在于
+# "同一事实只有一处渲染"，各出口只决定"注入哪些块、怎么拼"，不各写一份文案。
+AGENT_LOOP_HEADERS: dict[BlockKind, str] = {
+    BlockKind.MEMORY: "历史记忆",
+    BlockKind.METRICS: "受治理指标清单",
+    BlockKind.DATASOURCES: "可用数据源",
+    BlockKind.CANVAS: "当前画布布局（已落盘，以此为准）",
+    BlockKind.SUBTASK: "已完成子任务摘要",
+    BlockKind.ASSESSMENT: "最近一次子任务评估",
+    BlockKind.ARTIFACT: "上一轮已产出内容",
+}
+
+
 class Assembler:
     """按用途装配上下文（P0：委托模式，输出与旧路径逐字节等价）。"""
 
@@ -214,6 +228,75 @@ class Assembler:
         window = first_block(blocks, BlockKind.WINDOW)
         for t in select_for_answer(list(window.messages) if window else []):
             messages.append({"role": t["role"], "content": t["content"]})
+        messages.append({"role": "user", "content": user_msg})
+
+        ledger.record("user", estimate_tokens(user_msg))
+        return Assembled(messages=messages, ledger=ledger, parts=parts)
+
+    # ── 单 Agent 循环（P4）：唯一出口 ───────────────────────────────────────
+
+    def for_agent_loop(
+        self, blocks: list[Block], *, user_msg: str, step: int = 0
+    ) -> Assembled:
+        """单 Agent 循环的装配：system（含上下文块）+ 窗口 + 工具结果增量 + 本轮用户消息。
+
+        为什么要按 step 分流（而不是每步重建全套）：
+          · step0 注入**全部**状态块（记忆/指标/数据源/画布/子任务/评估）；
+          · step>0 只把**工具结果增量**拼进来。状态块已在首步的 system 里，
+            重复注入既白烧 token，也会让模型看到两份互相矛盾的画布快照。
+            派发后的**新**画布状态由工具结果承载（build_execution_summary 内含最新布局），
+            所以"不重建"并不会让模型失去最新事实。
+
+        TOOL_RESULT 块承载结构化消息（assistant 的 tool_calls + 各 role=tool 结果），
+        顺序与 tool_call_id **原样保留**——这是 OpenAI 工具协议的要求，压缩不得破坏。
+        """
+        table = active_table("agent_loop")
+        ledger = Ledger(purpose="agent_loop", budget_tokens=table.input_budget())
+        parts: dict[str, str] = {}
+        system_text = ""
+        ctx_lines: list[str] = []
+        window_msgs: list[dict] = []
+        tool_msgs: list[dict] = []
+
+        for b in blocks:
+            if b.is_empty:
+                continue
+            if b.kind is BlockKind.TOOL_RESULT:
+                tool_msgs.extend(dict(m) for m in b.messages)
+                ledger.record(BlockKind.TOOL_RESULT.value, b.tokens())
+                continue
+
+            text = b.text
+            if table.enforced:
+                budget_block = table.get(b.kind)
+                budget = budget_block.max_tokens if budget_block else 0
+                if budget > 0:
+                    b2, reason = self._compressor.compress(b, budget)
+                    text = b2.text
+                    if reason:
+                        ledger.degrade(reason)
+
+            if b.kind is BlockKind.SYSTEM:
+                system_text = text
+                ledger.record(BlockKind.SYSTEM.value, estimate_tokens(text))
+            elif b.kind is BlockKind.WINDOW:
+                window_msgs = [dict(m) for m in b.messages]
+                ledger.record(BlockKind.WINDOW.value, b.tokens())
+            else:
+                parts[b.kind.value] = text
+                ledger.record(b.kind.value, estimate_tokens(text))
+                if step == 0:
+                    header = AGENT_LOOP_HEADERS.get(b.kind, b.kind.value)
+                    ctx_lines.append(f"【{header}】\n{text}")
+
+        if ctx_lines:
+            system_text = (system_text.rstrip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
+
+        messages: list[dict] = []
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        messages.extend(t for t in window_msgs if t.get("role") in ("user", "assistant"))
+        messages.extend(tool_msgs)
         messages.append({"role": "user", "content": user_msg})
 
         ledger.record("user", estimate_tokens(user_msg))

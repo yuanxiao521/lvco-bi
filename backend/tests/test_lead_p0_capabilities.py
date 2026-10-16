@@ -146,11 +146,12 @@ def test_run_worker_uses_the_single_dispatch_core():
     assert "run_analysis(" not in body, "run_worker 不得绕过 dispatch_analysis 直接调 run_analysis"
 
 
-def test_for_agent_loop_is_a_noop_alias_of_for_decision():
-    """P0 装配出口：for_agent_loop(step) 的行为必须与 for_decision 完全一致。
+def test_for_agent_loop_is_no_longer_an_alias_of_for_decision():
+    """P0 时 for_agent_loop 是 for_decision 的空壳别名；**P4 起改成真装配**。
 
-    P4 才会让它「按循环步装配」；在那之前它只是占位出口——任何行为差异都说明
-    有人在 P0 阶段偷偷改了装配语义（这正是本用例要拦住的事）。
+    本用例因此从"必须与 for_decision 一致"改为"**必须已经不等于 for_decision**"——
+    如果哪天有人把它退回别名，统一装配就静默失效了（P4 的成果被悄悄抹掉）。
+    新出口的行为由 tests/test_lead_p4_assembly_unified.py 负责钉住。
     """
     from app.services.context.provider import TurnContextProvider, TurnInputs
 
@@ -166,16 +167,13 @@ def test_for_agent_loop_is_a_noop_alias_of_for_decision():
     )
     p = TurnContextProvider.for_turn(inputs)
     base = p.for_decision("按品类分析")
+    loop_assembled = p.for_agent_loop("按品类分析", step=0, system_text="SYS")
 
-    same = p.for_agent_loop("按品类分析")
-    assert same.messages == base.messages
-    assert same.parts == base.parts
-    assert same.ledger == base.ledger
-
-    # step 在 P0 被忽略：换 step 也必须给出同一装配结果
-    stepped = p.for_agent_loop("按品类分析", step=3)
-    assert stepped.messages == base.messages
-    assert stepped.parts == base.parts
+    # P4：真出口产出**完整 messages**（for_decision 只产 parts、messages 为空）
+    assert base.messages == []
+    assert loop_assembled.messages, "P4 起 for_agent_loop 必须产出完整 messages"
+    assert loop_assembled.messages[-1] == {"role": "user", "content": "按品类分析"}
+    assert loop_assembled.ledger.purpose == "agent_loop"
 
 
 def test_review_subtask_detail_is_exported_from_review_module():
