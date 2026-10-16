@@ -57,6 +57,11 @@ class Decision:
     # ask_user 的反问类型：confirm = 封闭确认（前端渲染确认卡片，用户点击后零 LLM 恢复）；
     # clarify = 开放澄清（用户文字回答，走正常决策）。缺省/非法值一律 clarify（保守）。
     ask_kind: str = "clarify"
+    # P2.5：后续轮（评审后重派）的路由意图，**内含内核选择**：
+    #   patch = 轻量补缺口 → react（复用画布已有块）
+    #   redo  = 重做      → orchestrator（需要重新规划/重新取数）
+    # 第 0 轮不该输出它（那时还没有上轮评审，谈不上补/重做）。
+    repair_kind: str = ""
 
 
 def _guess_complexity(intent: IntentResult) -> str:
@@ -213,16 +218,35 @@ def _parse_decision(
         # 未输出 / 非法：按意图确定性兜底（不额外调用）
         raw_complexity = _guess_complexity(intent)
         logger.warning(f"[lead_decider] missing_complexity use_intent_guess={raw_complexity}")
+
+    # P2.5：repair_kind（后续轮的路由意图）
+    # 分工：第 0 轮只给 complexity；后续轮只给 repair_kind。**同一轮只该出现一个**。
+    raw_repair_kind = str(obj.get("repair_kind") or "").strip().lower()
+    if raw_repair_kind not in ("patch", "redo"):
+        raw_repair_kind = ""
+    degraded_flag = False
+    if raw_repair_kind and obj.get("complexity"):
+        # 两者同时出现 = 模型输出不自洽。**以 repair_kind 为准**并记降级 + 告警：
+        # 不让 LLM 同时给两个字段并要求自洽，等于主动给它制造犯错余地。
+        degraded_flag = True
+        logger.warning(
+            "[lead_decider] both_complexity_and_repair_kind repair_kind_wins=%s",
+            raw_repair_kind,
+        )
+        if degradation is not None:
+            degradation.append("lead_decision_inconsistent_repair_kind")
+
     decision = Decision(
         action=action,
         tool_name=tool_name,
         tool_args=tool_args,
         direct_text=direct_text,
         reason=reason,
-        degraded=False,
+        degraded=degraded_flag,
         complexity=raw_complexity,
         guidance=guidance,
         ask_kind=raw_ask_kind,
+        repair_kind=raw_repair_kind,
     )
     logger.info(
         f"[lead_decider] action={action.value} tool={tool_name} "

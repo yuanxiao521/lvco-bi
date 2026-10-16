@@ -83,10 +83,15 @@ def test_every_spec_is_well_formed_and_classifiable():
         assert tool_class(fn["name"]) is not None, f"{fn['name']} 不属于任何类别"
 
 
-def test_quota_covers_observe_and_dispatch_only():
-    """配额只约束观察/派发；终止动作不占配额（它结束循环）。"""
-    assert set(QUOTA) == {"observe", "dispatch"}
-    assert QUOTA["observe"] == 2 and QUOTA["dispatch"] == 3
+def test_quota_covers_observe_dispatch_and_independent_repair():
+    """配额覆盖观察 / 派发，外加 P2.5 的 **repair 独立上限**（§6 不变量 2b）；
+    终止动作不占配额（它结束循环）。
+
+    为什么 repair 要独立：否则"补一下 → 仍不达标 → 再补"会把派发额度吃光，
+    还会掩盖"方向本身就错了"这个更该被发现的事实。
+    """
+    assert set(QUOTA) == {"observe", "dispatch", "repair"}
+    assert QUOTA["observe"] == 2 and QUOTA["dispatch"] == 3 and QUOTA["repair"] == 2
 
 
 # ── 统一 prompt ────────────────────────────────────────────────────────────

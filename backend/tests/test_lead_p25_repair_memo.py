@@ -41,6 +41,69 @@ def test_memo_key_differs_per_guidance_and_is_stable():
     assert a == effective_memo_key(args, "补上品牌维度"), "同一 guidance 的键必须稳定"
 
 
+# ── P2.5：repair_kind（后续轮的路由意图）──────────────────────────────────
+
+def _intent():
+    from app.services.agents.lead.lead_intent import IntentResult, IntentType
+    return IntentResult(intent=IntentType.ANALYSIS, confidence=0.9,
+                        needs_plan=True, degraded=False)
+
+
+def _parse(obj: dict, degradation=None):
+    from app.services.agents.lead.lead_decider import _parse_decision
+    return _parse_decision(obj, "做个分析", _intent(), degradation)
+
+
+def test_repair_kind_parsed_from_llm_output():
+    d = _parse({"action": "call_analysis", "tool_args": {"goal": "补品牌图"},
+                "repair_kind": "patch"})
+    assert d.repair_kind == "patch"
+    assert d.degraded is False
+
+
+def test_repair_kind_and_complexity_together_repair_kind_wins():
+    """两者同时出现 = 模型输出不自洽 → **以 repair_kind 为准** + 记降级 + 告警。
+
+    不让 LLM 同时给两个字段并要求自洽，等于主动给它制造犯错余地。
+    """
+    degradation: list[str] = []
+    d = _parse({"action": "call_analysis", "tool_args": {"goal": "补品牌图"},
+                "repair_kind": "redo", "complexity": "simple"}, degradation)
+    assert d.repair_kind == "redo"
+    assert d.degraded is True
+    assert "lead_decision_inconsistent_repair_kind" in degradation
+
+
+def test_invalid_repair_kind_is_dropped():
+    assert _parse({"action": "call_analysis", "tool_args": {"goal": "G"},
+                   "repair_kind": "重做"}).repair_kind == ""
+    assert _parse({"action": "call_analysis", "tool_args": {"goal": "G"}}).repair_kind == ""
+
+
+def test_repair_kind_maps_to_kernel():
+    """§4 P2.5：repair_kind **内含路由意图**，不需要新表。"""
+    from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL
+    assert REPAIR_KIND_KERNEL == {"patch": "react", "redo": "orchestrator"}
+
+
+def test_explicit_kernel_wins_in_resolve_worker():
+    """repair_kind 给出的显式内核必须压过「入口 × 复杂度」表。"""
+    from app.services.agents.lead.lead_worker import resolve_worker
+    # chat+complex 本来是 orchestrator；显式给 react 时应为 react（patch 语义）
+    assert resolve_worker("chat", "complex").mode == "orchestrator"
+    assert resolve_worker("chat", "complex", "react").mode == "react"
+    # chat+simple 本来是 react；显式给 orchestrator 时应为 orchestrator（redo 语义）
+    assert resolve_worker("chat", "simple").mode == "react"
+    assert resolve_worker("chat", "simple", "orchestrator").mode == "orchestrator"
+
+
+def test_repair_has_independent_class_and_quota():
+    from app.services.agents.lead.lead_agent_tools import QUOTA, tool_class
+    assert tool_class("repair") == "repair", "repair 必须有独立类别，否则会占派发额度"
+    assert tool_class("dispatch_analysis") == "dispatch"
+    assert QUOTA["repair"] == 2
+
+
 # ── 修法 A：循环里的显式跳过 ───────────────────────────────────────────────
 
 class _Ctx:

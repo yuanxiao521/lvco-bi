@@ -622,11 +622,18 @@ class LeadAgent:
                     break
                 if decision.action == ActionType.CALL_ANALYSIS:
                     had_analysis = True
-                    # 派发目标由「入口 × 复杂度」表解析（lead_worker）；显式 constraints.mode 优先
+                    # 派发目标解析（lead_worker）。优先级：
+                    #   P2.5 的 repair_kind（**内含路由意图**：patch→react / redo→orchestrator）
+                    #   > 显式 constraints.mode > 「入口 × 复杂度」表
+                    _repair_kind = str(getattr(decision, "repair_kind", "") or "")
+                    from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL
+
+                    _explicit_kernel = REPAIR_KIND_KERNEL.get(_repair_kind)
                     worker = resolve_worker(
                         ctx.entry,
                         getattr(decision, "complexity", "complex"),
-                        ((decision.tool_args or {}).get("constraints") or {}).get("mode"),
+                        _explicit_kernel
+                        or ((decision.tool_args or {}).get("constraints") or {}).get("mode"),
                     )
                     async for ev in run_worker(
                         user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,

@@ -36,10 +36,15 @@ OBSERVE_TOOL_NAMES: frozenset[str] = frozenset({
     "query_sample",
 })
 DISPATCH_TOOL_NAMES: frozenset[str] = frozenset({"dispatch_analysis", "repair"})
+# P2.5 护栏（§6 不变量 2b）：repair 本质是"补缺口"，需要**独立上限**——
+# 否则"补一下 → 仍不达标 → 再补"会把派发额度吃光，且掩盖"方向本身错了"。
+REPAIR_TOOL_NAMES: frozenset[str] = frozenset({"repair"})
+# repair_kind → 执行内核（§4 P2.5：它**内含路由意图**，不需要新表）
+REPAIR_KIND_KERNEL: dict[str, str] = {"patch": "react", "redo": "orchestrator"}
 TERMINAL_TOOL_NAMES: frozenset[str] = frozenset({"answer", "ask_user", "stop"})
 
 # 每类工具的次数上限（§2.3 循环闸）。终止动作不占配额——它结束循环。
-QUOTA: dict[str, int] = {"observe": 2, "dispatch": 3}
+QUOTA: dict[str, int] = {"observe": 2, "dispatch": 3, "repair": 2}
 
 
 def _fn(name: str, description: str, properties: dict | None = None,
@@ -113,6 +118,8 @@ def tool_class(name: str) -> str | None:
     """工具所属类别：observe / dispatch / terminal；未知返回 None。"""
     if name in OBSERVE_TOOL_NAMES:
         return "observe"
+    if name in REPAIR_TOOL_NAMES:
+        return "repair"          # 先于 dispatch 判断：repair 有独立配额（§6 2b）
     if name in DISPATCH_TOOL_NAMES:
         return "dispatch"
     if name in TERMINAL_TOOL_NAMES:
