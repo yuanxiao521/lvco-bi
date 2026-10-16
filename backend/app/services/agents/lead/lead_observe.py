@@ -61,6 +61,70 @@ async def list_datasources(
         return []
 
 
+def list_metrics(ctx) -> str:
+    """受治理指标清单（只读）。
+
+    P3 直接读**已经注入上下文的那份**（ctx.metrics_ctx，来自指标语义层），
+    不另开一条取数路径——同一事实只应有一个来源，否则两边迟早不一致。
+    """
+    return str(getattr(ctx, "metrics_ctx", "") or "")
+
+
+async def recon_tool(
+    name: str,
+    *,
+    ctx,
+    args: dict | None = None,
+    db_session=None,
+    trace=None,
+    degradation: list[str] | None = None,
+):
+    """执行一次只读观察（P3：独立 trace 名 lead_recon；失败即降级）。
+
+    返回观察结果（str 或 list）；未接的工具返回 None（调用方据此记降级）。
+    收敛在这里的意义：观察的 trace / 降级 / 工具名分派只有一份实现，
+    循环里不再散落 if-elif 与 try/except。
+    """
+    args = args or {}
+    span_cm = None
+    if trace is not None:
+        try:
+            from app.services.observability import observe_tool_call
+
+            span_cm = observe_tool_call(trace, "lead_recon:" + name, args=args)
+            span_cm.__enter__()
+        except Exception:  # noqa: BLE001
+            span_cm = None
+    try:
+        if name == "get_canvas_layout":
+            return await get_canvas_layout(ctx)
+        if name == "list_datasources":
+            return await list_datasources(
+                db_session, str(ctx.user_id), datasource_id=ctx.datasource_id
+            )
+        if name == "list_fields":
+            return await list_fields(db_session, str(ctx.user_id), args.get("datasource_id"))
+        if name == "list_metrics":
+            return list_metrics(ctx)
+        # query_sample：需要真实取数（list_fields → 组列名 → LIMIT 5）。项目禁止 SELECT *，
+        # 这条链路要连 SQL guard 一起验，**留到能用真机验证时再接**——
+        # 现在返回 None，由调用方记 degraded，绝不假装成功。
+        if degradation is not None:
+            degradation.append("lead_agent_observe_unimplemented_" + name)
+        return None
+    except Exception:  # noqa: BLE001
+        logger.warning("[lead_observe] recon_failed name=%s", name, exc_info=True)
+        if degradation is not None:
+            degradation.append("lead_agent_observe_failed_" + name)
+        return None
+    finally:
+        if span_cm is not None:
+            try:
+                span_cm.__exit__(None, None, None)
+            except Exception:  # noqa: BLE001
+                pass
+
+
 async def list_fields(db_session, user_id: str, datasource_id) -> list[dict]:
     """指定数据源的字段清单（列名 + 类型）。
 

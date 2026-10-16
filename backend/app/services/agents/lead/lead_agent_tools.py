@@ -82,7 +82,12 @@ DISPATCH_SPECS: list[dict] = [
         "goal 用一句自然语言写清本阶段目标。",
         {"goal": {"type": "string", "description": "本阶段目标"},
          "complexity": {"type": "string", "enum": ["complex", "simple"],
-                        "description": "complex=需要多步编排/多图表；simple=单查询或已有上下文可直接答"}},
+                        "description": "complex=需要多步编排/多图表；simple=单查询或已有上下文可直接答"},
+         "acceptance": {
+             "type": "object",
+             "description": "可选的验收标准（代码可核验）。目前支持 "
+                            "min_blocks(整数：至少几个内容块)、require_verified(布尔：报告数字须过后验)",
+         }},
         ["goal"]),
     _fn("repair",
         "小缺口轻量补发：复用画布已有块，只补缺的部分（不重做全量编排）。",
