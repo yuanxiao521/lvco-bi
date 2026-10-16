@@ -113,6 +113,30 @@ def equivalent_worker_table() -> BudgetTable:
     )
 
 
+def equivalent_agent_loop_table() -> BudgetTable:
+    """单 Agent 循环（P4）：全量 messages 形态。
+
+    与 answer 表同源，但多两项**它独有的固定/热开销**：
+      · tool_schema：工具 JSON schema（与 worker 表同口径的实测值）
+      · tool_result：当轮工具结果（L0 热层，用完即弃）
+    enforced=False：本阶段只做"统一出口 + 台账覆盖"，**不改变渲染结果**；
+    压缩策略要单独一轮调优（改 enforced 会直接改 prompt 内容，必须配评测）。
+    """
+    return BudgetTable(
+        purpose="agent_loop",
+        blocks=(
+            BlockBudget("system", 1200, priority=100),
+            BlockBudget("tool_schema", 1947, priority=95),   # 与 TARGET_WORKER 同口径
+            BlockBudget("tool_result", int(getattr(settings, "TOOL_RESULT_MAX_TOKENS", 800) or 800), priority=80),
+            BlockBudget("memory", max(200, int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400) * 5 // 9), priority=70),
+            BlockBudget("window", int(getattr(settings, "LEAD_CTX_ANSWER_HISTORY_TOKENS", 2000) or 2000), priority=90),
+        ),
+        output_tokens=int(getattr(settings, "LEAD_MERGED_MAX_TOKENS", 1500) or 1500),
+        enforced=False,
+        note="P4：单 Agent 循环输入预算（含工具结果与工具 schema）",
+    )
+
+
 # ── 目标表（P2）：计划里的设计值 ────────────────────────────────────────────
 TARGET_DECISION = BudgetTable(
     purpose="decision",
@@ -167,6 +191,8 @@ ACTIVE: dict[str, BudgetTable] = {
     "decision": equivalent_decision_table(),
     "answer": equivalent_answer_table(),
     "worker": equivalent_worker_table(),
+    # P4：单 Agent 循环的第四个出口
+    "agent_loop": equivalent_agent_loop_table(),
 }
 
 

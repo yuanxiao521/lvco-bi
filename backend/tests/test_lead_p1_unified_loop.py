@@ -238,18 +238,11 @@ async def test_stream_unified_wrapper_emits_done_last(monkeypatch):
 
 # ── 上下文装配 ─────────────────────────────────────────────────────────────
 
-def test_build_messages_injects_context_blocks():
-    ctx = FakeCtx()
-    ctx.history_summary = "上轮聊了销售额"
-    ctx.turn_summaries = ["[子任务评估] 上轮达标"]
-    msgs = U.build_lead_messages(
-        user_msg="那华东呢", ctx=ctx,
-        available_datasources=[{"id": 7, "name": "DS", "type": "duckdb",
-                                "fields": [{"name": "region"}]}],
-        canvas_layout="画布：1 个图表块",
-    )
-    assert msgs[0]["role"] == "system"
-    sys_text = msgs[0]["content"]
-    for token in ("历史记忆", "可用数据源", "id=7", "region", "当前画布布局", "子任务评估"):
-        assert token in sys_text, f"上下文缺少 {token}"
-    assert msgs[-1] == {"role": "user", "content": "那华东呢"}
+def test_context_assembly_moved_to_provider_outlet():
+    """P4：上下文装配**已收归** TurnContextProvider.for_agent_loop。
+
+    本模块不再有 build_lead_messages（临时实现已删）——若它被重新加回来，
+    就等于又开了一条装配路径，统一装配白做。
+    """
+    assert not hasattr(U, "build_lead_messages"), "临时装配函数不该回来"
+    assert not hasattr(U, "_render_datasources"), "渲染应收敛到 context/sources"

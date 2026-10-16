@@ -30,7 +30,7 @@ from app.services.context.sources.state import (
     SubtaskSource,
 )
 from app.services.context.sources.window import WindowSource
-from app.services.context.types import Assembled, Block, BlockKind, Ledger
+from app.services.context.types import Assembled, Block, BlockKind, Ledger, Priority
 
 
 @dataclass
@@ -66,6 +66,9 @@ class TurnContextProvider:
             int(getattr(settings, "LEAD_MAX_TURNS_IN_CTX", 30) or 30),
         )
         self._memory = MemorySource(inputs.history_summary)
+        # P4：循环内的工具结果（L0 热层）。每步追加一条（本轮 assistant 的 tool_calls
+        # + 各 role=tool 结果），顺序与 tool_call_id 必须原样保留。
+        self._tool_results: list[list[dict]] = []
         self._sources: dict[BlockKind, object] = {
             BlockKind.DATASOURCES: DatasourceSource(inputs.datasources),
             BlockKind.CANVAS: CanvasSource(inputs.canvas_layout),
@@ -82,6 +85,11 @@ class TurnContextProvider:
     def warmup(self) -> None:
         """P0：所有 Source 都是内存装配，无需预热。阶段 3（DB 取数）在此并发加载。"""
         return None
+
+    def add_tool_result(self, messages: list[dict]) -> None:
+        """追加一步的工具结果（assistant 的 tool_calls + role=tool 结果）。"""
+        if messages:
+            self._tool_results.append([dict(m) for m in messages])
 
     def refresh_canvas(self, layout_text: str) -> None:
         """落块后刷新画布快照（等价于旧 CanvasStateProvider 的 force=True 语义）。"""
@@ -103,18 +111,29 @@ class TurnContextProvider:
         """决策上下文：parts["history_summary"] 与旧 ctx.digest() 逐字节等价。"""
         return self._assembler.for_decision(self._base_blocks(), user_msg=user_msg)
 
-    def for_agent_loop(self, user_msg: str, *, step: int = 0) -> Assembled:
-        """单 Agent 循环的装配出口（**P0 空实现**：内部先复用 for_decision）。
+    def for_agent_loop(
+        self, user_msg: str, *, step: int = 0, system_text: str = ""
+    ) -> Assembled:
+        """**单 Agent 循环的唯一装配出口**（P4 起为真实现）。
 
-        为什么要先占住这个出口：P1 会把 Lead 从「四个工位」合并成「一个 system + 循环」，
-        P4 再把它变成「按循环步装配」（step0 全量；后续步只追加工具结果增量，
-        并把决策路径手拼的四块全部搬进 Source）。先把出口立起来，
-        调用方就能提前切过去而**不改行为**，把风险留在一个可回滚的小提交里。
-
-        P0 契约：行为与 for_decision **完全一致**（step 参数暂被忽略）——
-        由 tests/test_lead_p0_capabilities.py 对拍钉住。
+        P0 时它是 for_decision 的空壳别名（先占住出口、行为不变）；P4 换成真装配：
+          · step0：system + 全部状态块（记忆/指标/数据源/画布/子任务/评估）+ 窗口；
+          · step>0：只追加工具结果增量（状态块已在首步的 system 里）。
+        装配细节与"为什么不重建"见 Assembler.for_agent_loop 的说明。
         """
-        return self.for_decision(user_msg)
+        blocks: list[Block] = []
+        if system_text:
+            blocks.append(Block(
+                kind=BlockKind.SYSTEM, text=system_text,
+                priority=Priority.SYSTEM, compressible=False,
+            ))
+        blocks.extend(self._base_blocks())          # 记忆 + 窗口 + 状态源
+        for msgs in self._tool_results:
+            blocks.append(Block(
+                kind=BlockKind.TOOL_RESULT, messages=tuple(msgs),
+                priority=Priority.TOOL_RESULT, compressible=False,
+            ))
+        return self._assembler.for_agent_loop(blocks, user_msg=user_msg, step=step)
 
     def for_answer(
         self,
