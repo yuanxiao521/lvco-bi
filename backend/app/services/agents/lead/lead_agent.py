@@ -391,6 +391,15 @@ class LeadContext:
         return out
 
 
+def lead_agent_mode() -> str:
+    """P1 模式开关：legacy（默认）| unified。
+
+    非法值一律当 legacy——配置写错时**退回到已验证的路径**，而不是进一条没人跑过的新路。
+    """
+    raw = str(getattr(settings, "LEAD_AGENT_MODE", "legacy") or "legacy").strip().lower()
+    return raw if raw in ("legacy", "unified") else "legacy"
+
+
 class LeadAgent:
     """主导 Agent：意图 → 决策 → 调度 → 汇报 → 记忆回流。"""
 
@@ -458,6 +467,16 @@ class LeadAgent:
                 trace_cm = None
 
         try:
+            # ── P1：unified 模式（单 Agent + 工具循环）────────────────────────
+            # 默认 legacy → 本分支不进，行为零变化；切换由 LEAD_AGENT_MODE 控制，
+            # 出问题改回 legacy 即可回滚（双跑对拍通过前不动默认值）。
+            if lead_agent_mode() == "unified":
+                async for ev in self._stream_unified(
+                    user_msg, ctx=ctx, db_session=db_session, trace=trace
+                ):
+                    yield ev
+                return
+
             # ── 0.5) 请求级上下文门面（阶段 6）：一次构造全轮复用，装配产台账落 trace。
             # P0 语义：parts["history_summary"] 与 ctx.digest() 逐字节等价（测试锁定），
             # 决策 prompt 的实际内容不变——本步只增加"每块 token 台账"这一可观测产物。
@@ -669,6 +688,50 @@ class LeadAgent:
 
 
 
+
+    # ── P1 unified 分支：单 system + 工具循环 + 后处理（收尾总结 / 记忆回流）──
+    async def _stream_unified(
+        self, user_msg: str, *, ctx: LeadContext, db_session, trace=None
+    ) -> AsyncIterator[dict]:
+        """unified 模式的一轮。
+
+        循环本体在 lead_agent_unified.stream_unified（不碰 legacy 的 stream 主体）；
+        这里只负责"装配入口 + 后处理"，并保证**后处理插在 done 之前**
+        （否则前端会在记忆事件到达前就解锁输入）。
+        """
+        from app.services.agents.lead.lead_agent_unified import stream_unified
+        from app.services.agents.lead.lead_observe import list_datasources
+
+        degradation: list[str] = []
+        available = await list_datasources(
+            db_session, str(ctx.user_id), datasource_id=ctx.datasource_id,
+            inject_fields_unselected=(ctx.entry == "canvas"),
+        )
+        async for ev in stream_unified(
+            user_msg=user_msg,
+            ctx=ctx,
+            db_session=db_session,
+            llm=self.llm,
+            available_datasources=available,
+            memo=self._memo,
+            memo_lock=self._memo_lock,
+            extra_plannable_tools=self.extra_plannable_tools,
+            trace=trace,
+            degradation=degradation,
+            emit_answer=self._emit_answer,
+            confirm_guard=self._confirm_guard,
+            emit_done=False,
+        ):
+            yield ev
+
+        async for ev in self._maybe_final_summary(ctx):
+            yield ev
+        memory_event = await self._maybe_summarize(ctx, db_session=db_session, trace=trace)
+        if memory_event:
+            if memory_event.get("summary"):
+                yield {"type": "memory_saved", "chars": len(memory_event["summary"])}
+            yield {"type": "compressed_history", **memory_event}
+        yield {"type": "done", "degraded": bool(degradation), "degradations": degradation}
 
     # ── 分支：直接回答（decision 已给文本则直出，否则轻量 LLM 生成）──
     async def _answer_branch(

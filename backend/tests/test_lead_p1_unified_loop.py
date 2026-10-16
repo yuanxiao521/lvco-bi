@@ -153,6 +153,59 @@ async def test_llm_failure_degrades_deterministically():
     assert "lead_agent_llm_failed" in events[-1]["degradations"]
 
 
+# ── 模式开关与包装层顺序 ───────────────────────────────────────────────────
+
+def test_lead_agent_mode_defaults_to_legacy_and_rejects_garbage(monkeypatch):
+    """非法配置值必须退回 legacy——配置写错时回到已验证路径，而不是进新路。"""
+    from app.config import settings
+    from app.services.agents.lead.lead_agent import lead_agent_mode
+
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "legacy")
+    assert lead_agent_mode() == "legacy"
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "Unified")
+    assert lead_agent_mode() == "unified"
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "  unified  ")
+    assert lead_agent_mode() == "unified"
+    for bad in ("", None, "v2", "experimental"):
+        monkeypatch.setattr(settings, "LEAD_AGENT_MODE", bad)
+        assert lead_agent_mode() == "legacy", f"{bad!r} 应退回 legacy"
+
+
+async def test_stream_unified_wrapper_emits_done_last(monkeypatch):
+    """后处理（收尾总结 / 记忆回流）必须排在 done **之前**。
+
+    顺序反了的话，前端收到 done 就解锁输入并清 streaming 态，
+    而记忆事件还在后面——观感与状态都会错乱。
+    """
+    from app.services.agents.lead import lead_agent as LA
+    from app.services.agents.lead import lead_agent_unified as U
+
+    seen: dict = {}
+
+    async def fake_stream_unified(**kw):
+        seen["emit_done"] = kw.get("emit_done")
+        yield {"type": "report", "content": "正文", "source": "lead"}
+
+    async def fake_summarize(self, ctx, db_session=None, trace=None):
+        return {"summary": "记忆摘要", "covered_rounds": 1}
+
+    monkeypatch.setattr(U, "stream_unified", fake_stream_unified)
+    monkeypatch.setattr(LA.LeadAgent, "_maybe_summarize", fake_summarize)
+
+    agent = LA.LeadAgent(llm=object())
+    events = [
+        ev async for ev in agent._stream_unified(
+            "你好", ctx=LA.LeadContext(user_id="u1"), db_session=None
+        )
+    ]
+    types = [e["type"] for e in events]
+
+    assert seen["emit_done"] is False, "包装层必须自己发 done（否则后处理插不进去）"
+    assert types[-1] == "done", f"done 必须在最后，实际顺序 {types}"
+    assert "compressed_history" in types
+    assert types.index("compressed_history") < types.index("done")
+
+
 # ── 上下文装配 ─────────────────────────────────────────────────────────────
 
 def test_build_messages_injects_context_blocks():

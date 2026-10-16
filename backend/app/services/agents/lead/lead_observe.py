@@ -38,13 +38,24 @@ async def get_canvas_layout(ctx) -> str:
 
 
 async def list_datasources(
-    db_session, user_id: str, *, datasource_id=None
+    db_session,
+    user_id: str,
+    *,
+    datasource_id=None,
+    inject_fields_unselected: bool = False,
 ) -> list[dict]:
-    """可用数据源清单（表级摘要；已选源带字段）。失败返回空列表。"""
+    """可用数据源清单（表级摘要；已选源带字段）。失败返回空列表。
+
+    inject_fields_unselected：画布入口用——未选源时也给**首个数据源**注入真实字段，
+    让执行器在规划/落块前就拿到列名（与 legacy 决策路径同一语义）。
+    """
     from app.services.agents.lead.lead_tools import _load_available_datasources
 
     try:
-        return await _load_available_datasources(db_session, user_id, datasource_id)
+        return await _load_available_datasources(
+            db_session, user_id, datasource_id,
+            inject_fields_unselected=inject_fields_unselected,
+        )
     except Exception:  # noqa: BLE001
         logger.warning("[lead_observe] list_datasources_failed", exc_info=True)
         return []
