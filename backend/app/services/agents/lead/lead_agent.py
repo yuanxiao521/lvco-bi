@@ -400,6 +400,23 @@ def lead_agent_mode() -> str:
     return raw if raw in ("legacy", "unified") else "legacy"
 
 
+def _provider_context_blocks(assembled) -> tuple[str, str, str, str]:
+    """P4 装配统一：从 provider 的装配结果取出决策路径要的四块。
+
+    顺序必须与 `lead_decider._build_context_blocks` 的返回一致：
+    (数据源, 画布, 子任务评估, 已完成摘要)。两边用同一批渲染函数，故逐字节等价。
+    """
+    from app.services.context.types import BlockKind
+
+    parts = getattr(assembled, "parts", {}) or {}
+    return (
+        parts.get(BlockKind.DATASOURCES.value, ""),
+        parts.get(BlockKind.CANVAS.value, ""),
+        parts.get(BlockKind.ASSESSMENT.value, ""),
+        parts.get(BlockKind.SUBTASK.value, ""),
+    )
+
+
 class LeadAgent:
     """主导 Agent：意图 → 决策 → 调度 → 汇报 → 记忆回流。"""
 
@@ -528,6 +545,8 @@ class LeadAgent:
                     timeout=settings.LEAD_DECISION_TIMEOUT,
                     degradation=degradation,
                     trace=trace,
+                    # P4：四块交给 provider 装配（渲染函数同源，逐字节等价）
+                    context_blocks=_provider_context_blocks(assembled),
                 )
             elif _guard[0] == "resume":
                 merged = MergedOutcome(
@@ -580,6 +599,8 @@ class LeadAgent:
                         timeout=settings.LEAD_DECISION_TIMEOUT,
                         degradation=degradation,
                         trace=trace,
+                        # P4：四块交给 provider 装配（每轮都重新装配，快照保持最新）
+                        context_blocks=_provider_context_blocks(decision_assembled),
                     )
                 prev_action = decision.action.value
                 yield {

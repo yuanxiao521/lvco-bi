@@ -101,6 +101,50 @@ def test_tool_result_recorded_in_ledger():
     assert a.ledger.entries.get(BlockKind.TOOL_RESULT.value, 0) >= 0
 
 
+# ── P4b：决策路径四块改由 provider 供（逐字节等价）────────────────────────
+
+def test_decision_context_blocks_are_byte_identical_to_local_render():
+    """P4b 验收：provider 供的四块必须与本地渲染**逐字节一致**。
+
+    这是"双轨合并"的安全前提——渲染函数同源（context/sources/state.py），
+    分叉只可能出现在"谁把结果拼进 prompt"。对拍覆盖有数据/全空/空白三种形态。
+    """
+    from app.services.agents.lead.lead_decider import _build_context_blocks
+
+    ds = [{"id": 7, "name": "DS", "type": "duckdb"}]
+    summaries = ["[子任务执行记录] 已生成 3 块", "[子任务评估] 上轮达标"]
+    layout = "画布：1 个图表块"
+
+    for d, s, c in ((ds, summaries, layout), (None, [], ""), ([], None, "  ")):
+        assembled = _provider(datasources=d, subtask_summaries=s,
+                              canvas_layout=c).for_decision("x")
+        from_provider = (
+            assembled.parts.get(BlockKind.DATASOURCES.value, ""),
+            assembled.parts.get(BlockKind.CANVAS.value, ""),
+            assembled.parts.get(BlockKind.ASSESSMENT.value, ""),
+            assembled.parts.get(BlockKind.SUBTASK.value, ""),
+        )
+        assert from_provider == _build_context_blocks(d, s, c), f"四块不等价: {(d, s, c)!r}"
+
+
+def test_resolve_context_blocks_falls_back_when_a_part_is_missing():
+    """某块缺席时必须退回本地渲染——保住「（无）」占位，不把空串塞进 prompt。
+
+    这是 P4b 唯一的风险点：provider 的 blocks 只在非空时进 parts。
+    """
+    from app.services.agents.lead.lead_decider import (
+        _build_context_blocks,
+        _resolve_context_blocks,
+    )
+
+    local = _build_context_blocks(None, [], "")
+    assert _resolve_context_blocks(None, None, [], "") == local
+    # 有空串 → 视为缺席 → 退回（保住占位）
+    assert _resolve_context_blocks(("a", "", "c", "d"), None, [], "") == local
+    # 四块齐全 → 采用 provider 的版本
+    assert _resolve_context_blocks(("a", "b", "c", "d"), None, [], "") == ("a", "b", "c", "d")
+
+
 # ── 预算表 ─────────────────────────────────────────────────────────────────
 
 def test_agent_loop_budget_table_exists_and_is_not_enforced_yet():

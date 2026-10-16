@@ -103,6 +103,26 @@ class MergedOutcome:
     decision: Decision
 
 
+def _resolve_context_blocks(
+    context_blocks: tuple[str, str, str, str] | None,
+    datasources: list[dict] | None,
+    subtask_summaries: list[str] | None,
+    canvas_layout: str,
+) -> tuple[str, str, str, str]:
+    """P4 装配统一：优先用 **provider 装配好的四块**，否则退回本地渲染。
+
+    为什么能逐字节等价：两边用的是**同一批渲染函数**（context/sources/state.py）——
+    决策路径原先只在"谁来调渲染"上分叉，渲染口径从未分叉。
+
+    为什么必须留退回分支：provider 的 blocks 只在**非空**时进 parts；万一某块缺席，
+    本地渲染会给「（无）」占位而 parts 是空串——那种情况下必须退回，否则占位文案
+    会消失（这是本函数唯一的风险点，已由对拍测试覆盖）。
+    """
+    if context_blocks is not None and all(isinstance(t, str) and t for t in context_blocks):
+        return context_blocks
+    return _build_context_blocks(datasources, subtask_summaries, canvas_layout)
+
+
 def _build_context_blocks(
     datasources: list[dict] | None,
     subtask_summaries: list[str] | None,
@@ -277,6 +297,7 @@ async def decide_action(
     degradation: list[str] | None = None,
     prev_action: str | None = None,
     trace=None,
+    context_blocks: tuple[str, str, str, str] | None = None,
 ) -> Decision:
     """根据意图决定动作（Supervisor 版：可在多轮间传递子任务摘要）。
 
@@ -297,8 +318,8 @@ async def decide_action(
     """
     from app.services.ai_prompts import LEAD_DECISION_SYSTEM
 
-    ds_block, canvas_block, assessment_block, summary_block = _build_context_blocks(
-        datasources, subtask_summaries, canvas_layout
+    ds_block, canvas_block, assessment_block, summary_block = _resolve_context_blocks(
+        context_blocks, datasources, subtask_summaries, canvas_layout
     )
 
     user_content = (
@@ -387,6 +408,7 @@ async def decide_action_merged(
     timeout: float = 10.0,
     degradation: list[str] | None = None,
     trace=None,
+    context_blocks: tuple[str, str, str, str] | None = None,
 ) -> MergedOutcome:
     """首轮合并调用：一次 LLM 请求同时产出【意图】+【决策】。
 
@@ -402,8 +424,8 @@ async def decide_action_merged(
     # 决策 prompt 按助手身份选：画布页与对话页各有一份（感知/派发/评审本就已按 entry
     # 分化，这一份补上"决策"维度——两个场景的 Lead 至此四维齐备）。
     system = LEAD_MERGED_SYSTEM_CANVAS if entry == "canvas" else LEAD_MERGED_SYSTEM
-    ds_block, canvas_block, assessment_block, summary_block = _build_context_blocks(
-        datasources, subtask_summaries, canvas_layout
+    ds_block, canvas_block, assessment_block, summary_block = _resolve_context_blocks(
+        context_blocks, datasources, subtask_summaries, canvas_layout
     )
 
     user_content = (
