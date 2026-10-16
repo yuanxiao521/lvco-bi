@@ -49,6 +49,7 @@ async def dispatch_analysis(
     on_progress=None,
     trace=None,
     guidance: str = "",
+    bypass_memo: bool = False,
 ) -> RunAnalysisResult:
     """派发的**内核**：组装 RunAnalysisArgs → 在 memo_lock 下执行 run_analysis。
 
@@ -83,6 +84,7 @@ async def dispatch_analysis(
             memo=memo,
             available_datasources=available_datasources,
             worker_guidance=guidance,
+            bypass_memo=bypass_memo,
         )
 
 
@@ -103,6 +105,7 @@ async def run_worker(
     trace=None,
     do_review: bool = True,
     on_result=None,
+    bypass_memo: bool = False,
 ) -> AsyncIterator[dict]:
     tool_args = decision.tool_args or {}
     goal = str(tool_args.get("goal") or user_msg)
@@ -161,6 +164,7 @@ async def run_worker(
                 on_progress=_on_progress,
                 trace=trace,
                 guidance=getattr(decision, "guidance", "") or "",
+                bypass_memo=bypass_memo,
             )
         except Exception as e:  # noqa: BLE001
             logger.exception(f"[lead_agent] run_analysis_failed: {e}")

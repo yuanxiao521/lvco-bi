@@ -140,6 +140,27 @@ def assess_subtask_detail(
     return SubtaskAssessment(text=text, hard=hard, soft=soft)
 
 
+def effective_memo_key(args: RunAnalysisArgs, worker_guidance: str = "") -> str:
+    """幂等键（计入 guidance）——P2.5.1 陷阱的修法 B。
+
+    原实现刻意不含 guidance，于是**同一请求内用同一个 goal 重派**会命中上一轮的 memo
+    → 直接返回"未达标"的旧结果 → redo 完全无效；日志里只显示 memo_hit，
+    **看起来像"执行过了"**。现状能跑对，靠的是 LLM 恰好把 guidance 写进了 goal——
+    那是运气，不是设计。
+
+    为什么 guidance ≠ acceptance：guidance 是"要改成什么"（**实质输入**，改了就该重跑）；
+    acceptance 是"声明的标准"（改了不该击穿 memo，见 P3）。所以只把 guidance 纳入。
+
+    **仅在非空时拼接**：无 guidance 的路径（绝大多数 legacy 调用）键完全不变，
+    行为零变化。
+    """
+    key = make_idempotency_key(args)
+    if worker_guidance:
+        digest = hashlib.sha1(worker_guidance.encode("utf-8")).hexdigest()[:8]
+        key = f"{key}:g{digest}"
+    return key
+
+
 def assess_subtask(result: RunAnalysisResult, *, entry: str = "chat", user_goal: str = "") -> str:
     """确定性评审：从子任务产物判定「是否达标」，返回一行带前缀的评估文本。
 
@@ -485,6 +506,7 @@ async def run_analysis(
     memo: dict | None = None,
     available_datasources: list[dict] | None = None,
     worker_guidance: str = "",
+    bypass_memo: bool = False,
 ) -> RunAnalysisResult:
     """执行一次分析：按 `entry`/`constraints.mode` 委托编排器或 ReAct。
 
@@ -498,10 +520,15 @@ async def run_analysis(
         extra_plannable_tools: 入口级工具白名单（画布入口传入）。
         on_progress: 感知回调；不传则用 `emit` 直接吐 progress/text。
         memo: 幂等缓存（dict）；命中直接复用。
+        bypass_memo: 显式重做（redo）时跳过 memo——"重做"不是"重复执行"。
         available_datasources: 预加载的可用数据源（不传则内部加载）。
     """
     started = time.perf_counter()
-    key = make_idempotency_key(args)
+    key = effective_memo_key(args, worker_guidance)
+    # P2.5.1 修法 A：**显式重做**语义上不是"重复执行"，可彻底跳过 memo。
+    # 与 B（guidance 进键）互补：B 治"带指导的重派"，A 治"goal 一字不改的重做"。
+    if bypass_memo:
+        memo = None
     if memo is not None and key in memo:
         cached = memo[key]
         logger.info(f"[lead_tools] memo_hit key={key}")

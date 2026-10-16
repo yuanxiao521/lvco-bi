@@ -220,6 +220,7 @@ async def stream_unified(
         ) + history
 
     finished = False
+    seen_goals: set[str] = set()   # 本请求内派发过的 goal（用于识别"重做"）
     for step in range(limit):
         messages = _messages()
         text_parts: list[str] = []
@@ -364,6 +365,12 @@ async def stream_unified(
                 if overridden:
                     degradation.append("lead_agent_complexity_override")
 
+            # ── P2.5.1：同一个 goal 在本请求内**再派一次** = 重做（redo）──
+            # 必须显式跳过 memo，否则会命中上一轮的缓存、直接返回"未达标"的旧结果，
+            # 日志里只显示 memo_hit——看起来像"执行过了"，实际什么都没跑。
+            already_dispatched = goal in seen_goals
+            seen_goals.add(goal)
+
             decision = Decision(
                 action=ActionType.CALL_ANALYSIS,
                 tool_name="run_analysis",
@@ -384,6 +391,10 @@ async def stream_unified(
                 # 否则同一次派发会写两条 [子任务评估]
                 do_review=False,
                 on_result=lambda r: captured.setdefault("result", r),
+                # 重做（同 goal 再派）或 repair：显式跳过 memo。
+                # 与"guidance 进幂等键"互补——那条治"带指导的重派"，
+                # 这条治"goal 一字不改的重做"。
+                bypass_memo=(already_dispatched or name == "repair"),
             ):
                 yield ev
             # 派发后刷新画布快照：后续步骤的上下文与评审输入都要用最新布局
