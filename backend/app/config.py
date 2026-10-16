@@ -183,6 +183,13 @@ class Settings(BaseSettings):
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
     LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
+    # P1 单 Agent 化：Lead 的执行形态开关。
+    #   legacy  = 四个 prompt 工位（merged + decision + answer），当前生产形态；
+    #   unified = 一个 system + 工具层 + 循环闸（P1 目标形态）。
+    # 默认 legacy：P1 必须可回滚——双跑对拍通过后才切换默认值。
+    LEAD_AGENT_MODE: str = "legacy"
+    # unified 模式的循环闸：单轮最多几步（观察/派发/终止动作合计，§2.3）。
+    LEAD_AGENT_MAX_STEPS: int = 6
 
     # 任务队列（ARQ）：True = 对话任务投递到 Redis 队列、由独立 worker 进程执行
     # （API 进程重启不影响已入队任务）；False = 沿用进程内 asyncio.Task（默认，行为不变）。
