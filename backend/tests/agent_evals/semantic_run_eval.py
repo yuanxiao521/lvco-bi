@@ -39,6 +39,19 @@ OUT_RESULTS = BASE / "semantic_results.jsonl"
 OUT_EVENTS = BASE / "semantic_events.jsonl"
 
 
+def out_paths(prefix: str = "") -> tuple[Path, Path, Path]:
+    """按批次前缀派生输出路径。
+
+    为什么需要：默认是**固定文件名**，跑一次就把上一次的报告覆盖掉——而
+    semantic_report*.md 被 .gitignore 忽略，覆盖后无法从 git 恢复（基线报告
+    就这样丢过一次）。分批评测时每批给一个前缀，各批报告即可并存。
+    """
+    tag = f"_{prefix}" if prefix else ""
+    return (BASE / f"semantic_report{tag}.md",
+            BASE / f"semantic_results{tag}.jsonl",
+            BASE / f"semantic_events{tag}.jsonl")
+
+
 def load_dataset(path: Path) -> list[dict]:
     items = []
     with open(path, encoding="utf-8") as f:
@@ -264,6 +277,18 @@ async def main_async(args) -> int:
         print(f"仅画布：运行全部 {len(ds)} 道画布题 {sorted(q['id'] for q in ds)}")
     else:
         print(f"全量：{len(ds)} 题（画布 {len(canvas_cases)} 道 + 对话 {len(ds)-len(canvas_cases)} 道）")
+    # 分批评测：--ids 指定本次只跑哪几道。
+    # 动机：20 道连着跑 = 短时间内上百次 LLM 调用，会把网关日额度打爆
+    # （实测第 5 道起全部 503，后 16 道 0 分 0 秒，整批作废）。
+    if getattr(args, "ids", None):
+        want = {x.strip() for x in str(args.ids).split(",") if x.strip()}
+        ds = [q for q in ds if q["id"] in want]
+        if not ds:
+            print(f"没有匹配的题 id：{sorted(want)}")
+            return 2
+        print(f"本批只跑 {len(ds)} 道：{[q['id'] for q in ds]}")
+
+    out_md, out_results, out_events = out_paths(getattr(args, "out_prefix", "") or "")
     results: list[SemanticResult] = []
     start = time.time()
 
@@ -272,8 +297,8 @@ async def main_async(args) -> int:
     timeout_of = lambda qid: 360.0 if by_path.get(qid) == "canvas" else 150.0
 
     # 增量落盘：逐题追加，任一楼挂起也保留前面的结果
-    with open(OUT_RESULTS, "w", encoding="utf-8") as fres, \
-         open(OUT_EVENTS, "w", encoding="utf-8") as fev:
+    with open(out_results, "w", encoding="utf-8") as fres, \
+         open(out_events, "w", encoding="utf-8") as fev:
         for i, q in enumerate(ds, 1):
             entry = "canvas" if q.get("category") == "canvas" else "chat"
             t0 = time.time()
@@ -302,8 +327,8 @@ async def main_async(args) -> int:
 
     duration = time.time() - start
     md = render_report(results, ds, duration)
-    OUT_MD.write_text(md, encoding="utf-8")
-    print(f"\n报告: {OUT_MD}")
+    out_md.write_text(md, encoding="utf-8")
+    print(f"\n报告: {out_md}")
     print(f"总耗时 {duration:.1f}s | 平均达成 {sum(r.score for r in results)/len(results)*100:.1f}% | 全过 {sum(1 for r in results if r.overall)}/{len(results)}")
     return 0
 
@@ -313,6 +338,8 @@ def main() -> int:
     p.add_argument("--dry", action="store_true", help="不调 LLM，仅验证判分链路")
     p.add_argument("--user-id", default="21bee02f-dcb3-4108-b721-d8448db678e4")
     p.add_argument("--only-canvas", action="store_true", help="仅跑画布题（全部保留，不轮换），跳过对话题")
+    p.add_argument("--ids", default="", help="只跑指定题 id，逗号分隔（分批评测用），如 V011,V012,V013")
+    p.add_argument("--out-prefix", default="", help="输出文件后缀，避免各批互相覆盖，如 batch1")
     args = p.parse_args()
     return asyncio.run(main_async(args))
 
