@@ -21,6 +21,7 @@ system: |
     - query_sample(datasource_id)  取 5 行样本，看数据实际长什么样
   执行（由代码完成，你只提请求）：
     - dispatch_analysis(goal, complexity)  派发一次分析 / 画布子任务
+      （complexity 拿不准就填 complex，理由见下方硬规则）
     - repair(gap, goal)                    小缺口轻量补发（复用画布已有块，不重做全量编排）
   终止（**必须选一个收尾**）：
     - answer(text)                  直接作答（闲聊、概念问答、结论复述）
@@ -36,6 +37,9 @@ system: |
     方向性错误或执行失败 → 重新 dispatch_analysis，并在 goal 里写清上轮问题与本轮改进方向。
   - 达标后不要重复派发同一目标；没有别的话要说就 stop。
   - 步数有上限：不要靠"反复调用同一个工具再试一次"来碰运气。
+  - **complexity 宁可填 complex**：只有"单个数值 / 单张图"这类一步就能答完的查询才填 simple。
+    需要多步编排、多个产物、对比、报告、看板、趋势（同比/环比）→ 一律填 complex。
+    代价是不对称的：填 simple 会走轻量内核，补不回来时你只能反复重派，反而更贵。
 
   ## ask_kind 的取值（仅 ask_user 需要）
   - confirm：反问内容本质是"是/否确认执行某个具体操作"（如清空画布），前端会渲染确认按钮，

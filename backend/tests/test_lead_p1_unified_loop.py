@@ -153,6 +153,36 @@ async def test_llm_failure_degrades_deterministically():
     assert "lead_agent_llm_failed" in events[-1]["degradations"]
 
 
+# ── complexity 确定性兜底 ──────────────────────────────────────────────────
+
+def test_effective_complexity_missing_or_invalid_defaults_to_complex():
+    """缺失/非法 → complex（与 legacy 的确定性兜底一致），且不算"推翻模型"。"""
+    for bad in ("", "huge", None):
+        assert U.effective_complexity("随便看看", str(bad or "")) == ("complex", False)
+
+
+def test_effective_complexity_keeps_model_choice_when_complex():
+    assert U.effective_complexity("做个报告", "complex") == ("complex", False)
+
+
+def test_effective_complexity_upgrades_simple_for_multi_step_goals():
+    """实测根因兜底：模型把明显多步的目标判成 simple → 抬回 complex 并记 override。
+
+    依据：双跑对拍显示 unified 63% 派发走 react（legacy 37%），react 工具轮更贵，
+    20 题多出 47 次 LLM 调用。这条兜底就是用来压这个偏差的。
+    """
+    for goal in ("生成柱状图和饼图并写详细分析", "按地区对比销售额趋势", "搭一个销售看板"):
+        complexity, overridden = U.effective_complexity(goal, "simple")
+        assert complexity == "complex", f"{goal!r} 应抬回 complex"
+        assert overridden is True, f"{goal!r} 的抬回应记为 override（便于观测）"
+
+
+def test_effective_complexity_allows_simple_for_single_lookup():
+    """真正的单值查询不该被抬走——否则兜底会变成"永远走重路径"。"""
+    assert U.effective_complexity("华东区销售额是多少", "simple") == ("simple", False)
+    assert U.effective_complexity("有几个数据源", "simple") == ("simple", False)
+
+
 # ── 模式开关与包装层顺序 ───────────────────────────────────────────────────
 
 def test_lead_agent_mode_defaults_to_legacy_and_rejects_garbage(monkeypatch):

@@ -91,6 +91,36 @@ def build_lead_messages(
     return messages
 
 
+# 多产物 / 多步的文本特征：模型判 simple、但目标明显不止一步时，抬回 complex。
+_MULTI_STEP_MARKS = (
+    "报告", "看板", "对比", "分别", "多个", "多张", "趋势", "同比", "环比",
+    "分析", "图表", "柱状图", "折线图", "饼图", "散点", "漏斗", "热力",
+)
+
+
+def effective_complexity(
+    goal: str, model_value: str, *, entry: str = "chat"
+) -> tuple[str, bool]:
+    """complexity 的确定性兜底：模型偏保守时把 simple 抬回 complex。
+
+    为什么需要（实测依据）：双跑对拍显示 unified 把 63% 的派发路由到 react
+    （legacy 只有 37%），而 react 的工具轮更费 LLM 调用——20 题多出 47 次（+32%）。
+    根因是模型倾向选 simple。判据与 legacy 的 `_guess_complexity` 同源
+    （"多步 / 多产物 → complex"），只是这里没有 intent，改用 goal 文本特征。
+
+    返回 (complexity, overridden)；overridden=True 表示**推翻了模型的选择**，
+    调用方应记 degraded（便于观测这个兜底到底触发了多少次）。
+    """
+    if model_value not in ("complex", "simple"):
+        # 缺失 / 非法 → 走默认 complex（与 legacy 的确定性兜底一致），不算推翻模型
+        return "complex", False
+    if model_value == "complex":
+        return "complex", False
+    if any(m in (goal or "") for m in _MULTI_STEP_MARKS):
+        return "complex", True
+    return "simple", False
+
+
 def _parse_args(raw) -> dict:
     if isinstance(raw, dict):
         return raw
@@ -319,9 +349,13 @@ async def stream_unified(
             else:
                 goal = str(args.get("goal") or user_msg)
                 guidance = ""
-                complexity = str(args.get("complexity") or "complex")
-                if complexity not in ("complex", "simple"):
-                    complexity = "complex"     # 非法值 → 确定性兜底
+                # 模型给的 complexity 会被**确定性兜底**复核（见 effective_complexity）：
+                # 实测模型偏保守，会把明显多步的目标判成 simple，导致反复走轻量内核。
+                complexity, overridden = effective_complexity(
+                    goal, str(args.get("complexity") or ""), entry=ctx.entry
+                )
+                if overridden:
+                    degradation.append("lead_agent_complexity_override")
 
             decision = Decision(
                 action=ActionType.CALL_ANALYSIS,
