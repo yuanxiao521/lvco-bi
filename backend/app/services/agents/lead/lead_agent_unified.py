@@ -118,6 +118,7 @@ async def stream_unified(
     emit_answer: Callable[[str], AsyncIterator[dict]] | None = None,
     confirm_guard: Callable[..., Awaitable] | None = None,
     max_steps: int | None = None,
+    emit_done: bool = True,
 ) -> AsyncIterator[dict]:
     """unified 模式的一轮：单 system + 工具循环 + 代码层收敛闸。"""
     degradation = degradation if degradation is not None else []
@@ -166,12 +167,14 @@ async def stream_unified(
                     round_idx=0, degradation=degradation, trace=trace,
                 ):
                     yield ev
-                yield _finish()
+                if emit_done:
+                    yield _finish()
                 return
             # cancel / 过期：确定性收尾
             async for ev in _answer(getattr(guard[1], "direct_text", "") or "好的，已取消。"):
                 yield ev
-            yield _finish()
+            if emit_done:
+                yield _finish()
             return
 
     ctx.add_turn("user", user_msg)
@@ -353,4 +356,7 @@ async def stream_unified(
         yield {"type": "status",
                "message": f"本轮已连续执行 {limit} 步仍未收尾，已停止；如需继续请再说。"}
 
-    yield _finish()
+    # emit_done=False 时把 done 交给调用方：后处理（收尾总结 / 记忆回流）
+    # 必须插在 done **之前**，否则前端会在记忆事件到达前就解锁输入。
+    if emit_done:
+        yield _finish()
