@@ -1,0 +1,172 @@
+# -*- coding: utf-8 -*-
+"""P1 统一循环：收敛闸、配额、拒绝未知工具、确定性降级。
+
+任务书 §4 P1 的验收之一是「收敛闸测试绿」。这些用例用**假 LLM** 驱动循环，
+把闸门行为钉死——真机评测只能证明"平均效果好"，证明不了"绝不会失控"。
+"""
+from __future__ import annotations
+
+import pytest
+
+from app.services.agents.lead import lead_agent_unified as U
+
+
+class FakeCtx:
+    entry = "chat"
+    session_id = "s1"
+    user_id = "u1"
+    datasource_id = None
+    canvas_state = None
+
+    def __init__(self) -> None:
+        self.history_summary = ""
+        self.metrics_ctx = ""
+        self.turn_summaries: list[str] = []
+        self.turns: list[dict] = []
+
+    def recent_turns(self, max_turns: int = 8, max_chars=None):
+        return list(self.turns)
+
+    def add_turn(self, role: str, content: str) -> None:
+        self.turns.append({"role": role, "content": content})
+
+
+class FakeLLM:
+    """按脚本逐轮吐事件；记录调用次数（用于验证"闲聊 1 次调用"）。"""
+
+    def __init__(self, rounds: list[list[dict]]) -> None:
+        self.rounds = list(rounds)
+        self.calls = 0
+
+    async def tool_call_round(self, messages, tools, **kw):
+        self.calls += 1
+        events = self.rounds.pop(0) if self.rounds else []
+        for ev in events:
+            yield ev
+
+
+def _tc(name: str, args: dict, call_id: str = "c1") -> dict:
+    return {"type": "tool_call", "id": call_id, "name": name, "arguments": args}
+
+
+async def _run(rounds, *, max_steps=6, **kw):
+    llm = FakeLLM(rounds)
+    ctx = FakeCtx()
+    events = []
+    async for ev in U.stream_unified(
+        user_msg="你好", ctx=ctx, db_session=None, llm=llm,
+        available_datasources=[], max_steps=max_steps, **kw,
+    ):
+        events.append(ev)
+    return events, llm, ctx
+
+
+# ── 终止动作 ───────────────────────────────────────────────────────────────
+
+async def test_chitchat_finishes_in_one_llm_call():
+    """闲聊：一轮 tool_call_round 就收尾（P1 验收第 1 条）。"""
+    events, llm, _ = await _run([[_tc("answer", {"text": "你好，有什么可以帮你？"})]])
+
+    assert llm.calls == 1
+    assert any(e.get("type") == "report" and "你好" in e.get("content", "") for e in events)
+    assert events[-1]["type"] == "done"
+    assert events[-1]["degraded"] is False
+
+
+async def test_stop_finishes_immediately():
+    events, llm, _ = await _run([[_tc("stop", {"reason": "已完成"})]])
+    assert llm.calls == 1
+    assert events[-1]["type"] == "done"
+
+
+async def test_ask_user_confirm_emits_confirm_request(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.lead_session_state.set_pending", lambda *a, **k: None, raising=False)
+    events, _, _ = await _run([[_tc("ask_user", {"question": "要清空画布吗？", "ask_kind": "confirm"})]])
+    assert any(e.get("type") == "confirm_request" for e in events), "confirm 卡片链路断了"
+    assert events[-1]["type"] == "done"
+
+
+# ── 循环闸（§2.3）──────────────────────────────────────────────────────────
+
+async def test_step_limit_forces_stop():
+    """步数闸：模型一直调工具不收尾 → 到上限必须由**代码**强制停止。"""
+    rounds = [[_tc("get_canvas_layout", {}, f"c{i}")] for i in range(10)]
+    events, llm, _ = await _run(rounds, max_steps=3)
+
+    assert llm.calls == 3, "步数上限没有生效"
+    assert any(e.get("type") == "status" for e in events)
+    done = events[-1]
+    assert done["type"] == "done"
+    assert "lead_agent_step_limit" in done["degradations"]
+
+
+async def test_observe_quota_is_enforced():
+    """观察类配额 ≤2：第 3 次起被拒绝，且记降级。"""
+    rounds = [[_tc("get_canvas_layout", {}, f"c{i}")] for i in range(5)]
+    events, _, _ = await _run(rounds, max_steps=5)
+
+    results = [e for e in events if e.get("type") == "tool_result"]
+    assert len(results) == 2, f"观察类配额应为 2，实际执行了 {len(results)} 次"
+    done = events[-1]
+    assert "lead_agent_quota_observe" in done["degradations"]
+
+
+# ── 硬边界与降级 ───────────────────────────────────────────────────────────
+
+async def test_write_tool_call_is_rejected():
+    """写工具不在工具表里 → 必须拒绝并记降级，绝不"尽力执行"。"""
+    events, _, _ = await _run([[_tc("add_chart_block", {"chart_type": "bar"})]])
+
+    assert any(e.get("type") == "tool_result" for e in events) is False, "写工具被当成工具执行了"
+    done = events[-1]
+    assert "lead_agent_unknown_tool" in done["degradations"]
+
+
+async def test_text_without_tool_call_becomes_answer():
+    """模型只给文本、不调工具 → 当作回答（确定性降级），不是死循环。"""
+    events, llm, _ = await _run([[{"type": "text", "content": "结论：East 居首。"}]])
+    assert llm.calls == 1
+    assert any(e.get("type") == "report" and "East" in e.get("content", "") for e in events)
+    assert events[-1]["type"] == "done"
+
+
+async def test_llm_failure_degrades_deterministically():
+    """LLM 抛错 → 确定性收尾（§6 不变量 4），不空转。"""
+    class BoomLLM:
+        calls = 0
+
+        async def tool_call_round(self, messages, tools, **kw):
+            BoomLLM.calls += 1
+            raise RuntimeError("upstream 502")
+            yield  # pragma: no cover
+
+    events = []
+    async for ev in U.stream_unified(
+        user_msg="你好", ctx=FakeCtx(), db_session=None, llm=BoomLLM(),
+        available_datasources=[], max_steps=3,
+    ):
+        events.append(ev)
+
+    assert BoomLLM.calls == 1, "LLM 失败后不得重试空转"
+    assert any(e.get("type") == "error" for e in events)
+    assert "lead_agent_llm_failed" in events[-1]["degradations"]
+
+
+# ── 上下文装配 ─────────────────────────────────────────────────────────────
+
+def test_build_messages_injects_context_blocks():
+    ctx = FakeCtx()
+    ctx.history_summary = "上轮聊了销售额"
+    ctx.turn_summaries = ["[子任务评估] 上轮达标"]
+    msgs = U.build_lead_messages(
+        user_msg="那华东呢", ctx=ctx,
+        available_datasources=[{"id": 7, "name": "DS", "type": "duckdb",
+                                "fields": [{"name": "region"}]}],
+        canvas_layout="画布：1 个图表块",
+    )
+    assert msgs[0]["role"] == "system"
+    sys_text = msgs[0]["content"]
+    for token in ("历史记忆", "可用数据源", "id=7", "region", "当前画布布局", "子任务评估"):
+        assert token in sys_text, f"上下文缺少 {token}"
+    assert msgs[-1] == {"role": "user", "content": "那华东呢"}
