@@ -2,7 +2,8 @@
 
 职责边界（四件套）：
 - 持有本轮全部 Source（请求级，warmup 一次、全轮复用）；
-- 暴露 for_decision / for_answer / for_worker 三个出口；
+- 暴露四个出口：for_agent_loop（单 Agent 循环，主路径）/ for_decision /
+  for_answer / for_worker；
 - refresh(kind) 失效重读（等价于旧 CanvasStateProvider 的 force=True）；
 - **不做**压缩、不做格式化——那是 Compressor / Assembler 的事。
 
@@ -111,15 +112,22 @@ class TurnContextProvider:
         """决策上下文：parts["history_summary"] 与旧 ctx.digest() 逐字节等价。"""
         return self._assembler.for_decision(self._base_blocks(), user_msg=user_msg)
 
-    def for_agent_loop(
-        self, user_msg: str, *, step: int = 0, system_text: str = ""
-    ) -> Assembled:
-        """**单 Agent 循环的唯一装配出口**（P4 起为真实现）。
+    def for_agent_loop(self, user_msg: str, *, system_text: str = "") -> Assembled:
+        """**单 Agent 循环的唯一装配出口**：每次调用返回该步要发的**完整** messages。
 
-        P0 时它是 for_decision 的空壳别名（先占住出口、行为不变）；P4 换成真装配：
-          · step0：system + 全部状态块（记忆/指标/数据源/画布/子任务/评估）+ 窗口；
-          · step>0：只追加工具结果增量（状态块已在首步的 system 里）。
-        装配细节与"为什么不重建"见 Assembler.for_agent_loop 的说明。
+        循环里的用法（每步一次）：
+
+            messages = provider.for_agent_loop(user_msg, system_text=SYS).messages
+            ... 调 LLM、执行工具 ...
+            provider.add_tool_result([assistant 消息, *各 role=tool 结果])
+
+        调用方**不手工维护消息列表**：块的增加只通过 add_tool_result 提交，
+        消息的重建只通过本方法发生——tool_call_id 配对、块顺序、台账三件事
+        因此只有一处代码在管。
+
+        P0 时它是 for_decision 的空壳别名（先占住出口、行为不变）；P4 起为真装配。
+        原 step 参数已删除：增量不是靠步数判断，而是**块集合本身在长**
+        （工具结果块每步追加，状态块恒定），见 Assembler.for_agent_loop。
         """
         blocks: list[Block] = []
         if system_text:
@@ -133,7 +141,7 @@ class TurnContextProvider:
                 kind=BlockKind.TOOL_RESULT, messages=tuple(msgs),
                 priority=Priority.TOOL_RESULT, compressible=False,
             ))
-        return self._assembler.for_agent_loop(blocks, user_msg=user_msg, step=step)
+        return self._assembler.for_agent_loop(blocks, user_msg=user_msg)
 
     def for_answer(
         self,

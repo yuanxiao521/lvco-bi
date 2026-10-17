@@ -235,20 +235,20 @@ class Assembler:
 
     # ── 单 Agent 循环（P4）：唯一出口 ───────────────────────────────────────
 
-    def for_agent_loop(
-        self, blocks: list[Block], *, user_msg: str, step: int = 0
-    ) -> Assembled:
-        """单 Agent 循环的装配：system（含上下文块）+ 窗口 + 工具结果增量 + 本轮用户消息。
+    def for_agent_loop(self, blocks: list[Block], *, user_msg: str) -> Assembled:
+        """单 Agent 循环的装配：system（含上下文块）+ 窗口 + 本轮用户消息 + 工具结果。
 
-        为什么要按 step 分流（而不是每步重建全套）：
-          · step0 注入**全部**状态块（记忆/指标/数据源/画布/子任务/评估）；
-          · step>0 只把**工具结果增量**拼进来。状态块已在首步的 system 里，
-            重复注入既白烧 token，也会让模型看到两份互相矛盾的画布快照。
-            派发后的**新**画布状态由工具结果承载（build_execution_summary 内含最新布局），
-            所以"不重建"并不会让模型失去最新事实。
+        **每步重建一次完整 messages，而不是让调用方手工维护消息列表**：
+          · LLM 无状态，每步本来就要重发完整 messages，重建不增加任何 token；
+          · 状态块（记忆/指标/数据源/画布/子任务/评估）由 Source 恒定持有，
+            每步重建出的 system 逐字节相同，不会出现两份互相矛盾的快照；
+          · 工具结果块是**唯一**会增长的部分（每步追加一组），这就是"增量"的来源。
+            派发后的新画布/评审结论由工具结果承载（build_execution_summary 内含最新布局），
+            所以循环中途不需要刷新 Source。
 
-        TOOL_RESULT 块承载结构化消息（assistant 的 tool_calls + 各 role=tool 结果），
-        顺序与 tool_call_id **原样保留**——这是 OpenAI 工具协议的要求，压缩不得破坏。
+        顺序：system → 窗口(历史) → 本轮 user → assistant(tool_calls)/tool 结果。
+        TOOL_RESULT 块承载结构化消息，顺序与 tool_call_id **原样保留**——
+        这是 OpenAI 工具协议的要求，压缩不得破坏。
         """
         table = active_table("agent_loop")
         ledger = Ledger(purpose="agent_loop", budget_tokens=table.input_budget())
@@ -285,9 +285,8 @@ class Assembler:
             else:
                 parts[b.kind.value] = text
                 ledger.record(b.kind.value, estimate_tokens(text))
-                if step == 0:
-                    header = AGENT_LOOP_HEADERS.get(b.kind, b.kind.value)
-                    ctx_lines.append(f"【{header}】\n{text}")
+                header = AGENT_LOOP_HEADERS.get(b.kind, b.kind.value)
+                ctx_lines.append(f"【{header}】\n{text}")
 
         if ctx_lines:
             system_text = (system_text.rstrip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
@@ -296,8 +295,10 @@ class Assembler:
         if system_text:
             messages.append({"role": "system", "content": system_text})
         messages.extend(t for t in window_msgs if t.get("role") in ("user", "assistant"))
-        messages.extend(tool_msgs)
+        # 本轮用户消息必须排在工具结果**之前**：工具结果是本轮用户诉求引发的动作，
+        # 顺序反了就是"先看到工具结果再看到问题"，模型会误判因果。
         messages.append({"role": "user", "content": user_msg})
+        messages.extend(tool_msgs)
 
         ledger.record("user", estimate_tokens(user_msg))
         return Assembled(messages=messages, ledger=ledger, parts=parts)
