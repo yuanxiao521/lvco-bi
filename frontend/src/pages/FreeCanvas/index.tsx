@@ -58,16 +58,11 @@ import { remapChartsForDatasource } from "../../utils/canvasDatasource";
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
 import { Filter as FilterIcon, RefreshCw, Eraser } from "lucide-react";
 
-// 默认画布初始块：包含一个一级标题、一段描述文本、一个二级标题
-const DEFAULT_BLOCKS: CanvasBlock[] = [
-  { type: "h1", content: "2024年Q3销售分析报告" },
-  {
-    type: "text",
-    content:
-      "本报告基于销售主数据库2024年7月-9月的订单数据，分析各地区销售表现、产品类别分布及客户增长趋势。",
-  },
-  { type: "h2", content: "一、各地区销售表现" },
-];
+// 新建画布的初始内容：**真空白**。
+// 此前这里硬编码了「2024年Q3销售分析报告」等三块示例——用户每次新建都会看到一份
+// 看似已完成的报告骨架，误以为是 Agent 生成的内容，也被误当成「默认模板」。
+// 空画布时由空态引导（EmptyState）告诉用户怎么开始，不再预置任何业务内容。
+const DEFAULT_BLOCKS: CanvasBlock[] = [];
 
 // localStorage 存储键名：画布草稿数据
 const CANVAS_DRAFT_KEY = "lvco:canvas:draft:v1";
@@ -1890,6 +1885,15 @@ export default function FreeCanvas() {
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
         >
+          {blocks.length === 0 && (
+            /* 空态引导：新建画布不再预置示例报告，改为一句话指路 */
+            <div className="flex flex-col items-center justify-center py-24 text-center select-none">
+              <p className="text-lg font-medium text-slate-500">画布是空的，从这里开始</p>
+              <p className="mt-2 text-sm text-slate-400">
+                在下方输入分析诉求让 Agent 生成报告；或用上方按钮 / 左侧字段面板手动添加图表与文本块。
+              </p>
+            </div>
+          )}
           {/* 移动端：显示/隐藏 字段面板 和 配置面板 的切换按钮 */}
           <div className="md:hidden flex gap-2 mb-2">
             <button
