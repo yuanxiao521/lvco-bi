@@ -189,11 +189,18 @@ CANVAS_IMPROVEMENT_TODO.md
 PROJECT_WIKI.md
 TODO.md
 
-# ── 评测运行时产物（结果/报告不入库）────────────────────────
-backend/tests/agent_evals/final_v5*
+# ── 评测运行时产物（结果/报告不入库；只保留脚本与数据集）─────
+# 判据：**能由脚本重跑出来的**都不入库；dataset*.jsonl 与 *.py 是资产，保留。
+backend/tests/agent_evals/final_v*
+backend/tests/agent_evals/ab_v*
+backend/tests/agent_evals/results*.jsonl
+backend/tests/agent_evals/baseline_v*
 backend/tests/agent_evals/semantic_results*
 backend/tests/agent_evals/semantic_events*
 backend/tests/agent_evals/semantic_report*.md
+backend/tests/agent_evals/semantic_batched_summary*.json
+backend/tests/agent_evals/*_events.jsonl
+backend/tests/agent_evals/*report*.md
 backend/tests/agent_evals/*.norm.jsonl
 backend/tests/reports/
 
