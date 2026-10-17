@@ -94,8 +94,8 @@ export function buildMultiMeasureOption(
     const rightIdx = axisAssignments.findIndex((a) => a === 1);
     yAxisList.push({
       type: 'value',
-      name: measureFields[leftIdx]?.label ?? '',
-      nameTextStyle: { color: colors[leftIdx % colors.length], fontSize: 11 },
+      // 不设 name：轴名（如 SUM(total_amount)）会画在轴顶端并与 legend 重叠，
+      // 遮挡顶部刻度（实测）。左右轴的归属靠 axisLine 颜色 + legend 颜色对应即可。
       position: 'left',
       axisLine: { show: true, lineStyle: { color: colors[leftIdx % colors.length] } },
       axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
@@ -104,8 +104,6 @@ export function buildMultiMeasureOption(
     const rightColor = rightIdx >= 0 ? colors[rightIdx % colors.length] : colors[1 % colors.length];
     yAxisList.push({
       type: 'value',
-      name: measureFields[rightIdx]?.label ?? '',
-      nameTextStyle: { color: rightColor, fontSize: 11 },
       position: 'right',
       axisLine: { show: true, lineStyle: { color: rightColor } },
       axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
