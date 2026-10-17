@@ -3,10 +3,12 @@
 
 任务书 §5：把「按调用点分三出口」演进为「按循环阶段装配」——
   · 出口收敛：for_decision / for_answer / for_worker 降级为内部实现，
-    对外暴露 for_agent_loop(step)；
+    循环只走 for_agent_loop；
   · 新增块类型 TOOL_RESULT（观察/评审/派发的返回）；
-  · 循环感知：step0 全量、后续步只追加工具结果增量；
-  · 台账：所有块（含工具结果、含原来手拼的四块）统一进 Ledger。
+  · 循环感知：**每步重建全量 messages**（LLM 无状态，重建不增加 token），
+    "增量"来自块集合本身——工具结果块每步追加，状态块恒定；
+  · 台账：所有块（含工具结果、含原来手拼的四块）统一进 Ledger，
+    且覆盖整个循环（不是只有首步）。
 """
 from __future__ import annotations
 
@@ -30,19 +32,19 @@ def _provider(**kw) -> TurnContextProvider:
     return TurnContextProvider.for_turn(TurnInputs(**inputs))
 
 
-def _tool_msgs() -> list[dict]:
+def _tool_msgs(i: int = 1) -> list[dict]:
     return [
         {"role": "assistant", "content": None,
-         "tool_calls": [{"id": "c1", "type": "function",
+         "tool_calls": [{"id": f"c{i}", "type": "function",
                          "function": {"name": "dispatch_analysis", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "c1", "content": "已派发子任务，评审通过。"},
+        {"role": "tool", "tool_call_id": f"c{i}", "content": f"第 {i} 步派发完成。"},
     ]
 
 
 # ── step0：全量 ────────────────────────────────────────────────────────────
 
 def test_step0_injects_every_context_block_and_records_ledger():
-    a = _provider().for_agent_loop("那华东呢", step=0, system_text="SYS")
+    a = _provider().for_agent_loop("那华东呢", system_text="SYS")
     system = a.messages[0]["content"]
 
     assert system.startswith("SYS")
@@ -62,42 +64,73 @@ def test_step0_injects_every_context_block_and_records_ledger():
 
 
 def test_window_is_real_messages_not_system_text():
-    a = _provider().for_agent_loop("x", step=0, system_text="SYS")
+    a = _provider().for_agent_loop("x", system_text="SYS")
     roles = [m["role"] for m in a.messages]
     assert roles[0] == "system"
     assert "user" in roles[1:] and "assistant" in roles[1:]
 
 
-# ── step>0：只追加增量 ─────────────────────────────────────────────────────
+# ── 循环内：每步重建全量（step 参数已删除）─────────────────────────────────
 
-def test_step_gt0_does_not_reinject_state_blocks():
-    """后续步不重复注入状态块——它们已在首步 system 里；重复注入白烧 token，
-    还会让模型看到两份互相矛盾的画布快照。"""
-    a = _provider().for_agent_loop("x", step=3, system_text="SYS")
-    system = a.messages[0]["content"]
-    assert system == "SYS", "step>0 只该保留 system 本体"
-    for token in ("历史记忆", "可用数据源", "当前画布布局"):
-        assert token not in system
+def test_step_parameter_is_gone():
+    """P4 收尾：step 参数删除。增量不是靠步数判断，而是块集合在长。
+
+    保留它会让出口出现"全量 / 半量"两种语义，而半量在无状态 API 下必然丢上下文
+    （模型每一步都要完整 messages）——那是个不会有正确用法的陷阱。
+    """
+    import inspect
+
+    params = inspect.signature(TurnContextProvider.for_agent_loop).parameters
+    assert "step" not in params
 
 
-def test_tool_result_increment_is_appended_in_order():
+def test_every_rebuild_carries_full_context_and_is_idempotent():
+    """每步重建都必须带**全量**状态块，且没有新工具结果时重复调用逐字节相同。"""
     p = _provider()
-    p.add_tool_result(_tool_msgs())
-    a = p.for_agent_loop("x", step=1, system_text="SYS")
+    a = p.for_agent_loop("x", system_text="SYS")
+    b = p.for_agent_loop("x", system_text="SYS")
 
-    tool_msgs = [m for m in a.messages if m.get("role") in ("assistant", "tool")
-                 and m.get("tool_call_id") or m.get("tool_calls")]
-    assert len(tool_msgs) == 2, "工具结果增量必须带进来"
+    assert a.messages == b.messages, "重建必须是确定性的"
+    system = b.messages[0]["content"]
+    assert system.startswith("SYS")
+    for token in ("历史记忆", "可用数据源", "当前画布布局"):
+        assert token in system, f"每步都要带全量上下文，缺 {token}"
+
+
+def test_tool_result_appended_after_user_message_in_protocol_order():
+    """工具结果必须排在**本轮用户消息之后**：先有问题再有其引发的动作。"""
+    p = _provider()
+    p.add_tool_result(_tool_msgs(1))
+    a = p.for_agent_loop("x", system_text="SYS")
+
+    idx_user = max(i for i, m in enumerate(a.messages) if m.get("role") == "user")
+    idx_asst = next(i for i, m in enumerate(a.messages) if m.get("tool_calls"))
+    assert idx_user < idx_asst, "用户消息必须排在工具结果之前"
+    assert sum(1 for m in a.messages if m.get("content") == "x") == 1, "用户消息不得重复"
     # tool_call_id 与顺序原样保留（OpenAI 工具协议要求，压缩不得破坏）
-    assert tool_msgs[0]["tool_calls"][0]["id"] == "c1"
-    assert tool_msgs[1]["tool_call_id"] == "c1"
-    assert a.messages[-1] == {"role": "user", "content": "x"}
+    assert a.messages[-2]["tool_calls"][0]["id"] == "c1"
+    assert a.messages[-1]["tool_call_id"] == "c1"
+
+
+def test_rebuilt_messages_equal_hand_accumulated_sequence():
+    """P4 收尾验收：每步重建的 messages 必须与"调用方手工累积"**逐字节一致**。
+
+    这是"provider 作为唯一装配口"的安全前提。改造前循环自己 append 消息，
+    改造后每步向 provider 要；两种形态产出的序列必须完全相同，否则等于悄悄改了 prompt。
+    """
+    p = _provider()
+    expected = list(p.for_agent_loop("问题", system_text="SYS").messages)
+    for i in (1, 2, 3):
+        step_msgs = _tool_msgs(i)
+        p.add_tool_result(step_msgs)
+        expected.extend(step_msgs)
+        assert p.for_agent_loop("问题", system_text="SYS").messages == expected
 
 
 def test_tool_result_recorded_in_ledger():
     p = _provider()
-    p.add_tool_result(_tool_msgs())
-    a = p.for_agent_loop("x", step=1, system_text="SYS")
+    p.add_tool_result(_tool_msgs(1))
+    a = p.for_agent_loop("x", system_text="SYS")
     assert a.ledger.entries.get(BlockKind.TOOL_RESULT.value, 0) >= 0
 
 

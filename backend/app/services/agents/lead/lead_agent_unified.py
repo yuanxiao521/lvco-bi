@@ -161,10 +161,13 @@ async def stream_unified(
             return
 
     # ── P4：装配统一（唯一出口）─────────────────────────────────────────────
-    # 首步装配一次（含全部状态块），之后只把工具结果**增量**追加进 messages——不重建：
-    #   · 重复注入状态块既白烧 token，也会让模型看到两份互相矛盾的画布快照；
-    #   · 派发后的新画布/评审结论**由工具结果承载**（build_execution_summary 内含最新布局），
-    #     所以"不重建"不会让模型失去最新事实。
+    # 上下文**只由 provider 装配**：循环每步向它要一份完整 messages，调用方不碰
+    # 消息结构（tool_call_id 配对、块顺序、台账都在 provider/assembler 一处）。理由：
+    #   · LLM 无状态，每步本来就要重发完整 messages，"重建"不增加任何 token；
+    #   · 状态块（记忆/指标/数据源/画布/子任务/评估）由 Source 恒定持有，
+    #     每步重建出的 system 逐字节相同，不会出现两份互相矛盾的快照；
+    #   · 派发后的新画布/评审结论**由工具结果承载**（build_execution_summary
+    #     内含最新布局），所以循环中途不需要刷新 Source。
     # 构造必须在 ctx.add_turn 之前（否则本轮用户消息会在窗口里出现两次）。
     from app.services.ai_prompts import LEAD_AGENT_SYSTEM
     from app.services.context.provider import TurnContextProvider, TurnInputs
@@ -181,19 +184,16 @@ async def stream_unified(
         canvas_layout=canvas_layout,
         artifact_note=str(getattr(ctx, "extra_context", "") or ""),
     ))
-    assembled = provider.for_agent_loop(user_msg, step=0, system_text=LEAD_AGENT_SYSTEM)
-    messages = list(assembled.messages)
-    logger.info("[lead_unified] %s", assembled.ledger.summary())
-    if trace is not None:
-        try:
-            trace.update(metadata={"agent_loop_ledger": assembled.ledger.as_dict()})
-        except Exception:  # noqa: BLE001
-            pass
+    assembled = None   # 循环结束后统一记账（见末尾）
     ctx.add_turn("user", user_msg)
 
     finished = False
     seen_goals: set[str] = set()   # 本请求内派发过的 goal（用于识别"重做"）
     for step in range(limit):
+        # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
+        assembled = provider.for_agent_loop(user_msg, system_text=LEAD_AGENT_SYSTEM)
+        messages = assembled.messages
+        step_msgs: list[dict] = []      # 本步新增消息，步末提交给 provider
         text_parts: list[str] = []
         tool_calls: list[dict] = []
         try:
@@ -230,7 +230,7 @@ async def stream_unified(
             break
 
         # 把 assistant 的 tool_calls 回写进 messages（OpenAI 协议要求）
-        messages.append({
+        step_msgs.append({
             "role": "assistant",
             "content": model_text or None,
             "tool_calls": [
@@ -276,15 +276,15 @@ async def stream_unified(
             if cls is None:
                 degradation.append("lead_agent_unknown_tool")
                 logger.warning("[lead_unified] rejected_tool name=%s", name)
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": f"工具 {name} 不可用（不在你的工具表里）。"})
+                step_msgs.append({"role": "tool", "tool_call_id": call_id,
+                                   "content": f"工具 {name} 不可用（不在你的工具表里）。"})
                 continue
 
             # ── 配额闸（§2.3）──
             if remaining.get(cls, 0) <= 0:
                 degradation.append(f"lead_agent_quota_{cls}")
-                messages.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
+                step_msgs.append({"role": "tool", "tool_call_id": call_id,
+                                   "content": f"{cls} 类工具本轮次数已用完，请直接收尾。"})
                 continue
             remaining[cls] -= 1
 
@@ -305,7 +305,7 @@ async def stream_unified(
                         result, ensure_ascii=False, default=str)
                     ok = True
                 yield {"type": "tool_result", "name": name, "ok": ok, "result": payload[:4000]}
-                messages.append({"role": "tool", "tool_call_id": call_id,
+                step_msgs.append({"role": "tool", "tool_call_id": call_id,
                                  "content": payload[:4000]})
                 continue
 
@@ -399,7 +399,10 @@ async def stream_unified(
                     if outcome.guidance:
                         review_note += "。改进指导：" + outcome.guidance
                     review_note += "。小缺口用 repair 补；方向错或执行失败则重新 dispatch_analysis。"
-            messages.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
+            step_msgs.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
+        # 本步新增消息（assistant 的 tool_calls + 各 role=tool 结果）提交给 provider；
+        # 下一步重建 messages 时自然带上它们——循环里的"增量"只有这一个来源。
+        provider.add_tool_result(step_msgs)
         if finished:
             break
     else:
@@ -407,6 +410,16 @@ async def stream_unified(
         degradation.append("lead_agent_step_limit")
         yield {"type": "status",
                "message": f"本轮已连续执行 {limit} 步仍未收尾，已停止；如需继续请再说。"}
+
+    # 台账：装配覆盖**整个循环**（system + 窗口 + 每步工具结果），落 trace 供核 token 结构。
+    # 放在循环之后而不是首步之前——首步台账看不到工具结果，会低估真实上下文规模。
+    if assembled is not None:
+        logger.info("[lead_unified] ledger %s", assembled.ledger.summary())
+        if trace is not None:
+            try:
+                trace.update(metadata={"agent_loop_ledger": assembled.ledger.as_dict()})
+            except Exception:  # noqa: BLE001
+                pass
 
     # emit_done=False 时把 done 交给调用方：后处理（收尾总结 / 记忆回流）
     # 必须插在 done **之前**，否则前端会在记忆事件到达前就解锁输入。

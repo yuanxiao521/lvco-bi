@@ -167,7 +167,7 @@ def test_for_agent_loop_is_no_longer_an_alias_of_for_decision():
     )
     p = TurnContextProvider.for_turn(inputs)
     base = p.for_decision("按品类分析")
-    loop_assembled = p.for_agent_loop("按品类分析", step=0, system_text="SYS")
+    loop_assembled = p.for_agent_loop("按品类分析", system_text="SYS")
 
     # P4：真出口产出**完整 messages**（for_decision 只产 parts、messages 为空）
     assert base.messages == []

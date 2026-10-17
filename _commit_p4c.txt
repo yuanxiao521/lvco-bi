@@ -1,0 +1,20 @@
+refactor(lead): P4 收尾——循环上下文改由 TurnContextProvider 逐步装配
+
+目的：消除 P4 遗留的「装配双轨」。此前 provider 只在循环首步装配一次，
+后续工具结果由循环自己 append 进 messages——装配台账、tool_call_id 配对、
+消息顺序三件事分散在两个地方，而 add_tool_result / step 参数成了只有测试在调的死 API。
+
+改法（行为不变）：
+- provider.for_agent_loop(user_msg, *, system_text)：每步返回**完整** messages，
+  删除 step 参数。增量不靠步数判断，而是工具结果块每步追加（块集合在长）；
+- assembler.for_agent_loop：去掉 step 门控，system 每步重建（逐字节相同——
+  LLM 无状态、重建不增加 token）；消息顺序修正为
+  system → 窗口 → 本轮 user → 工具结果（用户消息必须排在其引发的动作之前）；
+- 循环：每步向 provider 要 messages，步末 add_tool_result 提交本步新增消息，
+  循环里不再出现任何 messages.append；
+- 台账改为循环结束后统一落 trace：首步台账看不到工具结果，会低估上下文规模。
+
+等价性证据：test_rebuilt_messages_equal_hand_accumulated_sequence 用 3 步派发
+对拍「手累积」序列，逐条相等。
+
+测试：994 passed（原 992；P4 用例 3→5，按新语义重写并在注释里说明原因）。
