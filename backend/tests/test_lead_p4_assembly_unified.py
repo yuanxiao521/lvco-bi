@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.services.context.budgets import active_table
 from app.services.context.provider import TurnContextProvider, TurnInputs
 from app.services.context.types import BlockKind
@@ -132,6 +134,42 @@ def test_tool_result_recorded_in_ledger():
     p.add_tool_result(_tool_msgs(1))
     a = p.for_agent_loop("x", system_text="SYS")
     assert a.ledger.entries.get(BlockKind.TOOL_RESULT.value, 0) >= 0
+
+
+# ── 与 legacy 感知语义对齐（活引用 / 派发后刷新）──────────────────────────
+
+def test_subtask_source_follows_live_list():
+    """派发会往 ctx.turn_summaries 里 append 摘要与评估；Source 必须持有**活引用**，
+
+    否则本轮新产生的评估永远进不了下一步的上下文——legacy 就不拷贝
+    （lead_agent.py `subtask_summaries=ctx.turn_summaries`）。
+    """
+    summaries = ["[子任务执行记录] 已生成 3 块"]
+    p = _provider(subtask_summaries=summaries)
+    before = p.for_agent_loop("x", system_text="SYS").messages[0]["content"]
+    assert "本轮无子任务评估" in before
+
+    summaries.append("[子任务评估] 上轮未达标：缺少华东区")
+    after = p.for_agent_loop("x", system_text="SYS").messages[0]["content"]
+    assert "上轮未达标" in after, "新评估必须自动进入下一步上下文"
+    assert after != before
+
+
+def test_unified_loop_keeps_legacy_perception_wiring():
+    """接线对齐 legacy 的两条硬事实（需真 LLM 才能端到端验证，故源码级钉住）：
+
+      ① 子任务摘要传活引用，不做 `list(...)` 拷贝；
+      ② 派发落块后 force 重读画布，并 refresh 回 provider。
+
+    与 test_lead_p0_capabilities 里的 AST 断言同一路数。
+    """
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "app/services/agents/lead/lead_agent_unified.py"
+    ).read_text(encoding="utf-8")
+    assert "subtask_summaries=ctx.turn_summaries" in src
+    assert "list(ctx.turn_summaries)" not in src
+    assert "provider.refresh_canvas(" in src
 
 
 # ── P4b：决策路径四块改由 provider 供（逐字节等价）────────────────────────

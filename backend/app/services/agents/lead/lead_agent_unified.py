@@ -164,10 +164,12 @@ async def stream_unified(
     # 上下文**只由 provider 装配**：循环每步向它要一份完整 messages，调用方不碰
     # 消息结构（tool_call_id 配对、块顺序、台账都在 provider/assembler 一处）。理由：
     #   · LLM 无状态，每步本来就要重发完整 messages，"重建"不增加任何 token；
-    #   · 状态块（记忆/指标/数据源/画布/子任务/评估）由 Source 恒定持有，
-    #     每步重建出的 system 逐字节相同，不会出现两份互相矛盾的快照；
-    #   · 派发后的新画布/评审结论**由工具结果承载**（build_execution_summary
-    #     内含最新布局），所以循环中途不需要刷新 Source。
+    #   · 请求级事实（窗口/长期记忆/指标/数据源/产物）由 Source 恒定持有，不重读；
+    #   · 轮内会变的事实必须**每步重读**（与 legacy 第 2 轮起的做法一致）：
+    #     画布在派发落块后 force 重读并 refresh 回 provider；子任务摘要/评估靠
+    #     SubtaskSource 持有的**活引用**自动跟随 ctx.turn_summaries。
+    #     （legacy 也是这么接的：`subtask_summaries=ctx.turn_summaries` 不拷贝，
+    #      画布每轮 `layout(force=True)` 后 `refresh_canvas`。）
     # 构造必须在 ctx.add_turn 之前（否则本轮用户消息会在窗口里出现两次）。
     from app.services.ai_prompts import LEAD_AGENT_SYSTEM
     from app.services.context.provider import TurnContextProvider, TurnInputs
@@ -178,7 +180,10 @@ async def stream_unified(
         entry=ctx.entry,
         turns=list(ctx.turns),
         history_summary=ctx.history_summary,
-        subtask_summaries=list(ctx.turn_summaries),
+        # 必须传**活引用**（不拷贝）：派发会在 run_worker 里 append 摘要/评估，
+        # SubtaskSource/AssessmentSource 持有同一列表 → 每步重建时自然带上最新事实。
+        # 拷一份的话，本轮的评估永远进不了决策上下文（legacy 第 508 行就是不拷贝）。
+        subtask_summaries=ctx.turn_summaries,
         datasources=available_datasources,
         metrics_ctx=ctx.metrics_ctx,
         canvas_layout=canvas_layout,
@@ -361,12 +366,15 @@ async def stream_unified(
                 bypass_memo=(already_dispatched or name == "repair"),
             ):
                 yield ev
-            # 派发后刷新画布快照：后续步骤的上下文与评审输入都要用最新布局
+            # 派发后刷新画布快照：后续步骤的上下文与评审输入都要用最新布局。
+            # 与 legacy 第 2 轮起的做法完全一致（layout(force=True) → refresh_canvas）：
+            # 画布块是**独立的一等上下文**，不能只靠工具结果里的执行摘要转述。
             if getattr(ctx, "canvas_state", None) is not None:
                 try:
                     canvas_layout = await ctx.canvas_state.layout(force=True) or canvas_layout
                 except Exception:  # noqa: BLE001
                     pass
+                provider.refresh_canvas(canvas_layout)
 
             # ── P2 评审阶段：固定执行、由代码触发（不是模型按需调用的工具）──
             #   · HARD 非空 → 硬闸直接 fail，不花 LLM（也绝不允许被翻案）
