@@ -181,7 +181,7 @@ async def run_worker(
     await runner
 
     result: RunAnalysisResult | None = holder.get("result")
-    # P2：把结果交给调用方（unified 循环要自己跑"评审阶段"——它是固定工序，
+    # P2：把结果交给调用方（单 Agent 循环要自己跑"评审阶段"——它是固定工序，
     # 由代码触发；legacy 路径用 do_review=True 保持原行为不变）
     if result is not None and on_result is not None:
         on_result(result)
@@ -212,7 +212,7 @@ async def run_worker(
     # 同时把结构化执行摘要回写 turn_summaries，供 Supervisor 下一轮决策参考
     # （含工具链/规划/数值证据/报告全文，避免 240 字截断导致 Lead 不知道"做了什么、效果如何"）
     # 先做确定性评估（成功/失败都要评），写入 turn_summaries 供决策器单独注入。
-    # do_review=False：调用方（unified 循环）会跑完整的**评审阶段**
+    # do_review=False：调用方（单 Agent 循环）会跑完整的**评审阶段**
     # （HARD 硬闸 + 仅 SOFT 非空时裁量），这里就不重复评一遍——
     # 否则同一次派发会写两条 [子任务评估]，两条实现也会跑偏。
     if do_review:

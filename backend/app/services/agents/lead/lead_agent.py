@@ -391,13 +391,20 @@ class LeadContext:
         return out
 
 
+# 旧模式值 → 新值。unified 这个名字容易与 P4 的「装配统一」混淆（同词不同事），
+# 已改名 single_agent；保留别名只为避免"环境里还写着旧值 → 静默退回 legacy"这种坑。
+_MODE_ALIASES: dict[str, str] = {"unified": "single_agent"}
+
+
 def lead_agent_mode() -> str:
-    """P1 模式开关：legacy（默认）| unified。
+    """执行形态开关：legacy（默认，四个 prompt 工位）| single_agent（单 Agent 循环）。
 
     非法值一律当 legacy——配置写错时**退回到已验证的路径**，而不是进一条没人跑过的新路。
     """
     raw = str(getattr(settings, "LEAD_AGENT_MODE", "legacy") or "legacy").strip().lower()
-    return raw if raw in ("legacy", "unified") else "legacy"
+    if raw in _MODE_ALIASES:
+        return _MODE_ALIASES[raw]
+    return raw if raw in ("legacy", "single_agent") else "legacy"
 
 
 def _provider_context_blocks(assembled) -> tuple[str, str, str, str]:
@@ -484,10 +491,10 @@ class LeadAgent:
                 trace_cm = None
 
         try:
-            # ── P1：unified 模式（单 Agent + 工具循环）────────────────────────
+            # ── P1：single_agent 模式（一个 system + 工具循环）──────────────────
             # 默认 legacy → 本分支不进，行为零变化；切换由 LEAD_AGENT_MODE 控制，
             # 出问题改回 legacy 即可回滚（双跑对拍通过前不动默认值）。
-            if lead_agent_mode() == "unified":
+            if lead_agent_mode() == "single_agent":
                 async for ev in self._stream_unified(
                     user_msg, ctx=ctx, db_session=db_session, trace=trace
                 ):
@@ -721,7 +728,7 @@ class LeadAgent:
     async def _stream_unified(
         self, user_msg: str, *, ctx: LeadContext, db_session, trace=None
     ) -> AsyncIterator[dict]:
-        """unified 模式的一轮。
+        """single_agent 模式的一轮。
 
         循环本体在 lead_agent_unified.stream_unified（不碰 legacy 的 stream 主体）；
         这里只负责"装配入口 + 后处理"，并保证**后处理插在 done 之前**
