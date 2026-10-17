@@ -30,6 +30,27 @@ CHART_TYPES = [
 # canvas_action 中携带的最大数据行数，避免 SSE 包过大
 _CANVAS_MAX_ROWS = 50
 
+# 日期型字段的启发式命名（自动提粒度用）：order_date / created_at / sale_date / 日期 / 月份 等
+_DATE_NAME_MARKS = ("date", "time", "day", "month", "year", "日期", "时间", "月份", "年份")
+
+
+def _is_date_like(dim: str) -> bool:
+    """维度名是否像日期字段（启发式，配合行数阈值使用，误判代价低：只是多查一次）。"""
+    d = (dim or "").lower()
+    return any(m in d for m in _DATE_NAME_MARKS)
+
+
+def _remap_bucket_measures(display_measures: list[dict], date_dim: str) -> list[dict]:
+    """按月重查后，度量引用的维度字段名要换成桶别名（date_trunc 的 AS 别名）。"""
+    alias = f"{date_dim}_month"
+    remapped = []
+    for m in display_measures or []:
+        m = dict(m)
+        if m.get("field") == date_dim:
+            m["field"] = alias
+        remapped.append(m)
+    return remapped
+
 # 画布工具名：供编排器（Planner）按入口注入为可规划工具。
 # 仅画布接口会注入，普通 AI 对话不注入，避免规划到无画布可落的工具。
 CANVAS_TOOL_NAMES = frozenset({
@@ -440,6 +461,42 @@ class AddChartBlockTool(BaseTool):
                 user_id=UUID(user_id),
                 db=db_session,
             )
+            # 趋势图自动提粒度：维度是日期型、行数过多（>62 ≈ 两个月按日）时，
+            # 自动按月重查一次。否则 X 轴 100+ 个日期标签糊成一团，且"月度趋势"
+            # 的语义名不副实（实测用户投诉点）。行数降不下来就保留原结果。
+            if (
+                chart_type in ('line', 'area', 'bar')
+                and dimensions
+                and len(result.rows) > 62
+                and not config.dimension_buckets
+            ):
+                date_dim = next((d for d in config.dimensions if _is_date_like(d)), None)
+                if date_dim:
+                    monthly = ChartQueryConfig(
+                        dimensions=config.dimensions,
+                        measures=config.measures,
+                        filters=config.filters,
+                        chart_type=chart_type,
+                        datasource_id=datasource_id,
+                        limit=_CANVAS_MAX_ROWS,
+                        dimension_buckets={date_dim: 'month'},
+                    )
+                    try:
+                        result2 = await execute_chart_query(
+                            datasource_id=UUID(datasource_id),
+                            config=monthly,
+                            user_id=UUID(user_id),
+                            db=db_session,
+                        )
+                        if 0 < len(result2.rows) < len(result.rows):
+                            logger.info(
+                                "[add_chart_block] granularity_escalated dim=%s rows=%d -> %d (month)",
+                                date_dim, len(result.rows), len(result2.rows),
+                            )
+                            result = result2
+                            display_measures = _remap_bucket_measures(display_measures, date_dim)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[add_chart_block] monthly_requery_failed: %s", e)
         except (QueryEngineError, ValueError) as e:
             logger.warning("[add_chart_block] query_failed error=%s", str(e))
             return json.dumps({"error": f"查询验证失败: {str(e)}"}, ensure_ascii=False)
