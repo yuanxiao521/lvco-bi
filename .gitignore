@@ -214,3 +214,7 @@ backend/_check_fields.py
 **/gen_hash.py
 **/verify_check.py
 backend/eval_logs/
+
+# 提交信息草稿（不随代码入库）
+_commit_*.txt
+_patch_*.py
