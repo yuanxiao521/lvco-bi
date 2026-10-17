@@ -158,7 +158,15 @@ export function buildMultiMeasureOption(
     xAxis = {
       type: 'category',
       data: xData,
-      axisLabel: { color: '#8B97A8', fontSize: 11, interval: 0, rotate: xData.length > 6 ? 30 : 0 },
+      axisLabel: {
+        color: '#8B97A8',
+        fontSize: 11,
+        // 少量类目全显 + 轻度倾斜；多类目（如按日趋势 100+ 点）交给 ECharts
+        // 自动抽稀 + hideOverlap，绝不全量渲染——此前 interval:0 会把日期轴糊成一团。
+        interval: 'auto',
+        hideOverlap: true,
+        rotate: xData.length > 30 ? 45 : xData.length > 6 ? 30 : 0,
+      },
       axisLine: { lineStyle: { color: '#E2E8F0' } },
     };
   }

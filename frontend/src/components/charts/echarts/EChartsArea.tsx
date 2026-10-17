@@ -27,7 +27,7 @@ export default function EChartsArea({ data, xField, yField, measureFields, color
   const option = {
     title: title ? { text: title, left: 'center' } : undefined,
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: data.map(d => String(d[xField])) },
+    xAxis: { type: 'category', data: data.map(d => String(d[xField])), axisLabel: { interval: 'auto', hideOverlap: true, rotate: data.length > 30 ? 45 : data.length > 6 ? 30 : 0 } },
     yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatYAxisNum(v) } },
     series: [{
       type: 'line',
