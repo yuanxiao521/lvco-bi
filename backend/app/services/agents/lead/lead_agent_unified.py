@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""P1 统一循环：一个 system + 工具层 + 循环闸（unified 模式）。
+"""P1 单 Agent 循环：一个 system + 工具层 + 循环闸（single_agent 模式）。
 
 与 legacy 的差别（任务书 §2.1）：
   legacy ：请求 → merged（意图+决策）→ decision（后续轮）→ answer（组织文本）
            三个工位各看一份上下文，条件扇出 1~5 次 LLM 调用。
-  unified：请求 → **一个** Lead Agent，在循环里「看 → 判 → 决」多步完成，
+  single_agent：请求 → **一个** Lead Agent，在循环里「看 → 判 → 决」多步完成，
            角色认知只有一份，终止动作由模型显式给出（answer / ask_user / stop）。
 
 **为什么单独一个模块**：不碰 LeadAgent.stream（legacy 路径），
-unified 由 LEAD_AGENT_MODE=unified 显式开启，出问题一键回滚。
+由 LEAD_AGENT_MODE=single_agent 显式开启，出问题一键回滚。
 
 三条硬约束（§2.3 / §6）：
   1. **收敛闸在代码里**：步数上限 + 每类工具次数上限 + 强制终止动作，
@@ -57,7 +57,7 @@ def effective_complexity(
 ) -> tuple[str, bool]:
     """complexity 的确定性兜底：模型偏保守时把 simple 抬回 complex。
 
-    为什么需要（实测依据）：双跑对拍显示 unified 把 63% 的派发路由到 react
+    为什么需要（实测依据）：双跑对拍显示单 Agent 循环把 63% 的派发路由到 react
     （legacy 只有 37%），而 react 的工具轮更费 LLM 调用——20 题多出 47 次（+32%）。
     根因是模型倾向选 simple。判据与 legacy 的 `_guess_complexity` 同源
     （"多步 / 多产物 → complex"），只是这里没有 intent，改用 goal 文本特征。
@@ -84,7 +84,7 @@ def explicit_kernel(name: str) -> str | None:
     这里**显式**取表，而不是靠 complexity="simple" 间接落到 react——
     否则哪天表改了，两处会静默漂移，而漂移表现只是"某个场景变慢/变贵"。
 
-    redo 没有对应：unified 用「同一 goal 再派」当启发式，只用于 bypass_memo
+    redo 没有对应：循环用「同一 goal 再派」当启发式，只用于 bypass_memo
     （跳过缓存），**不**据此换内核。是否给 repair 工具加 kind 参数（patch/redo
     由模型判断）属于工具面设计，需要单独一轮 + 评测。
     """
@@ -124,7 +124,7 @@ async def stream_unified(
     max_steps: int | None = None,
     emit_done: bool = True,
 ) -> AsyncIterator[dict]:
-    """unified 模式的一轮：单 system + 工具循环 + 代码层收敛闸。"""
+    """single_agent 模式的一轮：单 system + 工具循环 + 代码层收敛闸。"""
     degradation = degradation if degradation is not None else []
     limit = max_steps or int(getattr(settings, "LEAD_AGENT_MAX_STEPS", 6))
     tools = lead_tool_specs()

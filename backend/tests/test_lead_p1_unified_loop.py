@@ -213,16 +213,23 @@ def test_effective_complexity_allows_simple_for_single_lookup():
 # ── 模式开关与包装层顺序 ───────────────────────────────────────────────────
 
 def test_lead_agent_mode_defaults_to_legacy_and_rejects_garbage(monkeypatch):
-    """非法配置值必须退回 legacy——配置写错时回到已验证路径，而不是进新路。"""
+    """非法配置值必须退回 legacy——配置写错时回到已验证路径，而不是进新路。
+
+    取值就叫 single_agent（单 Agent），不叫 unified：unified 与 P4「装配统一」同词
+    不同事，读代码的人无法判断指哪一层。旧值保留为别名，避免环境里写着旧值时静默退回 legacy。
+    """
     from app.config import settings
     from app.services.agents.lead.lead_agent import lead_agent_mode
 
     monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "legacy")
     assert lead_agent_mode() == "legacy"
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "Unified")
-    assert lead_agent_mode() == "unified"
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "  unified  ")
-    assert lead_agent_mode() == "unified"
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "Single_Agent")
+    assert lead_agent_mode() == "single_agent"
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "  single_agent  ")
+    assert lead_agent_mode() == "single_agent"
+    # 旧值兼容：改名不能让人"配置写了但静默走了 legacy"
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "unified")
+    assert lead_agent_mode() == "single_agent"
     for bad in ("", None, "v2", "experimental"):
         monkeypatch.setattr(settings, "LEAD_AGENT_MODE", bad)
         assert lead_agent_mode() == "legacy", f"{bad!r} 应退回 legacy"
