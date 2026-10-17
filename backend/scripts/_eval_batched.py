@@ -5,7 +5,7 @@
 所以不能一次跑满 20 道——分批 + 对失败题重试，才能拿到可用数据。
 """
 from __future__ import annotations
-import json, subprocess, sys, time
+import json, os, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -35,8 +35,10 @@ def run(ids: list[str], tag: str):
     cmd = [sys.executable, str(EVAL), "--only-canvas",
            "--ids", ",".join(ids), "--out-prefix", tag]
     t0 = time.time()
+    # 子进程输出强制 UTF-8：判定行含 ✓/✗，GBK 控制台下 print 会直接 UnicodeEncodeError
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     p = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", env=env)
     log = (p.stdout or "") + (p.stderr or "")
     # 留存原始输出：调用次数（[llm] call model=）要从这里数，评测本身不报
     logdir = ROOT / "eval_logs"
