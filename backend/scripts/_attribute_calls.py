@@ -64,8 +64,42 @@ def summarize(name, qs):
                 modes=dict(modes), tools=dict(tools), actions=dict(actions))
 
 
+
+# ── 批处理效率：每轮 LLM 实际执行几个工具（决定 ReAct 的调用成本）──────────
+LEAD_TOOLS = {
+    'get_canvas_layout', 'list_datasources', 'list_fields', 'list_metrics',
+    'query_sample', 'run_analysis', 'dispatch_analysis', 'repair',
+    'answer', 'ask_user', 'stop',
+}
+
+
+def batching(name, qs):
+    """kernel 侧：工具数 / 轮数 ≈ 每轮真实执行的工具数。"""
+    if not qs:
+        return
+    calls = sum(q.get('iteration_count') or 0 for q in qs)
+    lead_tools = 0
+    kernel_tools = 0
+    dispatches = 0
+    for q in qs:
+        for e in q.get('events') or []:
+            if e.get('type') != 'tool_call':
+                continue
+            n = e.get('name')
+            if n in LEAD_TOOLS:
+                lead_tools += 1
+                if n in ('run_analysis', 'dispatch_analysis', 'repair'):
+                    dispatches += 1
+            else:
+                kernel_tools += 1
+    kernel_rounds = max(1, calls - lead_tools)
+    print(f'== {name} 批处理 ==')
+    print(f'  LLM 轮总数={calls}  Lead 工具={lead_tools}  内核工具={kernel_tools}  派发={dispatches}')
+    print(f'  内核轮≈{kernel_rounds}  → 每轮执行内核工具 = {kernel_tools / kernel_rounds:.2f} 个')
+    print(f'  每次派发内核工具 = {kernel_tools / max(1, dispatches):.2f} 个')
+
+
 if __name__ == '__main__':
-    legs = {'legacy': 'l', 'single_agent': 'u'}
-    for label, prefix in legs.items():
-        summarize(label, load(prefix))
+    for label, prefix in (('legacy', 'l'), ('single_agent', 'u')):
+        batching(label, load(prefix))
         print()
