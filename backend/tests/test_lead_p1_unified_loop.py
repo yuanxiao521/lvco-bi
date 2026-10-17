@@ -87,6 +87,33 @@ async def test_ask_user_confirm_emits_confirm_request(monkeypatch):
     assert events[-1]["type"] == "done"
 
 
+# ── 汇报层：decision 事件（method a：reason 由模型自述）──────────────────
+
+async def test_terminal_tool_emits_decision_event_with_model_reason():
+    """legacy 每轮都 emit decision(action/tool/reason)，前端 agentMeta 据此显示
+    "为什么这么判断"。统一循环把工具调用当决策点，reason 取模型自述（不是回填话术）。"""
+    events, _, _ = await _run([[_tc("answer", {"text": "好的", "reason": "闲聊直接回答"})]])
+
+    dec = [e for e in events if e.get("type") == "decision"]
+    assert len(dec) == 1
+    assert dec[0]["action"] == "answer"
+    assert dec[0]["tool"] == "answer"
+    assert dec[0]["reason"] == "闲聊直接回答"
+    # 顺序与 legacy 一致：先 decision 再正文
+    report_idx = next(i for i, e in enumerate(events) if e.get("type") == "report")
+    assert events.index(dec[0]) < report_idx
+
+
+async def test_observe_tools_do_not_emit_decision():
+    """观察只是"看一眼"，不发 decision（legacy 也没有对应动作）；
+    前端用 tool_call/tool_result 事件已经能看到。"""
+    events, _, _ = await _run([[_tc("get_canvas_layout", {}, "c1")], [_tc("stop", {})]])
+    assert not any(
+        e.get("type") == "decision" and e.get("tool") == "get_canvas_layout"
+        for e in events
+    ), "观察类不该发 decision"
+
+
 # ── 循环闸（§2.3）──────────────────────────────────────────────────────────
 
 async def test_step_limit_forces_stop():
