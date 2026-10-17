@@ -536,9 +536,42 @@ export default function FreeCanvas() {
   }, [chartConfigs]);
   // 防止同一 filter 重复触发（toggleFilter 切换 / 同值同字段签名）
   const lastCrossFilterSigRef = useRef<string>("");
+  // 清除联动筛选时，必须把已合并进各图表 config 的那条 filter 剥离掉并重查——
+  // 否则筛选会永久留在 chartConfigs 里：强制刷新带着 filter 重查（无效），
+  // 只能逐块重置才能清掉（实测用户投诉：点了图上的值就回不去了）。
+  const lastClearedSigRef = useRef<string>("");
+  useEffect(() => {
+    if (crossFilter) return;
+    const cleared = lastCrossFilterSigRef.current;
+    lastCrossFilterSigRef.current = "";
+    if (!cleared) return;                       // 从未设置过，无需剥离
+    if (lastClearedSigRef.current === cleared) return;  // 同一次清除只做一次
+    lastClearedSigRef.current = cleared;
+    const cid = canvasId;
+    if (!cid) return;
+    const field = cleared.split("__")[0];
+    const entries = Object.entries(chartConfigsRef.current);
+    if (entries.length === 0) return;
+    (async () => {
+      for (const [blockId, cfg] of entries) {
+        const had = (cfg.filters || []).some((fl) => fl.field === field);
+        const stripped: ChartQueryConfig = {
+          ...cfg,
+          filters: (cfg.filters || []).filter((fl) => fl.field !== field),
+        };
+        setChartConfigs((prev) => ({ ...prev, [blockId]: stripped }));
+        if (!had) continue;                     // 该图本就没这条 filter，不重查
+        try {
+          const result = await executeChartQuery(cid, stripped);
+          setChartResults((prev) => ({ ...prev, [blockId]: result }));
+        } catch (e) {
+          console.warn("cross-filter clear re-query failed for", blockId, e);
+        }
+      }
+    })();
+  }, [crossFilter, canvasId]);
   useEffect(() => {
     if (!crossFilter) {
-      lastCrossFilterSigRef.current = "";
       return;
     }
     const sig = `${crossFilter.field}__${crossFilter.value}`;
