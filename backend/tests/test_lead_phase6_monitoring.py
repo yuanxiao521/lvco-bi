@@ -18,6 +18,15 @@ import json
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _force_legacy_mode(monkeypatch):
+    """本文件的用例针对 legacy 主循环（intent/merged/decision/answer 分支），
+    用 fake LLM 没有 tool_call_round——single_agent 默认化后必须显式钉回 legacy，
+    否则会走进 unified 分支报 no attribute tool_call_round（2026-10-17 切默认后回归发现）。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "legacy")
 from app.services.agents.lead.lead_agent import LeadAgent, LeadContext
 from app.services.agents.lead.lead_review import build_execution_summary
 from app.services.agents.lead.lead_tools import (

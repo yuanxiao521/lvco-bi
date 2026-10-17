@@ -141,11 +141,12 @@ async def run_worker(
             "note": p.note,
             "tool": p.tool,
         })
-        # 仅失败时额外 emit 一条 text 到主气泡（错误提示）
+        # 失败信息只进两处：① turn_summaries（供 Lead 决策/重试参考）；
+        # ② ActivityFeed 的 failed 状态（前端按 tool_result.ok 渲染）。
+        # **不再 emit text 到主气泡**——react 重试一个工具 6 次时，主气泡会连蹦
+        # 6 条「【1/8】✗ add_chart_block 失败」，最后成功反而被淹没（实测用户投诉点）。
         if p.status == "fail":
-            text = render_progress_text(p)
-            ctx.turn_summaries.append(text)
-            await out_q.put({"type": "text", "content": text})
+            ctx.turn_summaries.append(render_progress_text(p))
 
     async def _runner() -> None:
         try:
