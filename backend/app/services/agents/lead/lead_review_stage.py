@@ -27,7 +27,7 @@ from app.services.agents.lead.lead_tools import RunAnalysisResult, assess_subtas
 logger = logging.getLogger("lvco.lead.review_stage")
 
 # 裁量输出的 token 上限：只要一个 JSON（verdict + 一句话 + 1-3 句 guidance）
-_ADJUDICATE_MAX_TOKENS = 400
+_ADJUDICATE_MAX_TOKENS = 1024
 
 
 @dataclass
@@ -123,7 +123,11 @@ async def run_review_stage(
         messages = build_adjudicate_messages(
             user_goal=user_goal, soft=detail.soft, execution_summary=execution_summary,
         )
-        raw = await llm.complete(messages, max_tokens=_ADJUDICATE_MAX_TOKENS)
+        # enable_thinking=False：glm 系推理模型在思考被开启且 max_tokens 较小时，
+        # 思考就把预算吃光、正文为空 → _extract_json 失败 → 裁量永远走降级（实测）。
+        raw = await llm.complete(
+            messages, max_tokens=_ADJUDICATE_MAX_TOKENS, enable_thinking=False,
+        )
         obj = _extract_json(raw)
         verdict = str(obj.get("verdict") or "").strip().lower()
         if verdict not in ("pass", "fail"):
