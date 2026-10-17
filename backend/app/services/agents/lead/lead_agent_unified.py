@@ -32,6 +32,7 @@ from typing import AsyncIterator, Awaitable, Callable
 from app.config import settings
 from app.services.agents.lead.lead_agent_tools import (
     QUOTA,
+    decision_action,
     lead_tool_specs,
     tool_class,
 )
@@ -271,6 +272,17 @@ async def stream_unified(
             args = _parse_args(tc.get("arguments"))
             call_id = tc.get("id") or f"call_{step}_{i}"
             cls = tool_class(name)
+
+            # ── 汇报层契约（与 legacy 对齐）：决策点发一条 decision 事件 ──
+            # legacy 每轮决策都 emit decision(action/tool/reason)，前端 agentMeta 用它
+            # 显示"这一步做什么、为什么"。统一循环没有独立的决策调用，因此把**工具调用**
+            # 当决策点：reason 由模型在工具参数里自述（method a：真实理由，不回填模板话术）。
+            # 观察类不发 decision——它只是"看一眼"，legacy 也没有对应动作，前端用
+            # tool_call/tool_result 已经能看到；未知工具同样不发（只记降级）。
+            if cls is not None and cls != "observe":
+                yield {"type": "decision", "round": step,
+                       "action": decision_action(name), "tool": name,
+                       "reason": str(args.get("reason") or ""), "degraded": False}
 
             # ── 终止动作：answer / ask_user / stop ──
             if cls == "terminal":

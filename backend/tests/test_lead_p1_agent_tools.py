@@ -20,6 +20,7 @@ from app.services.agents.lead.lead_agent_tools import (
     QUOTA,
     TERMINAL_TOOL_NAMES,
     WRITE_TOOL_NAMES,
+    decision_action,
     lead_tool_specs,
     registered_tool_names,
     tool_class,
@@ -128,6 +129,30 @@ def test_unified_prompt_states_the_write_boundary():
 
     assert "写工具" in LEAD_AGENT_SYSTEM
     assert "add_chart_block" in LEAD_AGENT_SYSTEM  # 点名，避免模型凭直觉尝试
+
+
+# ── 决策理由（method a）：reason 字段 + 动作枚举映射 ──────────────────────
+
+def test_every_tool_declares_reason_field():
+    """每个工具都必须带 reason（决策理由）。
+
+    method a：reason 由**模型自述**，SSE decision 事件用它显示"为什么这么判断"。
+    统一在 _fn 里注入，所以新增工具漏不掉——这条测试防止有人绕过 _fn 手写 spec。
+    """
+    for spec in lead_tool_specs():
+        name = spec["function"]["name"]
+        props = spec["function"]["parameters"]["properties"]
+        assert "reason" in props, f"{name} 缺 reason 字段"
+        assert props["reason"]["type"] == "string"
+
+
+def test_decision_action_maps_to_legacy_enum():
+    """decision.action 只能落在 legacy 的 4 个枚举值上，避免前端出现两套词汇。"""
+    assert decision_action("answer") == "answer"
+    assert decision_action("ask_user") == "ask_user"
+    assert decision_action("stop") == "stop"
+    assert decision_action("dispatch_analysis") == "call_analysis"
+    assert decision_action("repair") == "call_analysis"   # repair 也是"去干活"
 
 
 # ── 开关（可回滚）──────────────────────────────────────────────────────────

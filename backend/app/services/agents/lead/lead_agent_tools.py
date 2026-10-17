@@ -49,6 +49,14 @@ QUOTA: dict[str, int] = {"observe": 2, "dispatch": 3, "repair": 2}
 
 def _fn(name: str, description: str, properties: dict | None = None,
         required: list[str] | None = None) -> dict:
+    # 决策理由（method a）：每个工具调用都自带一句"为什么做这个动作"。
+    # 统一在 _fn 里注入而不是逐个工具手写——新增工具不会漏，漏了前端 decision
+    # 事件就没有理由可显示（只会显示动作名）。stop 已自带 reason，setdefault 不覆盖。
+    props = dict(properties or {})
+    props.setdefault("reason", {
+        "type": "string",
+        "description": "为什么调这个工具（一句话，给用户看的决策理由）",
+    })
     return {
         "type": "function",
         "function": {
@@ -56,7 +64,7 @@ def _fn(name: str, description: str, properties: dict | None = None,
             "description": description,
             "parameters": {
                 "type": "object",
-                "properties": properties or {},
+                "properties": props,
                 "required": required or [],
             },
         },
@@ -117,6 +125,21 @@ def lead_tool_specs() -> list[dict]:
 
 def registered_tool_names() -> set[str]:
     return {s["function"]["name"] for s in lead_tool_specs()}
+
+
+def decision_action(name: str) -> str:
+    """工具名 → legacy 决策动作枚举（SSE `decision` 事件的 action 取值）。
+
+    统一循环没有单独的决策调用，"工具调用"就是决策点；枚举沿用 legacy 的
+    answer / call_analysis / ask_user / stop，避免前端出现两套动作词汇。
+    repair 也归 call_analysis（legacy 里它同样是"去干活"），具体内核由 tool 区分。
+    """
+    cls = tool_class(name)
+    if cls == "terminal":
+        return name
+    if cls in ("dispatch", "repair"):
+        return "call_analysis"
+    return "observe"
 
 
 def tool_class(name: str) -> str | None:
