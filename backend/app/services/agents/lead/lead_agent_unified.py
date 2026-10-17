@@ -74,6 +74,26 @@ def effective_complexity(
     return "simple", False
 
 
+def explicit_kernel(name: str) -> str | None:
+    """派发工具 → 显式执行内核（复用 legacy 的同一张映射表，不另立词汇）。
+
+    legacy 的内核选择来自 `REPAIR_KIND_KERNEL[repair_kind]`
+    （patch→react / redo→orchestrator，lead_agent.py:649-658）；统一循环里没有
+    repair_kind 字段，repair 工具在语义上就是 patch（§2.5：小缺口 → 轻量内核）。
+    这里**显式**取表，而不是靠 complexity="simple" 间接落到 react——
+    否则哪天表改了，两处会静默漂移，而漂移表现只是"某个场景变慢/变贵"。
+
+    redo 没有对应：unified 用「同一 goal 再派」当启发式，只用于 bypass_memo
+    （跳过缓存），**不**据此换内核。是否给 repair 工具加 kind 参数（patch/redo
+    由模型判断）属于工具面设计，需要单独一轮 + 评测。
+    """
+    from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL
+
+    if name == "repair":
+        return REPAIR_KIND_KERNEL.get("patch")
+    return None
+
+
 def _parse_args(raw) -> dict:
     if isinstance(raw, dict):
         return raw
@@ -348,7 +368,7 @@ async def stream_unified(
                 complexity=complexity,
                 guidance=guidance,
             )
-            worker = resolve_worker(ctx.entry, complexity)
+            worker = resolve_worker(ctx.entry, complexity, explicit_kernel(name))
             captured: dict = {}   # 接住 RunAnalysisResult，供随后的评审阶段使用
             async for ev in run_worker(
                 user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,

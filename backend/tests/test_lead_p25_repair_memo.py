@@ -204,6 +204,25 @@ async def test_repair_always_bypasses_memo(monkeypatch):
     assert seen[0].get("bypass_memo") is True
 
 
+# ── 内核选择：repair 走 legacy 同一张映射表 ────────────────────────────────
+
+def test_repair_kernel_comes_from_legacy_mapping_table():
+    """repair → 轻量内核（react）必须取自 REPAIR_KIND_KERNEL，不另立词汇。
+
+    legacy 是把 `REPAIR_KIND_KERNEL[repair_kind]` 当 explicit 传给 resolve_worker
+    （lead_agent.py:649-658）；统一循环没有 repair_kind 字段，但语义上 repair 就是
+    patch。这里显式取表，避免靠 complexity="simple" 间接落到 react——
+    否则哪天表改了，两处会静默漂移。
+    """
+    from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL
+    from app.services.agents.lead.lead_agent_unified import explicit_kernel
+
+    assert explicit_kernel("repair") == REPAIR_KIND_KERNEL["patch"] == "react"
+    # 普通派发不给 explicit：仍按「入口 × 复杂度」表路由
+    assert explicit_kernel("dispatch_analysis") is None
+    assert explicit_kernel("") is None
+
+
 async def test_different_goals_do_not_bypass(monkeypatch):
     """不同 goal 是两次独立子任务，各自走 memo 即可（不该无脑跳过）。"""
     seen = await _drive(
