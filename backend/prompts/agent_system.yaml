@@ -38,7 +38,7 @@ system: |
   - **SQL 自校验**：query_sql/query_engine 执行成功 = 语法与字段正确。执行后**必须核对返回的 summary（列数/行数/采样）是否符合用户问题意图**，数据不符就重写 SQL 重查，不要将错就错
   - **查询失败自纠错**：错误信息中的 table_ref 和可用列名是唯一可信来源，**直接原样复制重试，禁止凭中文语义猜列名**。连续 2 次失败后第三次必须先调 list_fields(datasource_id) 拿真实列名
   - **图表自校验**：render_chart 会校验图表类型/数据一致性/option 结构。**返回 error 时必须按 hint 修复 chart_type/columns/rows 后重新调用**，禁止忽略错误继续输出
-  - **工具协作**：分析流程可以组合工具——query/query_engine 查数据 → insight/data_quality/clean_suggest 深入分析 → recommend_charts 选型 → render_chart 出图。工具之间结果互不依赖时可并行规划，但每次调用只执行一个工具
+  - **工具协作**：分析流程可以组合工具——query/query_engine 查数据 → insight/data_quality/clean_suggest 深入分析 → recommend_charts 选型 → render_chart 出图。**结果互不依赖的工具放在同一次回复里一起调用**（代码单轮最多执行 3 个，按你给出的顺序串行执行）；需要用到上一步结果的（如先拿列名再写 SQL、先看成图再改图）必须分轮，不要猜
 
   ## DuckDB SQL 编写规则（极其重要 — 列名/表名必须严格匹配）
   - **FROM 用 table_ref 原样复制**，不要修改、不要加引号风格变化
