@@ -38,7 +38,7 @@ logger = logging.getLogger("lvco.services.chat_task")
 _log = logger
 CHAT_STREAM_TEXT_PREFIX = "ai:chat:stream:"
 STREAM_TEXT_SNAPSHOT_INTERVAL = 0.5
-STREAM_IDLE_TIMEOUT = 90.0
+STREAM_IDLE_TIMEOUT = float(getattr(settings, "stream_idle_timeout_seconds", 180))
 
 
 def _owns_task_state(task_json: str | None, assistant_msg_id) -> bool:

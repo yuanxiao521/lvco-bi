@@ -1,5 +1,5 @@
 import ReactECharts from 'echarts-for-react'
-import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS, sortByDateIfAll } from './echartsUtils'
+import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS, sortByDateIfAll, formatCategoryLabel } from './echartsUtils'
 import type { MeasureFieldInfo } from './echartsUtils'
 
 interface EChartsLineProps {
@@ -47,6 +47,7 @@ export default function EChartsLine({ data, xField, yField, measureFields, color
         fontSize: 11,
         interval: 'auto',
         hideOverlap: true,
+        formatter: (v: string) => formatCategoryLabel(v),
         rotate: sorted.length > 30 ? 45 : sorted.length > 6 ? 30 : 0,
       },
       axisLine: { lineStyle: { color: '#E2E8F0' } },

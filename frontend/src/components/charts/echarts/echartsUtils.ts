@@ -185,6 +185,7 @@ export function buildMultiMeasureOption(
         // 自动抽稀 + hideOverlap，绝不全量渲染——此前 interval:0 会把日期轴糊成一团。
         interval: 'auto',
         hideOverlap: true,
+        formatter: (v: string) => formatCategoryLabel(v),
         rotate: xData.length > 30 ? 45 : xData.length > 6 ? 30 : 0,
       },
       axisLine: { lineStyle: { color: '#E2E8F0' } },
@@ -285,4 +286,16 @@ export function sortByDateIfAll<T extends Record<string, unknown>>(data: T[], xF
   if (!Array.isArray(data) || data.length < 2) return data;
   if (!data.every((d) => looksLikeDate(d[xField]))) return data;
   return [...data].sort((a, b) => String(a[xField] ?? '').localeCompare(String(b[xField] ?? '')));
+}
+
+
+/**
+ * 类目轴短标签：日期时间戳裁掉时间部分（date_trunc 常返回 '2023-01-01 00:00:00'），
+ * 长 ISO 串在 X 轴上非常占位且不易读。
+ */
+export function formatCategoryLabel(v: unknown): string {
+  const t = String(v ?? '');
+  if (/^\d{4}-\d{2}-\d{2} 00:00:00$/.test(t)) return t.slice(0, 7);
+  const m = t.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}/);
+  return m ? m[1] : t;
 }

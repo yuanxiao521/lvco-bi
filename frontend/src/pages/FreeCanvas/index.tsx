@@ -53,6 +53,7 @@ import { useToast } from "../../components/ui/Toast";
 // 导入默认模板工具函数
 import { findDefaultTemplate, isSystemTemplateId } from "../../data/defaultTemplates";
 import { REPORT, resolveGeometry, nextChartSlot, nextKpiSlot, nextFullWidthSlot, applyReportLayout, isKpiBlock } from "../../utils/reportLayout";
+import { sortRowsByDate } from "../../utils/querySort";
 import { remapChartsForDatasource } from "../../utils/canvasDatasource";
 // 跨图表联动筛选：图表 → store → 其他图表重查
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
@@ -646,10 +647,13 @@ export default function FreeCanvas() {
     const blocksWithData = blocks.map((b) => {
       if (b.type !== "chart" || !("blockId" in b)) return b;
       const blockId = (b as { blockId: string }).blockId;
+      const cfg = chartConfigs[blockId];
+      const res = chartResults[blockId];
       return {
         ...b,
-        _chartConfig: chartConfigs[blockId] ?? null,
-        _chartResult: chartResults[blockId] ?? null,
+        _chartConfig: cfg ?? null,
+        // 落库前排序：DB 里的行也必须有序（否则下次 Agent 读画布看到乱序日期）
+        _chartResult: res ? { ...res, rows: sortRowsByDate(cfg?.dimensions, res.rows) ?? res.rows } : null,
       };
     });
     await updateCanvasBlocks(canvasId, blocksWithData);
@@ -680,7 +684,7 @@ export default function FreeCanvas() {
         return {
           ...b,
           _chartConfig: chartConfigs[blockId] ?? null,
-          _chartResult: chartResults[blockId] ?? null,
+          _chartResult: chartResults[blockId] ? { ...chartResults[blockId], rows: sortRowsByDate(chartConfigs[blockId]?.dimensions, chartResults[blockId].rows) ?? chartResults[blockId].rows } : null,
         };
       });
       try {
@@ -712,7 +716,7 @@ export default function FreeCanvas() {
           return {
             ...b,
             _chartConfig: chartConfigs[blockId] ?? null,
-            _chartResult: chartResults[blockId] ?? null,
+            _chartResult: chartResults[blockId] ? { ...chartResults[blockId], rows: sortRowsByDate(chartConfigs[blockId]?.dimensions, chartResults[blockId].rows) ?? chartResults[blockId].rows } : null,
           };
         });
         updateCanvasBlocks(cid, blocksWithData)

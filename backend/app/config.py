@@ -186,6 +186,9 @@ class Settings(BaseSettings):
     # 后台任务硬超时（秒）：一轮超过该时长仍未收尾 → 中断并释放会话锁。
     # 断流/上游挂起时任务会一直悬着，用户被「上一轮还在处理中」挡住（实测投诉点）。
     lead_task_timeout_seconds: int = 420
+    # SSE 流空闲超时（秒）：超过该时长没有任何事件 → 判中断。
+    # 90s 对大 prompt 的推理模型太紧（实测 6551 token 的循环首步 >90s 无输出）。
+    stream_idle_timeout_seconds: int = 180
     # 任务态「running」超过该时长视为陈旧（worker 挂掉/任务悬死），允许清孤儿锁。
     lead_task_stale_seconds: int = 900
     # Lead 的执行形态开关（P1 单 Agent 化）。
