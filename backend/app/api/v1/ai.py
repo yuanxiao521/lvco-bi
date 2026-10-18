@@ -44,7 +44,12 @@ from app.schemas import (
 from app.services.ai_service import AIService, VALID_CHART_TYPES
 from app.services.ai_prompts import CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
-from app.services.session_lock import acquire_session_lock, release_session_lock
+from app.services.session_lock import (
+    acquire_session_lock,
+    force_release_session_lock,
+    release_session_lock,
+    session_task_running,
+)
 from app.services.chat_stream_registry import chat_registry
 from app.services.event_stream import event_stream
 
@@ -770,6 +775,11 @@ async def data_chat_stream(
         task_key: str | None = None
         if session_id:
             lock_token = acquire_session_lock(session_id)
+            if lock_token is None:
+                # 孤儿锁自愈（同画布入口）：任务态确认没在跑才清锁重试
+                if not session_task_running(session_id, canvas=False):
+                    force_release_session_lock(session_id)
+                    lock_token = acquire_session_lock(session_id)
             if lock_token is None:
                 yield f"data: {json.dumps({'type': 'error', 'message': _SESSION_BUSY_MSG}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -1816,11 +1826,24 @@ async def canvas_ai_chat(
     if body.canvas_context:
         blocks = body.canvas_context.get("blocks", [])
         if blocks:
-            canvas_ctx = "\n当前画布已有以下图表：\n"
+            # 全类型块清单：Lead 必须知道画布上到底有什么（此前只报图表块，
+            # 标题/叙事块看不见 → 会误判"画布是空的/只有几块"）。field 名兼容
+            # 前端 blockId 与旧 id。
+            canvas_ctx = "\n当前画布已有以下内容块：\n"
             for b in blocks:
-                if isinstance(b, dict) and b.get("type") == "chart":
-                    bid = b.get("id") or ""
-                    canvas_ctx += f"- id={bid} {b.get('title', '图表')} (类型: {b.get('chartType', '?')}, 维度: {b.get('dimensions', [])}, 度量: {b.get('measures', [])})\n"
+                if not isinstance(b, dict):
+                    continue
+                bid = b.get("blockId") or b.get("block_id") or b.get("id") or ""
+                btype = b.get("type") or "?"
+                if btype == "chart":
+                    canvas_ctx += (
+                        f"- [图表] id={bid} {b.get('title', '图表')} "
+                        f"(图表类型: {b.get('chartType', '?')}, 维度: {b.get('dimensions', [])}, "
+                        f"度量: {b.get('measures', [])})\n"
+                    )
+                else:
+                    text = str(b.get("content") or "")[:40].replace("\n", " ")
+                    canvas_ctx += f"- [{btype}] id={bid} {text}\n"
         current_cfg = body.canvas_context.get("currentConfig")
         if current_cfg:
             dims = current_cfg.get("dimensions", [])
@@ -2301,6 +2324,13 @@ async def canvas_ai_chat(
             if session_id:
                 lock_token = acquire_session_lock(session_id)
                 if lock_token is None:
+                    # 孤儿锁自愈：断流/崩遗留下的锁会在 TTL(600s) 内把用户挡在门外。
+                    # 只有「Redis 任务态确认已不在 running」时才清锁重试，
+                    # 避免把真正在跑的那一轮挤掉（并发写同一会话）。
+                    if not session_task_running(session_id, canvas=True):
+                        force_release_session_lock(session_id)
+                        lock_token = acquire_session_lock(session_id)
+                if lock_token is None:
                     yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
                     yield _sse({"type": "done"})
                     return
@@ -2360,7 +2390,15 @@ async def canvas_ai_chat(
                 _log.debug("canvas event stream clear failed", exc_info=True)
             task_launched = chat_registry.start(
                 task_sid,
-                lambda: _consume_canvas_task(_canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token), task_sid),
+                # 硬超时兜底：断流/上游挂起时任务会一直悬着（锁不释放、用户被挡住）。
+                # 超时由 wait_for 取消任务体 → 其 finally 会落库中断态并释放会话锁。
+                lambda: asyncio.wait_for(
+                    _consume_canvas_task(
+                        _canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token),
+                        task_sid,
+                    ),
+                    timeout=float(settings.lead_task_timeout_seconds),
+                ),
             )
             if not task_launched:
                 yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})

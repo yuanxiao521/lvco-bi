@@ -183,6 +183,11 @@ class Settings(BaseSettings):
     LEAD_PROGRESS_VERBOSE: bool = False
     # Supervisor 主管循环：一轮对话最多派发子任务的轮次上限（防主管无限转圈）
     LEAD_MAX_SUPERVISOR_ROUNDS: int = 3
+    # 后台任务硬超时（秒）：一轮超过该时长仍未收尾 → 中断并释放会话锁。
+    # 断流/上游挂起时任务会一直悬着，用户被「上一轮还在处理中」挡住（实测投诉点）。
+    lead_task_timeout_seconds: int = 420
+    # 任务态「running」超过该时长视为陈旧（worker 挂掉/任务悬死），允许清孤儿锁。
+    lead_task_stale_seconds: int = 900
     # Lead 的执行形态开关（P1 单 Agent 化）。
     #   legacy       = 四个 prompt 工位（merged + decision + answer），当前生产形态；
     #   single_agent = 一个 system + 工具层 + 循环闸，即「单 Agent」。
