@@ -212,7 +212,7 @@ from app.services.chat_task import lead_stream_guard as _lead_stream_guard  # no
 
 # 事件流空闲看门狗阈值（秒）：超过这么久没有任何事件，判定 Agent 内部停住
 # （典型：上游 LLM 一直发心跳但不出 token，httpx 的 read timeout 只兜"字节间隔"兜不住它）
-STREAM_IDLE_TIMEOUT = 90.0
+STREAM_IDLE_TIMEOUT = float(getattr(settings, "stream_idle_timeout_seconds", 180))
 
 
 def _read_streamed_text(session_id: object) -> str:

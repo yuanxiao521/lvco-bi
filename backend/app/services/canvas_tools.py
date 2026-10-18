@@ -29,6 +29,9 @@ CHART_TYPES = [
 
 # canvas_action 中携带的最大数据行数，避免 SSE 包过大
 _CANVAS_MAX_ROWS = 50
+# 取数探测上限：提粒度判定需要看到**真实行数**（limit=50 会把 365 天截成 50，
+# 导致 >62 的判定永远不成立）。落库/返回仍截到 _CANVAS_MAX_ROWS。
+_QUERY_PROBE_ROWS = 500
 
 # 日期型字段的启发式命名（自动提粒度用）：order_date / created_at / sale_date / 日期 / 月份 等
 _DATE_NAME_MARKS = ("date", "time", "day", "month", "year", "日期", "时间", "月份", "年份")
@@ -479,7 +482,8 @@ class AddChartBlockTool(BaseTool):
                 filters=[],
                 chart_type=chart_type,
                 datasource_id=datasource_id,
-                limit=_CANVAS_MAX_ROWS,
+                # 用探测上限取数：提粒度判断需要真实行数（见 _QUERY_PROBE_ROWS 注释）
+                limit=_QUERY_PROBE_ROWS,
             )
             result = await execute_chart_query(
                 datasource_id=UUID(datasource_id),
@@ -504,7 +508,7 @@ class AddChartBlockTool(BaseTool):
                         filters=config.filters,
                         chart_type=chart_type,
                         datasource_id=datasource_id,
-                        limit=_CANVAS_MAX_ROWS,
+                        limit=_QUERY_PROBE_ROWS,
                         dimension_buckets={date_dim: 'month'},
                     )
                     try:
@@ -519,6 +523,13 @@ class AddChartBlockTool(BaseTool):
                                 "[add_chart_block] granularity_escalated dim=%s rows=%d -> %d (month)",
                                 date_dim, len(result.rows), len(result2.rows),
                             )
+                            # 桶值规范化：date_trunc 返回 '2023-01-01 00:00:00'，
+                            # 直接显示在 X 轴很丑；按月桶统一裁成 'YYYY-MM'。
+                            _alias = f"{date_dim}_month"
+                            result2.rows = [
+                                {**r, _alias: str(r.get(_alias) or '')[:7]} if _alias in r else r
+                                for r in result2.rows
+                            ]
                             result = result2
                             display_measures = _remap_bucket_measures(display_measures, date_dim)
                     except Exception as e:  # noqa: BLE001
