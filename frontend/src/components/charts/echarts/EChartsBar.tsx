@@ -1,5 +1,5 @@
 import ReactECharts from 'echarts-for-react'
-import { formatYAxisNum, buildMultiMeasureOption, DEFAULT_COLORS } from './echartsUtils'
+import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS } from './echartsUtils'
 import type { MeasureFieldInfo } from './echartsUtils'
 
 interface EChartsBarProps {
@@ -27,14 +27,43 @@ export default function EChartsBar({ data, xField, yField, measureFields, colors
   // 单度量模式（向后兼容）
   const y = yField ?? ''
   const option = {
-    title: title ? { text: title, left: 'center' } : undefined,
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: data.map(d => String(d[xField])), axisLabel: { interval: 'auto', hideOverlap: true, rotate: data.length > 30 ? 45 : data.length > 6 ? 30 : 0 } },
-    yAxis: { type: 'value', axisLabel: { formatter: (v: number) => formatYAxisNum(v) } },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.98)',
+      borderColor: '#E2E8F0',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: '#1E293B', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(15,23,42,0.10); border-radius: 8px;',
+      valueFormatter: (v: number) => formatFullNum(v),
+    },
+    grid: { top: 14, left: 8, right: 16, bottom: 30, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => String(d[xField])),
+      axisLabel: {
+        color: '#94A3B8',
+        fontSize: 11,
+        interval: 'auto',
+        hideOverlap: true,
+        rotate: data.length > 30 ? 45 : data.length > 6 ? 30 : 0,
+      },
+      axisLine: { lineStyle: { color: '#E2E8F0' } },
+      axisTick: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#F1F5F9', width: 1 } },
+    },
     series: [{
       type: 'bar',
       data: data.map(d => Number(d[y]) || 0),
-      itemStyle: { color: color || colors[0] },
+      barMaxWidth: 36,
+      itemStyle: { color: color || colors[0], borderRadius: [6, 6, 0, 0] },
     }],
   }
   return <ReactECharts option={option} style={{ height: '100%', width: '100%' }} notMerge onEvents={onEvents} />

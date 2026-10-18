@@ -9,14 +9,22 @@
  * 5. 支持水平条形（horizontal=true）模式：x/y 轴对调
  */
 
-const DEFAULT_COLORS = ['#2BB5A0', '#6C7BF2', '#F5A623', '#EF5B5B', '#4EADFF', '#A78BFA', '#F472B6', '#34D399'];
+const DEFAULT_COLORS = ['#3E7BFA', '#14B8A6', '#F59E0B', '#EF4444', '#8B5CF6', '#0EA5E9', '#EC4899', '#22C55E'];
 
-/** Y轴格式化：>= 100万 → M，>= 1万 → w，>= 1000 → k */
+/** 数值格式化：中文量纲（亿/万/千），整数不带小数点——比 M/w/k 更符合中文阅读习惯 */
 export function formatYAxisNum(value: number): string {
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-  if (value >= 10000) return `${(value / 10000).toFixed(1)}w`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(value);
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  const trim = (v: number) => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1));
+  if (abs >= 100000000) return `${sign}${trim(abs / 100000000)}亿`;
+  if (abs >= 10000) return `${sign}${trim(abs / 10000)}万`;
+  if (abs >= 1000) return `${sign}${trim(abs / 1000)}千`;
+  return sign + trim(abs);
+}
+
+/** 千分位格式化（tooltip 用） */
+export function formatFullNum(value: number): string {
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 }
 
 export interface MeasureFieldInfo {
@@ -63,7 +71,7 @@ export function buildMultiMeasureOption(
   xField: string,
   measureFields: MeasureFieldInfo[],
   colors: string[] = DEFAULT_COLORS,
-  title?: string,
+  _title?: string,
   stacked?: boolean,
   extra: BuildOptionExtra = {},
 ) {
@@ -97,23 +105,27 @@ export function buildMultiMeasureOption(
       // 不设 name：轴名（如 SUM(total_amount)）会画在轴顶端并与 legend 重叠，
       // 遮挡顶部刻度（实测）。左右轴的归属靠 axisLine 颜色 + legend 颜色对应即可。
       position: 'left',
-      axisLine: { show: true, lineStyle: { color: colors[leftIdx % colors.length] } },
-      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#EEF1F6', type: 'dashed' } },
+      axisLine: { show: true, lineStyle: { color: colors[leftIdx % colors.length], width: 1 } },
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#F1F5F9', width: 1 } },
     });
     const rightColor = rightIdx >= 0 ? colors[rightIdx % colors.length] : colors[1 % colors.length];
     yAxisList.push({
       type: 'value',
       position: 'right',
-      axisLine: { show: true, lineStyle: { color: rightColor } },
-      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
+      axisLine: { show: true, lineStyle: { color: rightColor, width: 1 } },
+      axisTick: { show: false },
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
       splitLine: { show: false },
     });
   } else {
     yAxisList.push({
       type: 'value',
-      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#EEF1F6', type: 'dashed' } },
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#F1F5F9', width: 1 } },
     });
   }
 
@@ -138,7 +150,15 @@ export function buildMultiMeasureOption(
       base.areaStyle = { opacity: 0.25 };
     }
     if (chartType === 'bar') {
-      base.barMaxWidth = 40;
+      base.barMaxWidth = 36;
+      // 圆角柱：比直角柱更现代（横向柱圆角在右侧）
+      base.itemStyle = {
+        ...base.itemStyle,
+        borderRadius: horizontal ? [0, 6, 6, 0] : [6, 6, 0, 0],
+      };
+    }
+    if (chartType === 'line' || isArea) {
+      base.lineStyle = { width: 2.5 };
     }
     return base;
   });
@@ -149,15 +169,17 @@ export function buildMultiMeasureOption(
     // 水平条形：x 轴 = value，y 轴 = category
     xAxis = {
       type: 'value',
-      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#8B97A8', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#EEF1F6', type: 'dashed' } },
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#F1F5F9', width: 1 } },
     };
   } else {
     xAxis = {
       type: 'category',
       data: xData,
       axisLabel: {
-        color: '#8B97A8',
+        color: '#94A3B8',
         fontSize: 11,
         // 少量类目全显 + 轻度倾斜；多类目（如按日趋势 100+ 点）交给 ECharts
         // 自动抽稀 + hideOverlap，绝不全量渲染——此前 interval:0 会把日期轴糊成一团。
@@ -176,7 +198,7 @@ export function buildMultiMeasureOption(
     yAxisOut = {
       type: 'category',
       data: [...xData].reverse(),
-      axisLabel: { color: '#8B97A8', fontSize: 11 },
+      axisLabel: { color: '#94A3B8', fontSize: 11 },
       axisLine: { show: false },
       axisTick: { show: false },
     };
@@ -190,25 +212,31 @@ export function buildMultiMeasureOption(
   // 每个 series 都可点击切换显示/隐藏
   const legendData = measureFields.map((m) => ({
     name: m.label,
-    // ECharts 图例的 icon 使用 roundRect（PowerBI 风格圆角矩形）
-    icon: 'roundRect',
-    textStyle: { color: '#1A2332', fontSize: 11 },
+    // 圆点图例：比圆角矩形更轻，不与柱/线抢视觉
+    icon: 'circle',
+    textStyle: { color: '#475569', fontSize: 11 },
   }));
 
   // --- grid: 加大底部留白，避免 x 轴 label 被父容器裁切 ---
   const showLegend = measureFields.length > 1;
-  const gridBottom = horizontal ? 28 : 36; // 水平条形不需要太多底部
-  const gridTop = title ? 40 : (showLegend ? 32 : 12);
+  const gridBottom = horizontal ? 24 : 34; // 水平条形不需要太多底部
+  // 标题不再画在图表内（块头已显示），顶部只需给图例留位
+  const gridTop = showLegend ? 30 : 10;
 
   const option: any = {
-    title: title ? { text: title, left: 'center', textStyle: { fontSize: 13, fontWeight: 600, color: '#1A2332' } } : undefined,
+    // 不画内置标题：块头已经显示标题，再画一次就是"双标题"（实测冗余观感）
+    title: undefined,
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: horizontal ? 'shadow' : 'line' },
-      backgroundColor: '#FFFFFF',
+      confine: true,
+      axisPointer: { type: horizontal ? 'shadow' : 'line', lineStyle: { color: '#CBD5E1', width: 1 } },
+      backgroundColor: 'rgba(255,255,255,0.98)',
       borderColor: '#E2E8F0',
       borderWidth: 1,
-      textStyle: { color: '#1A2332', fontSize: 12 },
+      padding: [8, 12],
+      textStyle: { color: '#1E293B', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(15,23,42,0.10); border-radius: 8px;',
+      valueFormatter: (v: number) => formatFullNum(v),
     },
     legend: {
       show: showLegend,
