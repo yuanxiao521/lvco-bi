@@ -1,5 +1,5 @@
 import ReactECharts from 'echarts-for-react'
-import { formatYAxisNum, buildMultiMeasureOption, DEFAULT_COLORS } from './echartsUtils'
+import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS } from './echartsUtils'
 import type { MeasureFieldInfo } from './echartsUtils'
 
 interface EChartsHorizontalBarProps {
@@ -57,26 +57,44 @@ export default function EChartsHorizontalBar({
   const reversedCats = [...cats].reverse()
   const reversedVals = [...vals].reverse()
 
+  // 标题不画在图表内：块头已显示标题（避免双标题）
+  void title
   const option = {
-    title: title ? { text: title, left: 'center' } : undefined,
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { top: title ? 40 : 12, left: 8, right: 24, bottom: 28, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      axisPointer: { type: 'shadow' },
+      backgroundColor: 'rgba(255,255,255,0.98)',
+      borderColor: '#E2E8F0',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: '#1E293B', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 6px 20px rgba(15,23,42,0.10); border-radius: 8px;',
+      valueFormatter: (v: number) => formatFullNum(v),
+    },
+    grid: { top: 12, left: 8, right: 44, bottom: 18, containLabel: true },
     xAxis: {
       type: 'value',
-      axisLabel: { formatter: (v: number) => formatYAxisNum(v) },
+      axisLabel: { formatter: (v: number) => formatYAxisNum(v), color: '#94A3B8', fontSize: 11 },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { lineStyle: { color: '#F1F5F9', width: 1 } },
     },
     yAxis: {
       type: 'category',
       data: reversedCats,
-      axisLabel: { fontSize: 11, color: '#8B97A8' },
+      axisLabel: { fontSize: 11, color: '#475569' },
+      axisLine: { lineStyle: { color: '#E2E8F0' } },
+      axisTick: { show: false },
     },
     series: [
       {
         name: y,
         type: 'bar',
+        barMaxWidth: 26,
         data: reversedVals,
-        itemStyle: { color: color || colors[0], borderRadius: [0, 4, 4, 0] },
-        label: { show: true, position: 'right', fontSize: 10, color: '#8B97A8' },
+        itemStyle: { color: color || colors[0], borderRadius: [0, 6, 6, 0] },
+        label: { show: true, position: 'right', fontSize: 10, color: '#94A3B8' },
       },
     ],
   }
