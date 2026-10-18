@@ -558,17 +558,27 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       name: f.name, data_type: f.data_type, category: f.category,
     }));
     if (Array.isArray(ctx.canvasBlocks) && ctx.canvasBlocks.length) {
-      canvasContext.blocks = ctx.canvasBlocks
-        .filter((b) => b && b.type === "chart")
-        .map((b) => ({
-          block_id: b.blockId,
-          title: b.title,
-          chartType: b.chartType,
-          dimensions: b.queryConfig?.dimensions ?? b.dimensions ?? [],
-          measures: b.queryConfig?.measures ?? b.measures ?? [],
+      // 传**全部**块（不只图表）：后端据此告诉 Lead 画布上到底有什么。
+      // 此前只传图表块 → Lead 看不到标题/叙事块，会误判「画布只有 N 块/是空的」。
+      canvasContext.blocks = ctx.canvasBlocks.map((b) => {
+        const rec = b as unknown as Record<string, unknown>;
+        const base = {
+          blockId: b.blockId,
+          type: rec.type,
           // 布局感知：带上块坐标，LLM 据此判断画布是否整齐、是否需要整理布局
           x: b.x, y: b.y, width: b.width, height: b.height,
-        }));
+        };
+        if (rec.type === "chart") {
+          return {
+            ...base,
+            title: b.title,
+            chartType: b.chartType,
+            dimensions: b.queryConfig?.dimensions ?? b.dimensions ?? [],
+            measures: b.queryConfig?.measures ?? b.measures ?? [],
+          };
+        }
+        return { ...base, content: String(rec.content ?? "") };
+      });
     }
     set({ steps: [], meta: null }); // 每次新任务重置工作台步骤时间线 + 流程元信息
 

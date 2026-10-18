@@ -60,6 +60,59 @@ def session_lock_held(session_id: object) -> bool:
         return False
 
 
+def session_task_running(session_id: object, *, canvas: bool = False) -> bool:
+    """任务是否真的在跑（跨进程真相：Redis 任务态）。
+
+    锁本身不能证明任务在跑——进程崩溃/断流/任务被取消时锁还在（TTL 内），
+    表现就是「上一轮还在处理中」挡住用户所有新消息（实测投诉点）。
+    队列模式下任务跑在 worker 进程，本进程 registry 看不到，必须读 Redis。
+    """
+    from app.api.deps import get_cache_repository
+
+    key = f"ai:{'canvas' if canvas else 'chat'}:task:{session_id}"
+    try:
+        raw = get_cache_repository().get(key)
+    except Exception:
+        logger.warning("session_task_probe_failed session=%s", session_id, exc_info=True)
+        return True  # 探测失败时保守认为在跑，不误清锁
+    if not raw:
+        return False
+    try:
+        import json as _json
+        from datetime import datetime, timezone
+
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        data = data or {}
+        if str(data.get("status") or "") != "running":
+            return False
+        # 陈旧判定：worker 挂掉时 Redis 里的 running 永远不会被清，
+        # 只看 status 会让用户被永久挡住 → 超阈值视为"已不在跑"。
+        started = data.get("started_at")
+        if isinstance(started, str) and started:
+            try:
+                ts = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                age = (datetime.now(timezone.utc) - ts).total_seconds()
+                if age > int(getattr(settings, "lead_task_stale_seconds", 900)):
+                    logger.warning("session_task_stale session=%s age=%.0fs", session_id, age)
+                    return False
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
+def force_release_session_lock(session_id: object) -> None:
+    """强制清锁（仅在确认没有任务在跑时调用）：孤儿锁自愈用。"""
+    from app.api.deps import get_cache_repository
+
+    try:
+        get_cache_repository().delete(_lock_key(session_id))
+        logger.warning("session_lock_force_released session=%s", session_id)
+    except Exception:
+        logger.warning("session_lock_force_release_failed session=%s", session_id, exc_info=True)
+
+
 def release_session_lock(session_id: object, token: str | None) -> None:
     """释放会话锁。
 
