@@ -1922,15 +1922,7 @@ export default function FreeCanvas() {
           onDragOver={handleCanvasDragOver}
           onDrop={handleCanvasDrop}
         >
-          {blocks.length === 0 && (
-            /* 空态引导：新建画布不再预置示例报告，改为一句话指路 */
-            <div className="flex flex-col items-center justify-center py-24 text-center select-none">
-              <p className="text-lg font-medium text-slate-500">画布是空的，从这里开始</p>
-              <p className="mt-2 text-sm text-slate-400">
-                在下方输入分析诉求让 Agent 生成报告；或用上方按钮 / 左侧字段面板手动添加图表与文本块。
-              </p>
-            </div>
-          )}
+          {/* 空态引导统一由 CanvasBlocks 渲染（此处不再重复一份，避免两段文案叠在一起） */}
           {/* 移动端：显示/隐藏 字段面板 和 配置面板 的切换按钮 */}
           <div className="md:hidden flex gap-2 mb-2">
             <button

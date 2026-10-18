@@ -1046,10 +1046,14 @@ export default function CanvasBlocks({
       保证用户看到的角标 == Agent 上下文里的 [A1]，可以用编号直接指代某一块 */}
   const labels = useMemo(() => assignBlockLabels(blocks ?? []), [blocks]);
 
+  // 空画布：**唯一**的空态引导（此前这里 + FreeCanvas 各有一份，两段文案叠在一起）
   if (!blocks || blocks.length === 0) {
     return (
-      <div className="text-center py-16 text-muted-foreground text-[13px]">
-        画布为空，从左侧拖拽字段或添加块开始创建报告
+      <div className="flex flex-col items-center justify-center py-24 text-center select-none">
+        <p className="text-[15px] font-medium text-slate-500">画布是空的，从这里开始</p>
+        <p className="mt-2 text-[13px] text-slate-400">
+          在下方输入分析诉求让 Agent 生成报告；或用上方按钮 / 左侧字段面板手动添加图表与文本块。
+        </p>
       </div>
     );
   }
