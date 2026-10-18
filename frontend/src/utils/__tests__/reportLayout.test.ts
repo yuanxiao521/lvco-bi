@@ -4,6 +4,7 @@ import {
   resolveGeometry,
   deriveCursor,
   nextChartSlot,
+  nextKpiSlot,
   nextFullWidthSlot,
   applyReportLayout,
   estimateBlockHeight,
@@ -231,5 +232,40 @@ describe('assignBlockLabels', () => {
 
   it('空数组返回空编号', () => {
     expect(assignBlockLabels([])).toEqual([]);
+  });
+});
+describe('KPI 卡片布局（默认尺寸过大问题）', () => {
+  const kpi = (x: number, y: number): CanvasBlock =>
+    ({ type: 'chart', chartType: 'kpi_card', blockId: 'k1', x, y, width: 300, height: 132 } as CanvasBlock);
+
+  it('nextKpiSlot：空画布从 startY 起', () => {
+    expect(nextKpiSlot([])).toEqual({ x: REPORT.marginX, y: REPORT.startY });
+  });
+
+  it('nextKpiSlot：同一行最多 3 个，第 4 个换行', () => {
+    const geo = resolveGeometry();
+    const k1 = kpi(geo.leftX, REPORT.startY);
+    const s2 = nextKpiSlot([k1]);
+    expect(s2).toEqual({ x: geo.leftX + geo.kpiW + REPORT.colGap, y: REPORT.startY });
+    const k2 = kpi(s2.x, s2.y);
+    const k3 = kpi(s2.x + geo.kpiW + REPORT.colGap, s2.y);
+    expect(nextKpiSlot([k1, k2, k3])).toEqual({
+      x: geo.leftX,
+      y: REPORT.startY + REPORT.kpiH + REPORT.gapY,
+    });
+  });
+
+  it('applyReportLayout：KPI 排成一行 3 个，宽高为 kpiW/kpiH', () => {
+    const geo = resolveGeometry();
+    const out = applyReportLayout([kpi(0, 0), kpi(0, 0), kpi(0, 0)]);
+    expect(out[0]).toMatchObject({ x: geo.leftX, y: REPORT.startY, width: geo.kpiW, height: REPORT.kpiH });
+    expect(out[1].x).toBe(geo.leftX + geo.kpiW + REPORT.colGap);
+    expect(out[2].x).toBe(geo.leftX + 2 * (geo.kpiW + REPORT.colGap));
+  });
+
+  it('普通图表尺寸不变（回归保护）', () => {
+    const geo = resolveGeometry();
+    const out = applyReportLayout([{ type: 'chart', chartType: 'bar', blockId: 'b1' } as CanvasBlock]);
+    expect(out[0]).toMatchObject({ width: geo.chartW, height: REPORT.chartH });
   });
 });

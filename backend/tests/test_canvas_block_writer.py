@@ -182,3 +182,38 @@ async def test_switch_on_via_maybe_persist(ctx, monkeypatch):
                               canvas_id=str(canvas_id), db=db)
     assert got is not None and got["persisted"] is True
     assert len((await db.get(Canvas, canvas_id)).blocks) == 1
+
+
+def test_kpi_card_geometry_and_row_packing():
+    """KPI 卡片：矮卡片（kpiH）+ 一行 3 个（kpiW），普通图表尺寸不变。
+
+    背景：KPI 原先复用图表尺寸（chartW x chartH），一个数字占半屏，实测反馈很难看。
+    """
+    geo = laysvc.resolve_geometry()
+    assert geo["kpiW"] == round((geo["fullW"] - laysvc.REPORT["colGap"] * 2) / 3)
+    assert laysvc.REPORT["kpiH"] == 132
+
+    # 空画布 → 首个 KPI 从 startY 起
+    assert laysvc.next_kpi_slot([]) == {"x": geo["leftX"], "y": laysvc.REPORT["startY"]}
+
+    # 同一行最多 3 个：第 2/3 个横向排开，第 4 个换行
+    k1 = {"type": "chart", "chartType": "kpi_card", "x": geo["leftX"],
+          "y": laysvc.REPORT["startY"], "width": geo["kpiW"], "height": laysvc.REPORT["kpiH"]}
+    s2 = laysvc.next_kpi_slot([k1])
+    assert s2 == {"x": geo["leftX"] + geo["kpiW"] + laysvc.REPORT["colGap"],
+                  "y": laysvc.REPORT["startY"]}
+    k2 = {**k1, "x": s2["x"]}
+    k3 = {**k1, "x": s2["x"] + geo["kpiW"] + laysvc.REPORT["colGap"]}
+    s4 = laysvc.next_kpi_slot([k1, k2, k3])
+    assert s4 == {"x": geo["leftX"],
+                  "y": laysvc.REPORT["startY"] + laysvc.REPORT["kpiH"] + laysvc.REPORT["gapY"]}
+
+    # 全量重排：3 个 KPI 一行、宽高为 kpiW/kpiH；普通图表仍是 chartW x chartH
+    arranged = laysvc.apply_report_layout([k1, k2, k3, {"type": "chart", "chartType": "bar"}])
+    assert (arranged[0]["x"], arranged[0]["y"]) == (geo["leftX"], laysvc.REPORT["startY"])
+    assert arranged[0]["width"] == geo["kpiW"] and arranged[0]["height"] == laysvc.REPORT["kpiH"]
+    assert arranged[1]["x"] == geo["leftX"] + geo["kpiW"] + laysvc.REPORT["colGap"]
+    assert arranged[2]["x"] == geo["leftX"] + 2 * (geo["kpiW"] + laysvc.REPORT["colGap"])
+    bar = arranged[3]
+    assert bar["width"] == geo["chartW"] and bar["height"] == laysvc.REPORT["chartH"]
+    assert bar["y"] >= laysvc.REPORT["startY"] + laysvc.REPORT["kpiH"]  # 不叠在 KPI 上

@@ -52,7 +52,7 @@ import type { MetricDefinition } from "../../types/metric";
 import { useToast } from "../../components/ui/Toast";
 // 导入默认模板工具函数
 import { findDefaultTemplate, isSystemTemplateId } from "../../data/defaultTemplates";
-import { REPORT, resolveGeometry, nextChartSlot, nextFullWidthSlot, applyReportLayout } from "../../utils/reportLayout";
+import { REPORT, resolveGeometry, nextChartSlot, nextKpiSlot, nextFullWidthSlot, applyReportLayout, isKpiBlock } from "../../utils/reportLayout";
 import { remapChartsForDatasource } from "../../utils/canvasDatasource";
 // 跨图表联动筛选：图表 → store → 其他图表重查
 import { useCrossFilterStore } from "../../stores/crossFilterStore";
@@ -1029,7 +1029,7 @@ export default function FreeCanvas() {
     const isChart = (src as { type?: unknown }).type === "chart";
     const newId = newBlockId(String((src as { type?: unknown }).type ?? "block"));
     const slot = isChart
-      ? nextChartSlot(blocks, { width: canvasWidth })
+      ? (isKpiBlock(src) ? nextKpiSlot(blocks, { width: canvasWidth }) : nextChartSlot(blocks, { width: canvasWidth }))
       : nextFullWidthSlot(blocks, { width: canvasWidth });
     const clone = { ...(src as Record<string, unknown>), blockId: newId, x: slot.x, y: slot.y } as CanvasBlock;
     setBlocks((prev) => {
@@ -1154,14 +1154,18 @@ export default function FreeCanvas() {
           }
         }
         const title = block.title || `${ct} 图表`;
+        // KPI 卡片：一行 3 个、矮卡片（默认尺寸太大很难看，实测反馈）；普通图表保持双列
+        const isKpi = ct === "kpi_card";
+        const blockW = isKpi ? geometry.kpiW : geometry.chartW;
+        const blockH = isKpi ? REPORT.kpiH : REPORT.chartH;
         setBlocks((prev) => {
           // P1 后端唯一落库：事件带后端已算好的坐标/ID 时直接采用（渲染与 DB 一致）
           const pos = block.x != null && block.y != null
             ? { x: block.x, y: block.y }
-            : nextChartSlot(prev, { width: canvasWidth });
+            : (isKpi ? nextKpiSlot(prev, { width: canvasWidth }) : nextChartSlot(prev, { width: canvasWidth }));
           return [
             ...prev,
-            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: geometry.chartW, height: REPORT.chartH, x: pos.x, y: pos.y },
+            { type: "chart", blockId, title, chartType: ct, renderer: "echarts", datasourceId: dsId, width: blockW, height: blockH, x: pos.x, y: pos.y },
           ];
         });
         scrollToBlock(blockId);

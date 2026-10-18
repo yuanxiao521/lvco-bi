@@ -113,7 +113,11 @@ class CanvasBlockWriter:
             return None
 
         geo = laysvc.resolve_geometry()
-        slot = laysvc.next_chart_slot(blocks)
+        # KPI 卡片：单独成行、一行 3 个、矮卡片（默认尺寸太大很难看，实测反馈）
+        is_kpi = ct == "kpi_card"
+        slot = laysvc.next_kpi_slot(blocks) if is_kpi else laysvc.next_chart_slot(blocks)
+        block_w = geo["kpiW"] if is_kpi else geo["chartW"]
+        block_h = laysvc.REPORT["kpiH"] if is_kpi else laysvc.REPORT["chartH"]
         block_id = _new_block_id("chart")
         new_block = {
             "type": "chart",
@@ -122,8 +126,8 @@ class CanvasBlockWriter:
             "chartType": ct,
             "renderer": "echarts",
             "datasourceId": action_block.get("datasourceId"),
-            "width": geo["chartW"],
-            "height": laysvc.REPORT["chartH"],
+            "width": block_w,
+            "height": block_h,
             "x": slot["x"],
             "y": slot["y"],
             "_chartConfig": {
@@ -146,7 +150,7 @@ class CanvasBlockWriter:
         new_blocks = blocks + [new_block]
         return new_blocks, {"block": {**action_block, "blockId": block_id,
                                       "x": slot["x"], "y": slot["y"],
-                                      "width": geo["chartW"], "height": laysvc.REPORT["chartH"]},
+                                      "width": block_w, "height": block_h},
                             "blockId": block_id}
 
     async def _add_text(self, blocks: list[dict]) -> tuple[list[dict], dict] | None:

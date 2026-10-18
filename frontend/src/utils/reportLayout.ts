@@ -19,6 +19,7 @@ export const REPORT = {
   colGap: 20,      // 双列列间距
   startY: 32,      // 首块起始 y（原为 180，会在画布顶部留一大片死区）
   chartH: 320,     // 图表块默认高度
+  kpiH: 132,       // KPI 卡片默认高度（只有一个大数字，不需要图表那么高）
   minColW: 360,    // 双列时每列最小宽度，低于则降为单列
   fallbackW: 980,  // 未测量到画布实宽时的兜底通栏宽
 } as const;
@@ -27,6 +28,7 @@ export const REPORT = {
 export interface LayoutGeometry {
   fullW: number;   // 通栏块宽度
   chartW: number;  // 图表块宽度（单列时 = fullW）
+  kpiW: number;    // KPI 卡片宽度（一行 3 个）
   cols: 1 | 2;
   leftX: number;
   rightX: number;
@@ -40,9 +42,12 @@ export function resolveGeometry(width?: number): LayoutGeometry {
   );
   const two = avail >= REPORT.minColW * 2 + REPORT.colGap;
   const chartW = two ? Math.round((avail - REPORT.colGap) / 2) : avail;
+  // KPI 卡片一行 3 个：单张更窄更矮，避免“一个数字占半屏”的丑陋默认
+  const kpiW = Math.round((avail - REPORT.colGap * 2) / 3);
   return {
     fullW: avail,
     chartW,
+    kpiW,
     cols: two ? 2 : 1,
     leftX: REPORT.marginX,
     rightX: REPORT.marginX + chartW + REPORT.colGap,
@@ -152,7 +157,11 @@ export function estimateBlockHeight(block: CanvasBlock, geo: LayoutGeometry = re
     const w = typeof block.width === "number" ? block.width : geo.fullW;
     return estimateTextHeight(c, w);
   }
-  if (t === "chart") return REPORT.chartH;
+  if (t === "chart") {
+    return (block as { chartType?: string }).chartType === "kpi_card"
+      ? REPORT.kpiH
+      : REPORT.chartH;
+  }
   return 300;
 }
 
@@ -216,6 +225,31 @@ export function nextChartSlot(blocks: CanvasBlock[], opts: LayoutOpts = {}): { x
   return { x: geo.rightX, y: rightBottom > startY ? rightBottom + REPORT.gapY : rightBottom };
 }
 
+/** 是否 KPI 卡片块（chart 的 kpi_card 变体） */
+export function isKpiBlock(b: CanvasBlock): boolean {
+  const rec = b as { type?: string; chartType?: string };
+  return rec.type === "chart" && rec.chartType === "kpi_card";
+}
+
+/** KPI 卡片槽位：同一行最多 3 个，接在该行最右块之后；行满另起一行 */
+export function nextKpiSlot(blocks: CanvasBlock[], opts: LayoutOpts = {}): { x: number; y: number } {
+  const geo = resolveGeometry(opts.width);
+  const startY = opts.startY ?? REPORT.startY;
+  const placed = blocks.filter(isPlaced);
+  const kpis = placed.filter(isKpiBlock) as Array<CanvasBlock & { x: number; y: number }>;
+  if (kpis.length > 0) {
+    const lastY = Math.max(...kpis.map((b) => b.y));
+    const row = kpis.filter((b) => Math.abs(b.y - lastY) <= 5);
+    if (row.length < 3) {
+      const maxX = Math.max(...row.map((b) => b.x));
+      return { x: maxX + geo.kpiW + REPORT.colGap, y: lastY };
+    }
+    return { x: geo.leftX, y: lastY + REPORT.kpiH + REPORT.gapY };
+  }
+  const bottom = placed.reduce((m, b) => Math.max(m, blockBottom(b, 0, geo)), startY);
+  return { x: geo.leftX, y: bottom > startY ? bottom + REPORT.gapY : bottom };
+}
+
 /** 下一个通栏块位置：两列最深底部 + 间距 */
 export function nextFullWidthSlot(blocks: CanvasBlock[], opts: LayoutOpts = {}): { x: number; y: number } {
   const geo = resolveGeometry(opts.width);
@@ -227,6 +261,7 @@ export function nextFullWidthSlot(blocks: CanvasBlock[], opts: LayoutOpts = {}):
 
 /**
  * 全量重排（arrange_layout）：按现有顺序重写所有块坐标。
+ * - KPI 卡片 → 单独成行、一行最多 3 个（kpiW x kpiH）
  * - h1/h2/text → 通栏 fullW，并把游标整体压到该块底部（重置双列）
  * - chart → 双列网格 chartW x chartH（单列模式下列宽 = fullW）
  * - image → 保持原宽（超过通栏宽则收窄），按通栏处理
@@ -236,8 +271,29 @@ export function applyReportLayout(blocks: CanvasBlock[], opts: LayoutOpts = {}):
   const startY = opts.startY ?? REPORT.startY;
   let leftBottom = startY;
   let rightBottom = startY;
+  let kpiRowY: number | null = null;  // 当前 KPI 行 y（null=不在 KPI 行内）
+  let kpiRowN = 0;                    // 当前行已放几个
   const out = blocks.map((b) => {
     const type = (b as { type?: string }).type;
+
+    if (isKpiBlock(b)) {
+      if (kpiRowY === null || kpiRowN >= 3) {
+        const baseY = Math.max(leftBottom, rightBottom);
+        kpiRowY = baseY > startY ? baseY + REPORT.gapY : baseY;
+        kpiRowN = 0;
+      }
+      const x = geo.leftX + kpiRowN * (geo.kpiW + REPORT.colGap);
+      const y = kpiRowY as number;
+      kpiRowN += 1;
+      // 行（或未满行）底部推进游标：后续块不会叠到 KPI 上
+      leftBottom = Math.max(leftBottom, y + REPORT.kpiH);
+      rightBottom = Math.max(rightBottom, y + REPORT.kpiH);
+      if (kpiRowN >= 3) { kpiRowY = null; kpiRowN = 0; }
+      return { ...b, x, y, width: geo.kpiW, height: REPORT.kpiH };
+    }
+    // 非 KPI 块：结束当前 KPI 行
+    kpiRowY = null;
+    kpiRowN = 0;
 
     if (type === "chart") {
       // 网格：放底部较低的列（单列模式恒为左列通栏）

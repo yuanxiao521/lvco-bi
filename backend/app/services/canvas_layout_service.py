@@ -33,6 +33,7 @@ REPORT = {
     "colGap": 20,      # 双列列间距
     "startY": 32,      # 首块起始 y
     "chartH": 320,     # 图表块默认高度
+    "kpiH": 132,       # KPI 卡片默认高度（只有一个大数字，不需要图表那么高）
     "minColW": 360,    # 双列时每列最小宽度
     "fallbackW": 980,  # 未测量到画布实宽时的兜底通栏宽
 }
@@ -56,9 +57,12 @@ def resolve_geometry(width: float | None = None) -> dict:
         avail = REPORT["fallbackW"]
     two = avail >= REPORT["minColW"] * 2 + REPORT["colGap"]
     chart_w = _round((avail - REPORT["colGap"]) / 2) if two else avail
+    # KPI 卡片一行 3 个：单张更窄更矮，避免"一个数字占半屏"的丑陋默认（实测反馈）
+    kpi_w = _round((avail - REPORT["colGap"] * 2) / 3)
     return {
         "fullW": avail,
         "chartW": chart_w,
+        "kpiW": kpi_w,
         "cols": 2 if two else 1,
         "leftX": REPORT["marginX"],
         "rightX": REPORT["marginX"] + chart_w + REPORT["colGap"],
@@ -148,6 +152,8 @@ def estimate_block_height(block: dict, geo: dict | None = None) -> int:
         w = block.get("width") if isinstance(block.get("width"), (int, float)) else geo["fullW"]
         return estimate_text_height(c, w)
     if t == "chart":
+        if block.get("chartType") == "kpi_card":
+            return REPORT["kpiH"]
         return REPORT["chartH"]
     return 300
 
@@ -214,6 +220,30 @@ def next_chart_slot(blocks: list[dict], width: float | None = None) -> dict:
     return {"x": geo["rightX"], "y": rb + REPORT["gapY"] if rb > sy else rb}
 
 
+def is_kpi_block(b: dict) -> bool:
+    """是否 KPI 卡片块（chart 的 kpi_card 变体）。"""
+    return b.get("type") == "chart" and b.get("chartType") == "kpi_card"
+
+
+def next_kpi_slot(blocks: list[dict], width: float | None = None) -> dict:
+    """KPI 卡片槽位：同一行最多 3 个，接在该行最右块之后；行满另起一行。"""
+    geo = resolve_geometry(width)
+    sy = REPORT["startY"]
+    kpi_w = geo["kpiW"]
+    placed = [b for b in blocks if _is_placed(b)]
+    kpis = [b for b in placed if is_kpi_block(b)]
+    if kpis:
+        last_y = max(b["y"] for b in kpis)
+        row = [b for b in kpis if abs(b["y"] - last_y) <= 5]
+        if len(row) < 3:
+            max_x = max(b["x"] for b in row)
+            return {"x": max_x + kpi_w + REPORT["colGap"], "y": last_y}
+        return {"x": geo["leftX"], "y": last_y + REPORT["kpiH"] + REPORT["gapY"]}
+    # 尚无 KPI：放在现有块底部之后（空画布从 startY 起）
+    bottom = max((_bottom_of(b, geo) for b in placed), default=sy)
+    return {"x": geo["leftX"], "y": bottom + REPORT["gapY"] if bottom > sy else bottom}
+
+
 def next_full_width_slot(blocks: list[dict], width: float | None = None) -> dict:
     """下一个通栏块位置：两列最深底部 + 间距。"""
     geo = resolve_geometry(width)
@@ -224,13 +254,38 @@ def next_full_width_slot(blocks: list[dict], width: float | None = None) -> dict
 
 
 def apply_report_layout(blocks: list[dict], width: float | None = None) -> list[dict]:
-    """全量重排（arrange_layout）：按现有顺序重写所有块坐标。"""
+    """全量重排（arrange_layout）：按现有顺序重写所有块坐标。
+
+    KPI 卡片单独成行、一行最多 3 个（kpiW × kpiH），普通图表仍是双列网格。
+    """
     geo = resolve_geometry(width)
     sy = REPORT["startY"]
     left_bottom, right_bottom = sy, sy
+    kpi_row_y: int | None = None   # 当前 KPI 行 y（None=不在 KPI 行内）
+    kpi_row_n = 0                  # 当前行已放几个
     out: list[dict] = []
     for b in blocks:
         t = b.get("type")
+        if is_kpi_block(b):
+            kpi_w = geo["kpiW"]
+            if kpi_row_y is None or kpi_row_n >= 3:
+                base_y = max(left_bottom, right_bottom)
+                kpi_row_y = base_y + REPORT["gapY"] if base_y > sy else base_y
+                kpi_row_n = 0
+            x = geo["leftX"] + kpi_row_n * (kpi_w + REPORT["colGap"])
+            out.append({**b, "x": x, "y": kpi_row_y, "width": kpi_w, "height": REPORT["kpiH"]})
+            kpi_row_n += 1
+            # 行（或未满行）底部推进游标：后续块不会叠到 KPI 上
+            bottom = kpi_row_y + REPORT["kpiH"]
+            left_bottom = max(left_bottom, bottom)
+            right_bottom = max(right_bottom, bottom)
+            if kpi_row_n >= 3:
+                kpi_row_y = None
+                kpi_row_n = 0
+            continue
+        # 非 KPI 块：结束当前 KPI 行
+        kpi_row_y = None
+        kpi_row_n = 0
         if t == "chart":
             use_left = geo["cols"] == 1 or left_bottom <= right_bottom
             col_bottom = left_bottom if use_left else right_bottom
