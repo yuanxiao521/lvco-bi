@@ -2012,6 +2012,7 @@ async def canvas_ai_chat(
         full_content = ""
         canvas_actions_count = 0
         stream_degraded = False  # 事件流里出现过的降级标记，随流尾唯一的 done 下发
+        completed = False        # 正常收尾（走到 emit done）才置 True；否则视为中断
         db = async_session_factory()
         try:
             # ---- 3. 加载历史（阶段 3：服务端窗口，与聊天入口共用同一所有者） ----
@@ -2145,6 +2146,7 @@ async def canvas_ai_chat(
                 except Exception:
                     pass
 
+            completed = True
             # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
             yield ({"type": "done", "degraded": stream_degraded})
 
@@ -2169,6 +2171,15 @@ async def canvas_ai_chat(
                 try:
                     if not am.content and full_content.strip():
                         am.content = full_content.strip()
+                    # 中断可见：超时/上游断流/被取消时，会话里留一条明确提示，
+                    # 而不是让用户只看到「上一轮还在处理中」自己猜（实测反馈）。
+                    if not completed:
+                        hint = (
+                            "\n\n> ⚠️ 本轮生成已中断（上游超时或连接断开），已保留前面生成的内容。"
+                            "可以再发一句「继续」，我会接着做。"
+                        )
+                        if hint.strip() not in (am.content or ""):
+                            am.content = (am.content or "") + hint
                     await db.commit()
                 except Exception:
                     try:
@@ -2388,18 +2399,32 @@ async def canvas_ai_chat(
                 await event_stream.clear(task_sid)
             except Exception:
                 _log.debug("canvas event stream clear failed", exc_info=True)
-            task_launched = chat_registry.start(
-                task_sid,
-                # 硬超时兜底：断流/上游挂起时任务会一直悬着（锁不释放、用户被挡住）。
-                # 超时由 wait_for 取消任务体 → 其 finally 会落库中断态并释放会话锁。
-                lambda: asyncio.wait_for(
-                    _consume_canvas_task(
-                        _canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token),
-                        task_sid,
-                    ),
-                    timeout=float(settings.lead_task_timeout_seconds),
-                ),
-            )
+            async def _run_canvas_with_timeout() -> None:
+                """画布任务入口：带硬超时兜底 + 超时对前端可见。
+
+                断流/上游挂起时任务会一直悬着（锁不释放、用户被挡住）。
+                超时由 wait_for 取消任务体 → 其 finally 落库中断态并释放会话锁；
+                这里额外广播一条明确错误，避免前端只看到连接静默结束。
+                """
+                try:
+                    await asyncio.wait_for(
+                        _consume_canvas_task(
+                            _canvas_chat_task(session_id, user_msg_id, assistant_msg_id, lock_token),
+                            task_sid,
+                        ),
+                        timeout=float(settings.lead_task_timeout_seconds),
+                    )
+                except asyncio.TimeoutError:
+                    _log.warning(
+                        "canvas_task_timeout session=%s limit=%ss",
+                        session_id, settings.lead_task_timeout_seconds,
+                    )
+                    chat_registry.publish(task_sid, {
+                        "type": "error",
+                        "message": "本轮已超时中断（上游长时间无响应），已保留已完成的内容。",
+                    })
+
+            task_launched = chat_registry.start(task_sid, _run_canvas_with_timeout)
             if not task_launched:
                 yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
                 yield _sse({"type": "done"})
