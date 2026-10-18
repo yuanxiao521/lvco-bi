@@ -268,3 +268,21 @@ export function buildMultiMeasureOption(
 }
 
 export { DEFAULT_COLORS };
+
+
+/** 判断类目值是否像日期（ISO 日期/月/时间串） */
+function looksLikeDate(v: unknown): boolean {
+  const t = String(v ?? '');
+  return /^\d{4}-\d{2}(-\d{2})?/.test(t) || /^\d{4}\/\d{1,2}/.test(t);
+}
+
+/**
+ * 日期类目排序：数据库 GROUP BY 不保证顺序（实测「按日期趋势」X 轴乱跳）。
+ * 仅当**全部**类目都像日期时按字符串升序稳定排序（ISO 串字典序 = 时间序），
+ * 其余情况保持原顺序，避免打乱「按销售额排名」这类有业务语义的顺序。
+ */
+export function sortByDateIfAll<T extends Record<string, unknown>>(data: T[], xField: string): T[] {
+  if (!Array.isArray(data) || data.length < 2) return data;
+  if (!data.every((d) => looksLikeDate(d[xField]))) return data;
+  return [...data].sort((a, b) => String(a[xField] ?? '').localeCompare(String(b[xField] ?? '')));
+}

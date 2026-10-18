@@ -1,5 +1,5 @@
 import ReactECharts from 'echarts-for-react'
-import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS } from './echartsUtils'
+import { formatYAxisNum, formatFullNum, buildMultiMeasureOption, DEFAULT_COLORS, sortByDateIfAll } from './echartsUtils'
 import type { MeasureFieldInfo } from './echartsUtils'
 
 interface EChartsAreaProps {
@@ -24,6 +24,7 @@ export default function EChartsArea({ data, xField, yField, measureFields, color
 
   // 单度量模式（向后兼容）
   const y = yField ?? ''
+  const sorted = sortByDateIfAll(data, xField)
   const option = {
     tooltip: {
       trigger: 'axis',
@@ -39,13 +40,13 @@ export default function EChartsArea({ data, xField, yField, measureFields, color
     grid: { top: 14, left: 8, right: 16, bottom: 30, containLabel: true },
     xAxis: {
       type: 'category',
-      data: data.map(d => String(d[xField])),
+      data: sorted.map(d => String(d[xField])),
       axisLabel: {
         color: '#94A3B8',
         fontSize: 11,
         interval: 'auto',
         hideOverlap: true,
-        rotate: data.length > 30 ? 45 : data.length > 6 ? 30 : 0,
+        rotate: sorted.length > 30 ? 45 : sorted.length > 6 ? 30 : 0,
       },
       axisLine: { lineStyle: { color: '#E2E8F0' } },
       axisTick: { show: false },
@@ -59,7 +60,7 @@ export default function EChartsArea({ data, xField, yField, measureFields, color
     },
     series: [{
       type: 'line',
-      data: data.map(d => Number(d[y]) || 0),
+      data: sorted.map(d => Number(d[y]) || 0),
       smooth: 0.35,
       lineStyle: { width: 2.5 },
       areaStyle: { opacity: 0.16 },

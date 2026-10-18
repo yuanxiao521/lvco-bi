@@ -639,6 +639,24 @@ export default function FreeCanvas() {
     }
   }, [canvasId, refreshingAll, clearCrossFilter, toast]);
 
+  // 发送对话前的**立即落库**：autosave 有 1.5s debounce，Agent 启动时可能读到的还是旧 DB。
+  // 保证「用户看到的画布 == Agent 感知到的画布」（实测：画布上 8 个图表，Agent 说只有 2 块）。
+  const flushBlocksNow = useCallback(async () => {
+    if (!canvasId) return;
+    const blocksWithData = blocks.map((b) => {
+      if (b.type !== "chart" || !("blockId" in b)) return b;
+      const blockId = (b as { blockId: string }).blockId;
+      return {
+        ...b,
+        _chartConfig: chartConfigs[blockId] ?? null,
+        _chartResult: chartResults[blockId] ?? null,
+      };
+    });
+    await updateCanvasBlocks(canvasId, blocksWithData);
+    lastBackendSyncRef.current = JSON.stringify(blocks);
+    pendingSaveRef.current = null;
+  }, [canvasId, blocks, chartConfigs, chartResults]);
+
   // 后端 autosave：canvasId 存在时，blocks 变化 debounce 1.5s → PUT /canvases/:id/blocks
   // 关键点：切换画布 / 组件卸载时 effect cleanup 会 clearTimeout 取消 debounce，
   // 若只清定时器不补发，待保存的 blocks（含 AI 刚落的新块）会永远丢失。
@@ -2114,6 +2132,7 @@ export default function FreeCanvas() {
         onCanvasAction={handleCanvasAction}
         onStreamingChange={setAiStreaming}
         onEnsureCanvas={ensureCanvas}
+        onFlushBlocks={flushBlocksNow}
       />
 
       {/* —— 保存到仪表盘弹窗 —— */}
