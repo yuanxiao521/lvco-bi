@@ -198,3 +198,35 @@ async def test_arrange_layout(db_session: MagicMock):
     action = json.loads(out)["canvas_action"]
     assert action["action"] == "arrange_layout"
     assert action["layout"] == "auto"
+# ── 趋势图 X 轴排序：数据库 GROUP BY 不保证顺序（实测日期乱跳）──────────────
+
+def test_sort_rows_by_date_for_trend_charts():
+    from app.services.canvas_tools import _sort_rows_by_date
+
+    # 维度名要像日期（_is_date_like 是按列名启发式判断的）
+    rows = [
+        {"order_date": "2025-03-27", "v": 1},
+        {"order_date": "2024-07-10", "v": 2},
+        {"order_date": "2025-01-31", "v": 3},
+    ]
+    out = _sort_rows_by_date(rows, ["order_date"], "line")
+    assert [r["order_date"] for r in out] == ["2024-07-10", "2025-01-31", "2025-03-27"]
+
+
+def test_sort_rows_keeps_order_when_not_date_or_not_trend():
+    from app.services.canvas_tools import _sort_rows_by_date
+
+    rank = [{"region": "East", "v": 9}, {"region": "South", "v": 1}]
+    # 非日期维度：保持业务顺序（排名语义）
+    assert _sort_rows_by_date(rank, ["region"], "bar") == rank
+    # 日期维度但非趋势图：也保持原样
+    date_rows = [{"order_date": "2025-03-01"}, {"order_date": "2024-01-01"}]
+    assert _sort_rows_by_date(date_rows, ["order_date"], "pie") == date_rows
+
+
+def test_sort_rows_handles_bucket_alias():
+    from app.services.canvas_tools import _sort_rows_by_date
+
+    rows = [{"order_date_month": "2025-03-01", "v": 1}, {"order_date_month": "2024-11-01", "v": 2}]
+    out = _sort_rows_by_date(rows, ["order_date"], "line")
+    assert [r["order_date_month"] for r in out] == ["2024-11-01", "2025-03-01"]

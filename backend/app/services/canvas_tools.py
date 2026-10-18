@@ -40,6 +40,32 @@ def _is_date_like(dim: str) -> bool:
     return any(m in d for m in _DATE_NAME_MARKS)
 
 
+def _sort_rows_by_date(rows: list[dict], dimensions: list[str], chart_type: str) -> list[dict]:
+    """趋势图 X 轴排序：数据库不保证 GROUP BY 输出顺序（实测「按日期趋势」日期乱跳）。
+
+    仅当图型是趋势类、首维度名像日期时才按值升序排序（ISO 日期串字典序 = 时间序）；
+    其余情况原样返回，避免打乱「按销售额排名」这类有业务语义的顺序。
+    """
+    if not rows or not dimensions or chart_type not in (
+        "line", "area", "bar", "stacked_bar", "grouped_bar",
+    ):
+        return rows
+    dim0 = str(dimensions[0])
+    if not _is_date_like(dim0):
+        return rows
+    key = dim0
+    if key not in rows[0]:
+        # date_trunc 桶别名（如 order_date_month）
+        cand = [k for k in rows[0].keys() if str(k).startswith(dim0)]
+        key = cand[0] if cand else key
+    if key not in rows[0]:
+        return rows
+    try:
+        return sorted(rows, key=lambda r: str(r.get(key) or ""))
+    except Exception:  # noqa: BLE001
+        return rows
+
+
 def _remap_bucket_measures(display_measures: list[dict], date_dim: str) -> list[dict]:
     """按月重查后，度量引用的维度字段名要换成桶别名（date_trunc 的 AS 别名）。"""
     alias = f"{date_dim}_month"
@@ -508,6 +534,7 @@ class AddChartBlockTool(BaseTool):
             return json.dumps({"error": f"生成图表失败: {str(e)}"}, ensure_ascii=False)
 
         rows = list(result.rows)[:_CANVAS_MAX_ROWS]
+        rows = _sort_rows_by_date(rows, dimensions, chart_type)
         action = {
             "action": "add_chart_block",
             "block": {

@@ -51,6 +51,8 @@ export interface CanvasAssistantCtx {
   onCanvasAction?: (action: any) => void;
   onApplyChartConfig?: (config: CanvasChartConfig) => void;
   ensureCanvas?: () => Promise<string>;
+  /** 发消息前把当前画布 blocks 立即刷到后端（保证 Agent 读到的 DB = 用户看到的画布） */
+  flushBlocks?: () => Promise<void>;
   /** P2 断线续收：resume 命中运行中任务后由调用方 GET 画布对齐本地渲染（块状态以 DB 为准） */
   refreshCanvas?: () => void;
 }
@@ -518,6 +520,15 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
         effCanvasId = await ctx.ensureCanvas();
       } catch {
         // 创建失败按草稿继续，后端以 canvas_id=null 兜底
+      }
+    }
+    // 发消息前**立即**把画布落库：autosave 有 1.5s debounce，Agent 可能先跑完、
+    // 读到的是旧 DB（表现为「Agent 说画布上只有 N 块」而用户屏幕上明明更多）。
+    if (effCanvasId && ctx.flushBlocks) {
+      try {
+        await ctx.flushBlocks();
+      } catch {
+        // 保存失败不阻断对话（Agent 仍可凭前端上传的 blocks 感知画布）
       }
     }
     activeStreamCanvasId = effCanvasId ?? null;  // 本流归属画布：切画布时据此中止
