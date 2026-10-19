@@ -69,9 +69,9 @@ def _sort_rows_by_date(rows: list[dict], dimensions: list[str], chart_type: str)
         return rows
 
 
-def _remap_bucket_measures(display_measures: list[dict], date_dim: str) -> list[dict]:
-    """按月重查后，度量引用的维度字段名要换成桶别名（date_trunc 的 AS 别名）。"""
-    alias = f"{date_dim}_month"
+def _remap_bucket_measures(display_measures: list[dict], date_dim: str, bucket: str = "month") -> list[dict]:
+    """桶化重查后，度量引用的维度字段名要换成桶别名（date_trunc 的 AS 别名）。"""
+    alias = f"{date_dim}_{bucket}"
     remapped = []
     for m in display_measures or []:
         m = dict(m)
@@ -491,49 +491,58 @@ class AddChartBlockTool(BaseTool):
                 user_id=UUID(user_id),
                 db=db_session,
             )
-            # 趋势图自动提粒度：维度是日期型、行数过多（>62 ≈ 两个月按日）时，
-            # 自动按月重查一次。否则 X 轴 100+ 个日期标签糊成一团，且"月度趋势"
-            # 的语义名不副实（实测用户投诉点）。行数降不下来就保留原结果。
+            # 趋势图时间粒度自适应：日期维度默认是**原始粒度（按日）**，
+            # 数据跨几年时会有上千个点 —— X 轴糊成一团且没有阅读意义。
+            # 这里按行数上阶梯：日 → 月 → 年，直到点数回落到可读范围（≤62）。
+            # 注意：只对趋势类图型生效；排名/占比类不动。
+            _MAX_TREND_POINTS = 62
             if (
                 chart_type in ('line', 'area', 'bar')
                 and dimensions
-                and len(result.rows) > 62
                 and not config.dimension_buckets
             ):
                 date_dim = next((d for d in config.dimensions if _is_date_like(d)), None)
                 if date_dim:
-                    monthly = ChartQueryConfig(
-                        dimensions=config.dimensions,
-                        measures=config.measures,
-                        filters=config.filters,
-                        chart_type=chart_type,
-                        datasource_id=datasource_id,
-                        limit=_QUERY_PROBE_ROWS,
-                        dimension_buckets={date_dim: 'month'},
-                    )
-                    try:
-                        result2 = await execute_chart_query(
-                            datasource_id=UUID(datasource_id),
-                            config=monthly,
-                            user_id=UUID(user_id),
-                            db=db_session,
-                        )
-                        if 0 < len(result2.rows) < len(result.rows):
-                            logger.info(
-                                "[add_chart_block] granularity_escalated dim=%s rows=%d -> %d (month)",
-                                date_dim, len(result.rows), len(result2.rows),
+                    for _bucket, _cut in (('month', 7), ('year', 4)):
+                        if len(result.rows) <= _MAX_TREND_POINTS:
+                            break
+                        try:
+                            _cfg = ChartQueryConfig(
+                                dimensions=config.dimensions,
+                                measures=config.measures,
+                                filters=config.filters,
+                                chart_type=chart_type,
+                                datasource_id=datasource_id,
+                                limit=_QUERY_PROBE_ROWS,
+                                dimension_buckets={date_dim: _bucket},
                             )
-                            # 桶值规范化：date_trunc 返回 '2023-01-01 00:00:00'，
-                            # 直接显示在 X 轴很丑；按月桶统一裁成 'YYYY-MM'。
-                            _alias = f"{date_dim}_month"
-                            result2.rows = [
-                                {**r, _alias: str(r.get(_alias) or '')[:7]} if _alias in r else r
-                                for r in result2.rows
-                            ]
-                            result = result2
-                            display_measures = _remap_bucket_measures(display_measures, date_dim)
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("[add_chart_block] monthly_requery_failed: %s", e)
+                            _r2 = await execute_chart_query(
+                                datasource_id=UUID(datasource_id),
+                                config=_cfg,
+                                user_id=UUID(user_id),
+                                db=db_session,
+                            )
+                            if 0 < len(_r2.rows) < len(result.rows):
+                                logger.info(
+                                    "[add_chart_block] granularity_escalated dim=%s rows=%d -> %d (%s)",
+                                    date_dim, len(result.rows), len(_r2.rows), _bucket,
+                                )
+                                # 桶值规范化：date_trunc 返回 '2023-01-01 00:00:00'，
+                                # 直接上 X 轴很丑 → 月裁成 YYYY-MM、年裁成 YYYY。
+                                _alias = f"{date_dim}_{_bucket}"
+                                _r2.rows = [
+                                    {**r, _alias: str(r.get(_alias) or '')[:_cut]}
+                                    if _alias in r else r
+                                    for r in _r2.rows
+                                ]
+                                result = _r2
+                                display_measures = _remap_bucket_measures(
+                                    display_measures, date_dim, bucket=_bucket,
+                                )
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning(
+                                "[add_chart_block] %s_requery_failed: %s", _bucket, e,
+                            )
         except (QueryEngineError, ValueError) as e:
             logger.warning("[add_chart_block] query_failed error=%s", str(e))
             return json.dumps({"error": f"查询验证失败: {str(e)}"}, ensure_ascii=False)
