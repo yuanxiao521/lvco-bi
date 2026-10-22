@@ -33,6 +33,13 @@ from app.config import settings
 
 logger = logging.getLogger("lvco.worker")
 
+# 画布入口的基础查数工具（与 ai.py 的 _CANVAS_QUERY_TOOL_NAMES 同一清单）。
+# 为什么复制一份：ai.py 是 API 层模块，worker import 它会拖进 FastAPI 路由依赖；
+# 这里只保留纯名单。两处由测试断言一致（见 tests/test_canvas_task_queue.py）。
+_CANVAS_QUERY_TOOL_NAMES = frozenset({
+    "list_datasources", "list_fields", "list_metrics", "query_sql", "query_engine",
+})
+
 _pool = None
 
 
@@ -57,8 +64,8 @@ async def worker_alive() -> bool:
         return False
 
 
-async def enqueue_chat_task(**payload) -> str | None:
-    """把一轮对话任务投递到队列，返回 job_id。
+async def _enqueue(function: str, log_tag: str, **payload) -> str | None:
+    """入队公共体：无在线 worker / 入队失败都返回 None（调用方回退进程内执行）。
 
     返回 None 的两种情况（调用方据此回退进程内执行）：
       1) 没有在线 worker —— 入队会变成"永远排队"，不如本进程直接跑；
@@ -69,15 +76,25 @@ async def enqueue_chat_task(**payload) -> str | None:
             logger.warning("no_arq_worker_online_fallback_inprocess")
             return None
         pool = await get_pool()
-        job = await pool.enqueue_job("run_chat_task_job", **payload)
+        job = await pool.enqueue_job(function, **payload)
         if job is None:
             # 同 job_id 已存在（去重语义）——按已入队处理
             return "duplicate"
-        logger.info("chat_task_enqueued job=%s session=%s", job.job_id, payload.get("session_id"))
+        logger.info("%s job=%s session=%s", log_tag, job.job_id, payload.get("session_id"))
         return job.job_id
     except Exception:  # noqa: BLE001
-        logger.warning("chat_task_enqueue_failed", exc_info=True)
+        logger.warning("task_enqueue_failed", exc_info=True)
         return None
+
+
+async def enqueue_chat_task(**payload) -> str | None:
+    """把一轮对话任务投递到队列，返回 job_id。"""
+    return await _enqueue("run_chat_task_job", "chat_task_enqueued", **payload)
+
+
+async def enqueue_canvas_task(**payload) -> str | None:
+    """把一轮画布任务投递到队列，返回 job_id（契约与 enqueue_chat_task 一致）。"""
+    return await _enqueue("run_canvas_task_job", "canvas_task_enqueued", **payload)
 
 
 async def run_chat_task_job(
@@ -139,10 +156,75 @@ async def run_chat_task_job(
     return "ok"
 
 
+async def run_canvas_task_job(
+    ctx: dict,
+    *,
+    session_id: str | None,
+    lock_token: str | None,
+    assistant_msg_id: str | None,
+    task_key: str | None,
+    payload: dict,
+) -> str:
+    """队列消费端：在 worker 进程内执行一轮**画布**任务（主入口）。
+
+    payload 里是可序列化的「已装配上下文」——user_msg 在 API 侧已注入数据源/画布/
+    指标上下文，worker 只重建 LeadAgent 并执行。事件照旧写 Redis Stream（同一份
+    事件日志），API 连接只读日志，所以前端完全无感。
+    """
+    import uuid as _uuid
+
+    from app.services.agents.lead import LeadAgent, LeadContext
+    from app.services.canvas_task import run_canvas_task
+    from app.services.llm_client import LLMClient
+    from app.services.observability import get_observer
+
+    canvas_id = payload.get("canvas_id")
+    lead_ctx = LeadContext(
+        user_id=payload.get("user_id") or "",
+        session_id=session_id or "",
+        entry="canvas",
+        canvas_id=canvas_id,
+        datasource_id=payload.get("datasource_id"),
+        history_summary=payload.get("history_summary") or "",
+        memory_covered=int(payload.get("memory_covered") or 0),
+        memory_watermark=payload.get("memory_watermark"),
+        memory_fail_count=int(payload.get("memory_fail_count") or 0),
+        metrics_ctx=payload.get("metrics_ctx") or "",
+        ui_action=payload.get("ui_action"),
+    )
+    for turn in payload.get("turns") or []:
+        if isinstance(turn, dict) and turn.get("role") in ("user", "assistant"):
+            lead_ctx.turns.append({"role": turn["role"], "content": str(turn.get("content", ""))})
+    user_msg = payload.get("user_msg") or ""
+
+    def event_factory(db_session):
+        # 画布白名单与 API 进程同一份定义（单源）
+        from app.services.canvas_tools import CANVAS_TOOL_NAMES
+
+        from app.services.chat_task import lead_stream_guard
+
+        return lead_stream_guard(
+            LeadAgent(
+                llm=LLMClient(settings),
+                observer=get_observer(),
+                extra_plannable_tools=frozenset(CANVAS_TOOL_NAMES) | _CANVAS_QUERY_TOOL_NAMES,
+            ).stream(user_msg, ctx=lead_ctx, db_session=db_session)
+        )
+
+    await run_canvas_task(
+        session_id=_uuid.UUID(session_id) if session_id else None,
+        lock_token=lock_token,
+        assistant_msg_id=_uuid.UUID(assistant_msg_id) if assistant_msg_id else None,
+        task_key=task_key,
+        event_factory=event_factory,
+    )
+    return "ok"
+
+
 class WorkerSettings:
     """arq worker 配置：.venv/Scripts/python.exe -m arq app.worker.WorkerSettings"""
 
-    functions = [run_chat_task_job]
+    functions = [run_chat_task_job, run_canvas_task_job]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 10          # 单进程并发任务数
     job_timeout = 1800     # 单任务超时（秒）：分析类任务可能跑几分钟
