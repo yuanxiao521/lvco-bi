@@ -1,6 +1,8 @@
 import logging
+import os
 import re
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -78,7 +80,11 @@ class DuckDBClient:
         """
         try:
             ro = bool(getattr(settings, "DUCKDB_READ_ONLY", False))
-            return self._connect(db_path, read_only=ro)
+            conn = self._connect(db_path, read_only=ro)
+            if ro:
+                # RO 模式：本进程成为"读者"——注册心跳 + 启动写意图协调线程
+                _coordination.register_reader()
+            return conn
         except duckdb.Error as e:
             if "already open" not in str(e).lower():
                 raise
@@ -180,6 +186,7 @@ class DuckDBClient:
             yield self._get_connection()
             return
         with self._write_lock:
+            # 本进程先下线（关连接 + 删心跳），并广播写意图让**其它**读者也下线
             with self._conn_lock:
                 if self._conn is not None:
                     try:
@@ -188,7 +195,23 @@ class DuckDBClient:
                         pass
                 self._conn = None
                 self._drain_cursors()
+            _coordination.unregister_reader()
+            intent_token = f"{os.getpid()}-{time.time()}"
+            _coordination.set_intent(intent_token)
             try:
+                # 等其它读者下线（它们的协调线程看到意图后会自行关连接）
+                deadline = time.monotonic() + _INTENT_WAIT_TIMEOUT
+                while True:
+                    others = _coordination.foreign_readers()
+                    if not others:
+                        break
+                    if time.monotonic() > deadline:
+                        raise duckdb.Error(
+                            "等待其它只读进程释放 DuckDB 超时（"
+                            f"{_INTENT_WAIT_TIMEOUT}s，仍有 {len(others)} 个读者）。"
+                            "请稍后重试导入，或检查是否有异常占用 DuckDB 的进程。"
+                        )
+                    time.sleep(0.3)
                 self._conn = self._connect(self._db_path(), read_only=False)
                 yield self._conn
             finally:
@@ -200,6 +223,8 @@ class DuckDBClient:
                             pass
                     self._conn = None
                     self._drain_cursors()
+                # 撤销意图：读者线程会重新打开连接并注册心跳
+                _coordination.clear_intent()
 
     def ensure_attached(self, schema_name: str, attach_sql: str, *, force: bool = False) -> bool:
         """确保外部数据库已 ATTACH 到 DuckDB；已附加则直接复用，避免重复建连。
@@ -250,6 +275,137 @@ class DuckDBClient:
                 self._conn.close()
                 self._conn = None
             self._drain_cursors()
+
+
+
+# ── 方案 B（升级版）：跨进程 DuckDB 写窗口协调 ──────────────────────────────
+#
+# 背景（实测）：DuckDB 文件锁的规则是「多个只读进程可并行；存在任一读写连接时，
+# 其它进程（含只读）都打不开」。API 与 worker 各持一个只读连接后，上传/删源的
+# 写窗口会永远打不开文件——除非**所有读者主动下线**。本协调器用 Redis 完成
+# "写方广播意图 → 读者自行下线 → 写方独占 → 读者回来" 的闭环：
+#
+#   写方 write_window():  SET duckdb:write-intent
+#                         轮询等 duckdb:reader:* 全部消失（读者线程看到意图后自行关连接）
+#                         打开读写连接执行 → 关闭 → DEL intent
+#   读方协调线程:         每 0.5s 看 intent：有 → 关连接 + 删自己的 reader 心跳；
+#                         无 → 连接在则续期心跳（TTL 5s，进程崩溃自动过期）
+#
+# 只在 DUCKDB_READ_ONLY=true 时启用；Redis 不可用时全部静默跳过——退化为
+# "写窗口只管本进程" 的旧行为（单进程部署依旧正确）。
+_INTENT_KEY = "duckdb:write-intent"
+_READER_PREFIX = "duckdb:reader:"
+_READER_TTL = 5            # 心跳 TTL（秒）：进程崩溃后自动过期
+_COORD_INTERVAL = 0.5      # 协调线程轮询间隔（秒）
+_INTENT_WAIT_TIMEOUT = 15  # 写方等读者下线的上限（秒）；超时给出明确报错而不是挂死
+
+
+class _DuckWriteCoordination:
+    """跨进程写窗口协调（Redis 心跳 + 意图广播；Redis 掉线时全部退化为空操作）。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._pid = str(os.getpid())
+        self._registered = False
+
+    def _repo(self):
+        try:
+            from app.core.cache import get_cache_repository
+
+            return get_cache_repository()
+        except Exception:  # noqa: BLE001
+            return None
+
+    # ── 读方 ──────────────────────────────────────────────────────────────
+
+    def register_reader(self) -> None:
+        """本进程持有了只读连接：注册心跳并惰性启动协调线程。"""
+        self._registered = True
+        self._ensure_thread()
+
+    def unregister_reader(self) -> None:
+        """本进程连接已关闭（写窗口进入/显式 close）：下线心跳。"""
+        self._registered = False
+        repo = self._repo()
+        if repo is None:
+            return
+        try:
+            repo.delete_shared(_READER_PREFIX + self._pid)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _ensure_thread(self) -> None:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(
+                target=self._coordination_loop, name="duckdb-ro-coordination", daemon=True
+            )
+            self._thread.start()
+
+    def _coordination_loop(self) -> None:
+        """读方协调线程：看意图下线 / 续期心跳。任何异常都不致命（下轮重来）。"""
+        while True:
+            time.sleep(_COORD_INTERVAL)
+            try:
+                repo = self._repo()
+                if repo is None:
+                    continue
+                intent = repo.get(_INTENT_KEY)
+                if intent:
+                    # 写方要独占：立即关闭本进程连接并下线（下次查询惰性重开）
+                    if self._registered:
+                        with _client._conn_lock:
+                            if _client._conn is not None:
+                                try:
+                                    _client._conn.close()
+                                except Exception:  # noqa: BLE001
+                                    pass
+                            _client._conn = None
+                            _client._drain_cursors()
+                        self._registered = False
+                        repo.delete_shared(_READER_PREFIX + self._pid)
+                    continue
+                if self._registered:
+                    # 续期心跳（证明本进程仍持连接）
+                    repo.set_shared(_READER_PREFIX + self._pid, "1", ttl=_READER_TTL)
+            except Exception:  # noqa: BLE001
+                continue
+
+    # ── 写方 ──────────────────────────────────────────────────────────────
+
+    def set_intent(self, token: str) -> None:
+        repo = self._repo()
+        if repo is None:
+            return
+        try:
+            repo.set_shared(_INTENT_KEY, token, ttl=30)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def clear_intent(self) -> None:
+        repo = self._repo()
+        if repo is None:
+            return
+        try:
+            repo.delete_shared(_INTENT_KEY)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def foreign_readers(self) -> list[str]:
+        """还在持连接的**其它**读者（自己的心跳不算）。"""
+        repo = self._repo()
+        if repo is None:
+            return []
+        try:
+            keys = repo.scan_shared_keys(_READER_PREFIX)
+            return [k for k in keys if k != _READER_PREFIX + self._pid]
+        except Exception:  # noqa: BLE001
+            return []
+
+
+_coordination = _DuckWriteCoordination()
 
 
 duckdb_client = DuckDBClient()
