@@ -178,7 +178,9 @@ function applyCanvasEvent(event: any, api: CanvasEventApi): void {
       break;
     }
     case "intent":
-      set((s: CanvasAssistantStore) => ({ meta: { ...(s.meta ?? {}), intent: event.intent, intentConfidence: event.confidence, degraded: event.degraded ?? s.meta?.degraded } }));
+      // intent 有两种来源：model（模型自述）/ derived（代码推断，前端标"（推断）"）——
+      // 不把推断值伪装成模型判断，是这套标签能被信任的前提。
+      set((s: CanvasAssistantStore) => ({ meta: { ...(s.meta ?? {}), intent: event.intent, intentConfidence: event.confidence, intentSource: event.source, degraded: event.degraded ?? s.meta?.degraded } }));
       break;
     case "decision":
       set((s: CanvasAssistantStore) => ({ meta: { ...(s.meta ?? {}), decision: event.action, decisionTool: event.tool, decisionReason: event.reason, degraded: event.degraded ?? s.meta?.degraded } }));

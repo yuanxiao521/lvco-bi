@@ -2091,10 +2091,12 @@ async def canvas_ai_chat(
                     except (json.JSONDecodeError, TypeError):
                         pass
                 elif ev_type == "intent":
+                    # source/step 透传（model=模型自述 / derived=代码推断，前端标"（推断）"）
                     yield ({"type": "intent", "intent": event.get("intent"),
                                 "confidence": event.get("confidence"),
                                 "needs_plan": event.get("needs_plan"),
-                                "degraded": event.get("degraded")})
+                                "degraded": event.get("degraded"),
+                                "source": event.get("source"), "step": event.get("step")})
                 elif ev_type == "decision":
                     yield ({"type": "decision", "round": event.get("round"),
                                 "action": event.get("action"),
@@ -2112,6 +2114,11 @@ async def canvas_ai_chat(
                         if report_delta:
                             full_content += report_delta
                             yield ({"type": "message", "delta": report_delta})
+                elif ev_type == "confirm_request":
+                    # HITL 确认卡片（§6 不变量 7）：事件白名单漏了它 = 画布侧"清空画布"
+                    # 永远不弹确认框（真机实测踩到过）。goal 是挂起的目标，question 是卡片文案。
+                    yield ({"type": "confirm_request", "goal": event.get("goal"),
+                            "question": event.get("question")})
                 elif ev_type == "memory_saved":
                     yield ({"type": "memory_saved", "chars": event.get("chars", 0)})
                 elif ev_type == "error":

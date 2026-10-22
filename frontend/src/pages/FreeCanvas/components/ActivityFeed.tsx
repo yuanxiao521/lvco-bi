@@ -26,6 +26,8 @@ export interface AgentMeta {
   /** intent 原始 key：analysis / data_qa / chat / canvas_edit / followup */
   intent?: string;
   intentConfidence?: number;
+  /** intent 来源：model=模型自述（method a）/ derived=代码推断（UI 标"（推断）"） */
+  intentSource?: string;
   /** decision action 原始 key：call_analysis / answer / canvas_op / ask_user */
   decision?: string;
   decisionTool?: string;
@@ -292,9 +294,10 @@ function ActivityFeed({ steps, meta }: ActivityFeedProps) {
           {hasMetaInfo && (
             <div className="flex flex-wrap items-center gap-1.5 py-2 border-b border-border-light/60">
               {meta?.intent && (
-                <span title={`意图识别 · confidence=${meta.intentConfidence ?? "-"}`}
+                <span title={`意图识别 · source=${meta.intentSource ?? "-"}${meta.intentConfidence != null ? ` · confidence=${meta.intentConfidence}` : ""}`}
                       className="rounded-full border border-border/60 text-[10px] px-2 py-0.5 text-ai bg-background/40">
                   意图：{INTENT_LABEL[meta.intent] ?? meta.intent}
+                  {meta.intentSource === "derived" ? <span className="text-muted-foreground/70">（推断）</span> : null}
                 </span>
               )}
               {meta?.decision && (

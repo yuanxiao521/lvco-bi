@@ -157,4 +157,24 @@ describe('画布助手：刷新自动续收', () => {
     // 文本仍要正常流入
     expect(s.messages.some((m) => m.content.includes('查询完成'))).toBe(true);
   });
+
+  it('intent 事件带 source=derived → meta.intentSource 保留（UI 标"（推断）"，不冒充模型判断）', async () => {
+    await enterCanvas('canvas-D', 'sess-D', true);
+    fetchMock.mockResolvedValue(
+      sseFrom([
+        { type: 'status', resumed: true, message: '已恢复连接' },
+        { type: 'intent', intent: 'canvas_edit', source: 'derived' },
+        { type: 'decision', action: 'call_analysis', tool: 'dispatch_analysis', reason: '落图' },
+        { type: 'done' },
+      ]),
+    );
+
+    await useCanvasAssistantStore.getState().onCanvasReady('canvas-D', ctxFor('canvas-D'));
+
+    const s = useCanvasAssistantStore.getState();
+    expect(s.meta?.intent).toBe('canvas_edit');
+    expect((s.meta as { intentSource?: string } | null)?.intentSource).toBe('derived');
+    // decision 事件不得覆盖 intent（理解层 vs 执行层，两层各自留存）
+    expect(s.meta?.decision).toBe('call_analysis');
+  });
 });
