@@ -2431,12 +2431,62 @@ async def canvas_ai_chat(
                         "message": "本轮已超时中断（上游长时间无响应），已保留已完成的内容。",
                     })
 
-            task_launched = chat_registry.start(task_sid, _run_canvas_with_timeout)
+            # ── 启动执行（两条路，由 TASK_QUEUE_ENABLED 选择；与对话入口同构）─────
+            # A) 队列模式：投递到 ARQ，由独立 worker 进程执行——API 重启不影响任务，
+            #    事件仍写同一份事件日志，本连接只读日志。
+            # B) 进程内模式：asyncio.Task 在本进程执行（带硬超时包装），行为与历史一致。
+            queued = False
+            if settings.TASK_QUEUE_ENABLED and session_id:
+                from app.worker import enqueue_canvas_task
+
+                (
+                    q_memory_summary,
+                    q_memory_covered,
+                    q_memory_watermark,
+                    q_memory_fail_count,
+                ) = await _load_session_memory(db, session_id)
+                q_history = await _load_server_window(
+                    db, session_id, exclude_msg_id=user_msg_id
+                )
+                job_id = await enqueue_canvas_task(
+                    session_id=str(session_id),
+                    lock_token=lock_token,
+                    assistant_msg_id=str(assistant_msg_id) if assistant_msg_id else None,
+                    task_key=f"ai:canvas:task:{session_id}",
+                    payload={
+                        "user_id": str(current_user.id),
+                        "canvas_id": str(canvas_uid) if canvas_uid else None,
+                        "datasource_id": str(datasource.id) if datasource else body.datasource_id,
+                        "history_summary": q_memory_summary or "",
+                        "memory_covered": q_memory_covered,
+                        "memory_watermark": q_memory_watermark,
+                        "memory_fail_count": q_memory_fail_count,
+                        "metrics_ctx": metrics_ctx_for_lead,
+                        "ui_action": getattr(body, "ui_action", None),
+                        "turns": q_history,
+                        "user_msg": user_msg,
+                    },
+                )
+                queued = job_id is not None
+                if not queued:
+                    _log.warning(
+                        "canvas_task_enqueue_failed_fallback_inprocess session=%s", session_id
+                    )
+
+            task_launched = queued or chat_registry.start(task_sid, _run_canvas_with_timeout)
             if not task_launched:
                 yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
                 yield _sse({"type": "done"})
                 return
-            # 本连接作为首个订阅者：补发文本快照，再实时转发任务事件
+            # 本连接作为首个订阅者。
+            if queued:
+                # 队列模式：执行在另一个进程，只能从事件日志读（回放 + 续读直到 done）。
+                async for line in _stream_from_event_log(
+                    task_sid, max_idle_seconds=await _queue_idle_cap()
+                ):
+                    yield line
+                return
+            # 进程内模式：补发文本快照，再实时转发任务事件
             rt = chat_registry.get(task_sid)
             if rt and rt.full_text:
                 yield _sse({"type": "message", "delta": rt.full_text})
