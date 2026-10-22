@@ -417,10 +417,13 @@ async def run_chat_task(
                     seen_chart_keys.add(key)
                     collected_charts.append(chart_obj)
                 elif ev_type == "intent":
+                    # source=model（模型自述）/ derived（代码推断）必须透传：
+                    # 前端据此标"（推断）"，不把推导值伪装成模型判断。
                     _publish({
                         "type": "intent",
                         "intent": event.get("intent"), "confidence": event.get("confidence"),
                         "needs_plan": event.get("needs_plan"), "degraded": event.get("degraded"),
+                        "source": event.get("source"), "step": event.get("step"),
                     })
                 elif ev_type == "decision":
                     _publish({
@@ -428,6 +431,12 @@ async def run_chat_task(
                         "round": event.get("round"), "action": event.get("action"),
                         "tool": event.get("tool"), "reason": event.get("reason"),
                         "degraded": event.get("degraded"),
+                    })
+                elif ev_type == "confirm_request":
+                    # HITL 确认卡片：与画布侧同一契约（goal=挂起目标，question=卡片文案）
+                    _publish({
+                        "type": "confirm_request",
+                        "goal": event.get("goal"), "question": event.get("question"),
                     })
                 elif ev_type == "progress":
                     _publish({

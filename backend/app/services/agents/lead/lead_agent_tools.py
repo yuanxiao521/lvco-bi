@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+from app.services.agents.lead.lead_intent_signal import INTENT_VALUES
+
 # ── 硬边界：写工具清单（与 services/canvas_tools.py 的真实声明逐名对齐）──
 WRITE_TOOL_NAMES: frozenset[str] = frozenset({
     "add_chart_block",
@@ -48,7 +50,7 @@ QUOTA: dict[str, int] = {"observe": 2, "dispatch": 3, "repair": 2}
 
 
 def _fn(name: str, description: str, properties: dict | None = None,
-        required: list[str] | None = None) -> dict:
+        required: list[str] | None = None, *, intent: bool = False) -> dict:
     # 决策理由（method a）：每个工具调用都自带一句"为什么做这个动作"。
     # 统一在 _fn 里注入而不是逐个工具手写——新增工具不会漏，漏了前端 decision
     # 事件就没有理由可显示（只会显示动作名）。stop 已自带 reason，setdefault 不覆盖。
@@ -57,6 +59,19 @@ def _fn(name: str, description: str, properties: dict | None = None,
         "type": "string",
         "description": "为什么调这个工具（一句话，给用户看的决策理由）",
     })
+    # 理解层标签（C+B）：只注入**决策类**工具——观察类只是"看一眼"，不表达本轮目标。
+    # 位置与 reason 相同：统一注入，新增决策工具不会漏；前端 intent 徽章靠它出值。
+    if intent:
+        props.setdefault("intent", {
+            "type": "string",
+            "enum": list(INTENT_VALUES),
+            "description": (
+                "本轮用户意图（请求级标签，首次调用决策类工具时给出）："
+                "chat=闲聊/概念问答；data_qa=问单个数据事实；"
+                "canvas_edit=改画布（落块/删块/调布局）；analysis=多步分析；"
+                "followup=对上文的追问/修正"
+            ),
+        })
     return {
         "type": "function",
         "function": {
@@ -96,25 +111,25 @@ DISPATCH_SPECS: list[dict] = [
              "description": "可选的验收标准（代码可核验）。目前支持 "
                             "min_blocks(整数：至少几个内容块)、require_verified(布尔：报告数字须过后验)",
          }},
-        ["goal"]),
+        ["goal"], intent=True),
     _fn("repair",
         "小缺口轻量补发：复用画布已有块，只补缺的部分（不重做全量编排）。",
         {"gap": {"type": "string",
                  "description": "具体缺什么（缺哪个维度 / 哪个数字未证实 / 缺哪种图表）"},
          "goal": {"type": "string",
                   "description": "补发目标，写清只补 X、不要重做 Y"}},
-        ["gap", "goal"]),
+        ["gap", "goal"], intent=True),
 ]
 
 TERMINAL_SPECS: list[dict] = [
     _fn("answer", "直接作答并结束本轮。把要说的内容放进 text。",
-        {"text": {"type": "string"}}, ["text"]),
+        {"text": {"type": "string"}}, ["text"], intent=True),
     _fn("ask_user", "反问用户并结束本轮（等用户下一轮回复）。",
         {"question": {"type": "string"},
          "ask_kind": {"type": "string", "enum": ["confirm", "clarify"],
                       "description": "confirm=是/否确认执行某具体操作；clarify=需要用户补充具体信息"}},
-        ["question"]),
-    _fn("stop", "主目标已完成，结束本轮。", {"reason": {"type": "string"}}, []),
+        ["question", "ask_kind"], intent=True),
+    _fn("stop", "主目标已完成，结束本轮。", {"reason": {"type": "string"}}, [], intent=True),
 ]
 
 

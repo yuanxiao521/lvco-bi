@@ -233,7 +233,8 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
         try { event = JSON.parse(jsonStr); } catch { return; }
         switch (event.type) {
           case "intent":
-            set((s) => ({ agentMeta: { ...(s.agentMeta ?? {}), intent: event.intent, intentConfidence: event.confidence, degraded: event.degraded ?? s.agentMeta?.degraded } }));
+            // source=model（模型自述）| derived（代码推断）；派生值在 UI 上标"（推断）"
+            set((s) => ({ agentMeta: { ...(s.agentMeta ?? {}), intent: event.intent, intentConfidence: event.confidence, intentSource: event.source, degraded: event.degraded ?? s.agentMeta?.degraded } }));
             break;
           case "decision":
             set((s) => ({ agentMeta: { ...(s.agentMeta ?? {}), decision: event.action, decisionTool: event.tool, decisionReason: event.reason, degraded: event.degraded ?? s.agentMeta?.degraded } }));

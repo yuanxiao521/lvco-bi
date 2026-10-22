@@ -36,6 +36,7 @@ from app.services.agents.lead.lead_agent_tools import (
     lead_tool_specs,
     tool_class,
 )
+from app.services.agents.lead.lead_intent_signal import derive_intent, normalize_intent
 
 logger = logging.getLogger("lvco.lead.unified")
 
@@ -73,6 +74,33 @@ def effective_complexity(
     if any(m in (goal or "") for m in _MULTI_STEP_MARKS):
         return "complex", True
     return "simple", False
+
+
+# 破坏性操作词：命中即**必须**走确认卡片（宁可多问一次，也不能让"清空画布"直接执行）。
+# 与 legacy 的 _CLEAR_MARKERS 同源、方向相反：那边用它"抑制无效澄清"，这边用它"强制确认"。
+_ASK_CONFIRM_MARKERS: tuple[str, ...] = (
+    "清空", "清掉", "清空画布", "删除所有", "删掉所有", "全部删除", "移除所有",
+    "不可恢复", "clear canvas", "remove all", "delete all",
+)
+
+
+def effective_ask_kind(ask_kind: str, question: str) -> tuple[str, bool]:
+    """ask_user 的 ask_kind 确定性兜底：破坏性操作一律升级成 confirm。
+
+    为什么需要（真机实测）：模型对"把画布清空"会调 ask_user，但**漏填 ask_kind**
+    （schema 里它是可选字段），于是 ask_kind 退化成 clarify → 前端不渲染确认卡片，
+    用户在聊天框里看到一句反问，破坏性操作却可能被后续文本"确认"直接触发。
+    legacy 靠 prompt 强制输出该字段；单 Agent 这里再补一道**代码闸**（§6 不变量 7：
+    HITL 不退化）——prompt 会失灵，代码闸不会。
+
+    返回 (最终 ask_kind, 是否发生了升级)。
+    """
+    kind = ask_kind if ask_kind in ("confirm", "clarify") else "clarify"
+    if kind == "confirm":
+        return kind, False
+    if any(marker in (question or "") for marker in _ASK_CONFIRM_MARKERS):
+        return "confirm", True
+    return kind, False
 
 
 def explicit_kernel(name: str) -> str | None:
@@ -215,6 +243,12 @@ async def stream_unified(
 
     finished = False
     seen_goals: set[str] = set()   # 本请求内派发过的 goal（用于识别"重做"）
+    # 理解层标签（intent）：请求级一次（C+B 合流）。分层见 lead_intent_signal 模块头——
+    #   intent = 用户这一轮要什么（1 条）；decision = 这一步做什么、为什么（N 条）。
+    # intent **不参与路由**（路由仍由工具选择 + effective_complexity 决定），
+    # 它是标签：展示给用户 + 监控"理解漂移"。
+    intent_emitted = False
+    intent_value = ""
     for step in range(limit):
         # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
         assembled = provider.for_agent_loop(user_msg, system_text=LEAD_AGENT_SYSTEM)
@@ -273,6 +307,41 @@ async def stream_unified(
             call_id = tc.get("id") or f"call_{step}_{i}"
             cls = tool_class(name)
 
+            # ── 理解层标签（请求级一次，早于该步的 decision 事件）──
+            # 来源两种，都是真实判断，不回填模板话术：
+            #   · model  ：模型在决策类工具参数里自述（method a，与 reason 同源）
+            #   · derived：模型没给 → 按 动作+入口+复杂度 推导，标记为"推断"
+            # 观察类不发：它只是"看一眼"，不表达本轮目标（与 decision 不发同理）。
+            if cls is not None and cls != "observe":
+                model_intent = normalize_intent(args.get("intent"))
+                if not intent_emitted:
+                    if model_intent:
+                        intent_value, intent_source = model_intent, "model"
+                    else:
+                        _goal = str(args.get("goal") or args.get("text") or user_msg or "")
+                        _cx = ""
+                        if cls == "repair":
+                            _cx = "simple"      # patch 一律走轻量内核
+                        elif cls == "dispatch":
+                            _cx = effective_complexity(
+                                _goal, str(args.get("complexity") or ""), entry=ctx.entry
+                            )[0]
+                        intent_value = derive_intent(
+                            entry=ctx.entry,
+                            action=decision_action(name),
+                            complexity=_cx,
+                            dispatched=cls in ("dispatch", "repair"),
+                        )
+                        intent_source = "derived"
+                    intent_emitted = True
+                    yield {"type": "intent", "intent": intent_value,
+                           "confidence": None, "source": intent_source, "step": step,
+                           "degraded": intent_source == "derived"}
+                elif model_intent and model_intent != intent_value:
+                    # 多步里改主意：标签定稿后不再改（避免同轮两条自相矛盾），
+                    # 但记降级——这是"理解漂移"的唯一可观测信号，别静默吞掉。
+                    degradation.append("lead_intent_drift")
+
             # ── 汇报层契约（与 legacy 对齐）：决策点发一条 decision 事件 ──
             # legacy 每轮决策都 emit decision(action/tool/reason)，前端 agentMeta 用它
             # 显示"这一步做什么、为什么"。统一循环没有独立的决策调用，因此把**工具调用**
@@ -291,7 +360,16 @@ async def stream_unified(
                         yield ev
                 elif name == "ask_user":
                     question = str(args.get("question") or "请补充更多信息，我好帮你继续。")
-                    ask_kind = str(args.get("ask_kind") or "clarify")
+                    ask_kind, _ask_upgraded = effective_ask_kind(
+                        str(args.get("ask_kind") or "clarify"), question
+                    )
+                    if _ask_upgraded:
+                        # 模型漏填/填错 ask_kind 但问题涉及破坏性操作 → 强制升级为确认卡片
+                        degradation.append("lead_ask_kind_upgraded_to_confirm")
+                        logger.info(
+                            "[lead_unified] ask_kind_upgraded_to_confirm question=%s",
+                            question[:40],
+                        )
                     try:
                         from app.services.lead_session_state import set_pending
                         set_pending(ctx.session_id, str(user_msg or ""))
