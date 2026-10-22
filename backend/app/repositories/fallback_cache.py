@@ -73,6 +73,12 @@ class FallbackCacheRepository:
         if self._use_redis:
             self._redis.delete(key)
 
+    def scan_shared_keys(self, prefix: str) -> list[str]:
+        """按前缀枚举**共享**键（只扫 Redis）。内存降级模式返回空——单进程无跨进程协调问题。"""
+        if self._use_redis:
+            return self._redis.scan_shared_keys(prefix)
+        return []
+
     def delete_by_prefix(self, prefix: str) -> int:
         """按前缀清除两个层（Redis + 内存）。"""
         total = 0

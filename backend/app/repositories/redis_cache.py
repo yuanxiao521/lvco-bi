@@ -103,6 +103,22 @@ class RedisCacheRepository:
             logger.warning("redis_delete_by_prefix_failed prefix=%s error=%s", prefix, e)
         return deleted
 
+    def scan_shared_keys(self, prefix: str) -> list[str]:
+        """按前缀枚举 Redis 键（SCAN，不阻塞；供跨进程协调枚举读者心跳）。
+
+        返回去掉应用前缀的键名（与 get/set 的键口径一致）。
+        """
+        try:
+            full_prefix = self._full_key(prefix)
+            app_prefix = self._full_key("")
+            out: list[str] = []
+            for batch in self._redis.scan_iter(match=f"{full_prefix}*", count=200):
+                raw = batch.decode() if isinstance(batch, bytes) else str(batch)
+                out.append(raw[len(app_prefix):] if raw.startswith(app_prefix) else raw)
+            return out
+        except Exception:  # noqa: BLE001
+            return []
+
     def exists(self, key: str) -> bool:
         if not self._redis:
             return False
