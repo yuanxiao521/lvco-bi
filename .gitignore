@@ -99,6 +99,8 @@ config/secrets.*
 .env.bak
 *.env.backup
 *.env.bak
+.env.bak-*
+backend/.env.bak-*
 
 # ── IDE ──────────────────────────────────────────────────────────
 .vscode/
