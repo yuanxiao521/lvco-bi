@@ -13,11 +13,11 @@ P0（行为零变化）：
 from __future__ import annotations
 
 from app.config import settings
-from app.services.context.budgets import active_table
-from app.services.context.compress import Compressor
+from app.services.context.budgets import TOKENS_PER_CHAR_JSON, active_table, chars_for_tokens
+from app.services.context.compress import DEGRADE_TOOL_COMPACTED, Compressor
 from app.services.context.sources.window import select_for_answer
 from app.services.context.types import Assembled, Block, BlockKind, Ledger
-from app.services.context_utils import estimate_tokens
+from app.services.context_utils import compact_result_json, estimate_tokens
 
 
 # ── legacy 渲染（逐字节等价层，测试锁定） ───────────────────────────────────
@@ -136,6 +136,34 @@ AGENT_LOOP_HEADERS: dict[BlockKind, str] = {
     BlockKind.ASSESSMENT: "最近一次子任务评估",
     BlockKind.ARTIFACT: "上一轮已产出内容",
 }
+
+
+# ── 工具结果压缩（P4 / §5.3）────────────────────────────────────────────────
+
+def _tool_result_budget(table) -> int:
+    """单条工具消息的 token 预算（与执行层 TOOL_RESULT_MAX_TOKENS 同口径）。"""
+    budget = table.get(BlockKind.TOOL_RESULT)
+    if budget is not None and budget.max_tokens > 0:
+        return int(budget.max_tokens)
+    return int(getattr(settings, "TOOL_RESULT_MAX_TOKENS", 800) or 800)
+
+
+def compress_tool_message(content: str, max_tokens: int) -> tuple[str, bool]:
+    """压缩**一条** role=tool 消息的 content，返回 (新内容, 是否压缩过)。
+
+    只动 content 字符串：role / tool_call_id / assistant.tool_calls 原样保留——
+    工具协议的配对关系不可破坏（成对消息一旦错位，下一次调用直接 400）。
+
+    复用执行层的 compact_result_json（同口径、同铁律）：error 结果完整保留、
+    rows 只留前几行、非 JSON 走字符截断。不在这里另写一套截断规则。
+    """
+    if not content:
+        return content, False
+    max_chars = chars_for_tokens(max_tokens, TOKENS_PER_CHAR_JSON)
+    if len(content) <= max_chars:
+        return content, False
+    compacted = compact_result_json(content, max_chars=max_chars)
+    return compacted, compacted != content
 
 
 class Assembler:
@@ -262,8 +290,26 @@ class Assembler:
             if b.is_empty:
                 continue
             if b.kind is BlockKind.TOOL_RESULT:
-                tool_msgs.extend(dict(m) for m in b.messages)
-                ledger.record(BlockKind.TOOL_RESULT.value, b.tokens())
+                # §5.3：工具结果是循环里**唯一随步数增长**的块（状态块恒定不变），
+                # 它的上限必须在这里收口——不做上限就是"步数越多上下文越无界"。
+                # 与状态块的 enforced 开关无关：那个开关治的是"要不要改变渲染结果"的
+                # 取舍（改了必须配评测），而工具结果不做上限是缺陷，不是取舍。
+                # 逐条各算预算（确定性）：同一条结果在任何一步压出的文本都相同，
+                # 不会因为后面又来了两条结果而改变已发出去的内容——前缀缓存不吃亏。
+                tool_budget = _tool_result_budget(table)
+                added_tokens = 0
+                for m in b.messages:
+                    msg = dict(m)
+                    if msg.get("role") == "tool":
+                        text, compacted = compress_tool_message(
+                            str(msg.get("content") or ""), tool_budget
+                        )
+                        if compacted:
+                            msg["content"] = text
+                            ledger.degrade(DEGRADE_TOOL_COMPACTED)
+                    tool_msgs.append(msg)
+                    added_tokens += estimate_tokens(str(msg.get("content") or ""))
+                ledger.record(BlockKind.TOOL_RESULT.value, added_tokens)
                 continue
 
             text = b.text
