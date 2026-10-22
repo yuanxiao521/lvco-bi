@@ -118,13 +118,18 @@ def test_list_metrics_reads_injected_metrics_context():
     assert list_metrics(object()) == ""
 
 
-async def test_recon_tool_unimplemented_returns_none_and_degrades():
-    """未接的工具返回 None 并记降级——**绝不假装成功**。"""
+async def test_recon_tool_query_sample_degrades_without_db_session():
+    """取不到时返回 None 并记降级——**绝不假装成功**。
+
+    历史：query_sample 曾经是未接线的桩（记 unimplemented 后返回 None）；
+    P3 补线后改走真实取数，失败口径细化成具体原因（此处：拿不到数据源清单）。
+    降级原因的完整矩阵见 tests/test_lead_p3_query_sample.py。
+    """
     degradation: list[str] = []
     got = await recon_tool("query_sample", ctx=_Ctx(), args={}, db_session=None,
                            degradation=degradation)
     assert got is None
-    assert "lead_agent_observe_unimplemented_query_sample" in degradation
+    assert any("query_sample" in d for d in degradation)
 
 
 async def test_recon_tool_unknown_name_degrades():

@@ -18,6 +18,7 @@ P0 只做「能力接口」，**不改任何行为**：本模块全是对既有�
 """
 from __future__ import annotations
 
+import json
 import logging
 
 logger = logging.getLogger("lvco.lead.observe")
@@ -70,6 +71,138 @@ def list_metrics(ctx) -> str:
     return str(getattr(ctx, "metrics_ctx", "") or "")
 
 
+# ── query_sample：真实取 5 行样本（P3 观察能力的最后一块）────────────────────
+# 为什么必须真取数：模型幻觉最典型的两种形态就是「字段名猜错」和「值域猜错」
+# （把 2023-01-15 00:00:00 当成 2023-01-15、把 "华东" 写成 "East"）。看一眼真实行，
+# 比任何自然语言描述都有效，也比重派一次完整编排便宜得多。
+# 三条硬约束（对齐任务书 §6 不变量 1/4）：
+#   1. **禁 SELECT ***：列名从 schema 显式枚举并加双引号（guard 的 AST 层也会拦 *）；
+#   2. **不另写执行器**：一律走 QueryDatasourceTool().execute() —— L3 guard、
+#      表归属校验、超时保护、只读 DuckDB 全在那一条链路上，抄一份必然跑偏；
+#   3. **失败即降级**：取不到就返回 None 并记 degraded，绝不返回伪造样本。
+_SAMPLE_ROWS = 5
+_SAMPLE_MAX_FIELDS = 12      # 宽表只取前 12 列：样本用于认形态，不是导出
+_SAMPLE_CELL_CHARS = 80      # 单值截断，防止一个长文本列把上下文吃掉
+
+
+def sample_sql(table_ref: str, fields: list[str], limit: int = _SAMPLE_ROWS) -> str:
+    """构造样本 SQL（纯函数，可单测）：显式列名 + LIMIT，结构上不可能出现 SELECT *。"""
+    cols = ", ".join('"' + str(f).replace('"', '""') + '"' for f in fields)
+    return f"SELECT {cols} FROM {table_ref} LIMIT {int(limit)}"
+
+
+def _sample_cell(value):
+    """单元格归一：标量原样，其余转字符串并截断（样本只需看形态）。"""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = str(value)
+    return text[:_SAMPLE_CELL_CHARS] + "…" if len(text) > _SAMPLE_CELL_CHARS else text
+
+
+async def query_sample(
+    db_session,
+    user_id: str,
+    datasource_id=None,
+    *,
+    degradation: list[str] | None = None,
+) -> str | None:
+    """取指定数据源的 5 行真实样本，返回紧凑 JSON 字符串。
+
+    取不到时返回 None（调用方据此记降级），所有降级原因写进 degradation 列表。
+    只提样本、不提全量：样本替代不了业务口径，它的作用是让 Lead 少猜字段和值域。
+    """
+    def _degrade(reason: str) -> None:
+        if degradation is not None:
+            degradation.append("lead_agent_observe_" + reason)
+
+    target = str(datasource_id) if datasource_id else None
+    candidates = await list_datasources(
+        db_session, str(user_id), datasource_id=target, inject_fields_unselected=True,
+    )
+    ds = candidates[0] if candidates else None
+    if ds is None:
+        # 模型点名了一个不存在/无权限的源：不退回别的源（那会用错数据得出错误结论），
+        # 直接降级，让它改用 list_datasources 重新确认。
+        _degrade("query_sample_datasource_not_found")
+        return None
+
+    fields = [
+        str(f.get("name") if isinstance(f, dict) else f)
+        for f in (ds.get("fields") or [])
+    ]
+    fields = [f for f in fields if f][:_SAMPLE_MAX_FIELDS]
+    if not fields:
+        _degrade("query_sample_no_fields")
+        return None
+    table_ref = str(ds.get("table_ref") or "")
+    if not table_ref:
+        _degrade("query_sample_no_table_ref")
+        return None
+
+    sql = sample_sql(table_ref, fields)
+    from app.services.agent_tools import QueryDatasourceTool
+
+    try:
+        raw = await QueryDatasourceTool().execute(
+            datasource_id=str(ds.get("id")),
+            sql=sql,
+            user_id=str(user_id),
+            db_session=db_session,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("[lead_observe] query_sample_failed", exc_info=True)
+        _degrade("query_sample_failed")
+        return None
+
+    try:
+        payload = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except Exception:  # noqa: BLE001
+        _degrade("query_sample_bad_payload")
+        return None
+
+    if payload.get("error"):
+        # 返回可读错误而不是 None：模型看到「为什么取不到」才会自纠（换列名 / 先
+        # list_fields / 直接派发），否则它只会把同一个错误重试一遍。
+        _degrade("query_sample_query_error")
+        return json.dumps({
+            "ok": False,
+            "error": str(payload.get("error"))[:300],
+            "table_ref": payload.get("table_ref") or table_ref,
+            "hint": payload.get("hint") or "先 list_fields 确认字段名，再决定是否派发",
+            "sql": sql,
+        }, ensure_ascii=False)
+
+    columns = [str(c) for c in (payload.get("columns") or fields)]
+    rows: list[dict] = []
+    for raw_row in (payload.get("rows") or [])[:_SAMPLE_ROWS]:
+        if isinstance(raw_row, dict):
+            items = [(c, raw_row.get(c)) for c in columns] or list(raw_row.items())
+        elif isinstance(raw_row, (list, tuple)):
+            items = list(zip(columns, raw_row))
+        else:
+            items = [("value", raw_row)]
+        rows.append({str(k): _sample_cell(v) for k, v in items})
+
+    if not rows:
+        _degrade("query_sample_empty")
+        return json.dumps({
+            "ok": False,
+            "error": "查询返回 0 行（表为空或过滤过严）",
+            "table_ref": table_ref,
+            "sql": sql,
+        }, ensure_ascii=False)
+
+    return json.dumps({
+        "ok": True,
+        "datasource_id": str(ds.get("id")),
+        "table_ref": table_ref,
+        "columns": columns[:_SAMPLE_MAX_FIELDS],
+        "row_count": len(rows),
+        "rows": rows,
+        "note": f"仅 {len(rows)} 行样本，用于确认字段与值的真实形态（不是全量数据）",
+    }, ensure_ascii=False, default=str)
+
+
 async def recon_tool(
     name: str,
     *,
@@ -106,9 +239,16 @@ async def recon_tool(
             return await list_fields(db_session, str(ctx.user_id), args.get("datasource_id"))
         if name == "list_metrics":
             return list_metrics(ctx)
-        # query_sample：需要真实取数（list_fields → 组列名 → LIMIT 5）。项目禁止 SELECT *，
-        # 这条链路要连 SQL guard 一起验，**留到能用真机验证时再接**——
-        # 现在返回 None，由调用方记 degraded，绝不假装成功。
+        if name == "query_sample":
+            # 真实取 5 行样本：内部复用 query_sql 的执行链（guard + 归属校验 + 超时），
+            # 不另起一条取数实现。取不到时返回 None 并记降级。
+            return await query_sample(
+                db_session,
+                str(getattr(ctx, "user_id", "") or ""),
+                args.get("datasource_id") or getattr(ctx, "datasource_id", None),
+                degradation=degradation,
+            )
+        # 未知/未接的观察工具：记降级，绝不假装成功
         if degradation is not None:
             degradation.append("lead_agent_observe_unimplemented_" + name)
         return None
