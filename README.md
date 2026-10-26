@@ -73,7 +73,7 @@ flowchart TB
     Duck --> Redis
 ```
 
-The Lead loop runs on a single system prompt (`prompts/lead_agent_system.yaml`). Every tool call it makes **is** a decision point and carries a model-stated `reason` — streamed to the UI as a `decision` event, alongside a request-level `intent` label. Read-only observation tools let it look before it acts; write tools never enter its tool surface.
+The Lead loop runs on a single system prompt (prompts/lead_agent_system.yaml). Every tool call it makes **is** a decision point and carries a model-stated `reason` — streamed to the UI as a decision event, alongside a request-level `intent` label. Read-only observation tools let it look before it acts; write tools never enter its tool surface.
 
 Background jobs (both entries) run in an **ARQ worker**; if the worker is down the API falls back to an in-process task automatically. Events are appended to a **Redis Stream** (capped at 2000, TTL 1h), so any reconnect replays from its own cursor — refreshing the page or switching routes never loses a run or duplicates a block.
 
@@ -90,7 +90,7 @@ dispatch_analysis returns
       → {verdict, reason, guidance} as tool result; adjudication failure falls back to the code verdict
 ```
 
-An unmet result routes by gap type: a small gap (`repair`, `repair_kind=patch`) reuses existing canvas blocks through the lightweight React kernel; a wrong direction or an execution failure re-dispatches the full orchestrator. Repairs bypass the idempotency memo so a redo really re-runs.
+An unmet result routes by gap type: a small gap (repair, repair_kind=patch) reuses existing canvas blocks through the lightweight React kernel; a wrong direction or an execution failure re-dispatches the full orchestrator. Repairs bypass the idempotency memo so a redo really re-runs.
 
 ---
 
@@ -104,7 +104,6 @@ An unmet result routes by gap type: a small gap (`repair`, `repair_kind=patch`) 
 - **Read-only DuckDB everywhere, writes behind a coordinated gate.** Every process opens the analytical store read-only (multi-reader concurrency); imports and deletes broadcast a write intent on Redis, readers disconnect themselves, and the writer takes the file exclusively.
 
 ---
-
 ## Project Flow (Canvas Conversation Example)
 
 ```
@@ -118,7 +117,7 @@ User: "Analyze sales by category, brand, and season"
 ② API Layer
    │ Inject: canvas snapshot + governed metrics + schema meta
    │ Session locked per canvas (orphan-lock self-heal, stale-task detection)
-   │ TASK_QUEUE_ENABLED → ARQ "run_canvas_task_job"; fallback: in-process
+   │ TASK_QUEUE_ENABLED → ARQ run_canvas_task_job; fallback: in-process
    ▼
 ③ Lead Agent loop (worker process)
    │ intent: canvas_edit → dispatch_analysis(goal, complexity, acceptance?)
@@ -148,7 +147,7 @@ User: "Analyze sales by category, brand, and season"
 | Component | Role | Mechanism |
 |-----------|------|-----------|
 | **Lead Agent** | Single tool-calling loop, owns observe/dispatch/review/answer | Code-level convergence gate; two-stage review; tool-call budget ledger |
-| **Canvas Executor** | Step-by-step canvas charting | Placement-only tools; self-validating `add_chart_block` |
+| **Canvas Executor** | Step-by-step canvas charting | Placement-only tools; self-validating add_chart_block |
 | **General Executor** | Multi-step complex analysis | Planner skeleton → topological parallel execution → fail-signature tracking |
 | **React Executor** | Lightweight Q&A and gap patches | Reason→Tool loop; max 6 rounds; circuit breaker |
 
@@ -156,9 +155,9 @@ User: "Analyze sales by category, brand, and season"
 
 | Path | Tool | When | Security |
 |------|------|------|----------|
-| **Governed Metric** | `metric_key` | Business metrics with a defined caliber | Formula AST whitelist; auto-upgrade to governed caliber |
-| **Structured Query** | `query_engine` | Flexible aggregation/grouping/filtering | Parameterized SQL, injection-proof |
-| **Raw SQL** | `query_sql` | Complex analytics (window functions, CTEs) | Keyword blacklist → SQLGlot AST whitelist (parse failure is fail-closed) → table ownership (degrades to allow on parse failure; read-only DuckDB is the backstop) → LIMIT injection + query timeout |
+| **Governed Metric** | metric_key | Business metrics with a defined caliber | Formula AST whitelist; auto-upgrade to governed caliber |
+| **Structured Query** | query_engine | Flexible aggregation/grouping/filtering | Parameterized SQL, injection-proof |
+| **Raw SQL** | query_sql | Complex analytics (window functions, CTEs) | Keyword blacklist → SQLGlot AST whitelist (parse failure is fail-closed) → table ownership (degrades to allow on parse failure; read-only DuckDB is the backstop) → LIMIT injection + query timeout |
 
 ### Evaluation Results
 
@@ -168,15 +167,15 @@ User: "Analyze sales by category, brand, and season"
 | Backend test suite | pytest | 1058 passed |
 | Frontend test suite | vitest | 54 passed |
 
-> v2 rubric: each expectation scores only if the expected semantics ⊆ the actual query semantics (metric caliber, dimensions/granularity, filters, sort/limit/blocks, chart types, answer points). Unspecified items are not scored. Per-batch reports live in `backend/tests/agent_evals/`.
+> v2 rubric: each expectation scores only if the expected semantics ⊆ the actual query semantics (metric caliber, dimensions/granularity, filters, sort/limit/blocks, chart types, answer points). Unspecified items are not scored. Per-batch reports live in backend/tests/agent_evals/.
 
 ---
 
 ## Reliability
 
 - **Task/connection decoupling.** Chat and canvas both run as background jobs (ARQ; in-process fallback). The HTTP connection becomes a subscriber — refresh, disconnect, or route switches never kill a run.
-- **Replayable event log.** Every event lands in a capped Redis Stream; reconnects replay from a cursor, non-idempotent side effects (`canvas_action`) are skipped on replay and reloaded from the database instead.
-- **Idle watchdogs & hard timeouts.** Streams force-close with a visible error when the agent parks; canvas tasks carry a hard timeout that lands an explicit "interrupted" note in the session.
+- **Replayable event log.** Every event lands in a capped Redis Stream; reconnects replay from a cursor, non-idempotent side effects (canvas_action) are skipped on replay and reloaded from the database instead.
+- **Idle watchdogs & hard timeouts.** Streams force-close with a visible error when the agent parks; canvas tasks carry a hard timeout that lands an explicit interrupted note in the session.
 - **Graceful degradation.** Redis unavailable → in-memory fallbacks + process-local execution. LLM report failure → deterministic template report (zero LLM). Observation/review failures → code verdicts, never a dead end.
 - **Session safety.** Per-session locks with orphan self-heal and stale-task detection; assistant placeholder rows are persisted before execution and patched on interruption.
 
@@ -209,7 +208,7 @@ User: "Analyze sales by category, brand, and season"
 cd backend
 cp .env.example .env         # configure DB connection, LLM API key
 uv venv
-source .venv/bin/activate    # or .venv\Scripts\activate on Windows
+source .venv/bin/activate    # or .venv\\Scripts\\activate on Windows
 uv pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload
@@ -258,7 +257,7 @@ lvco-bi/
 │   │   │   │   │   ├── lead_agent_unified.py  # the single-agent tool loop
 │   │   │   │   │   ├── lead_agent_tools.py    # tool registry, quotas, write-tool exclusion
 │   │   │   │   │   ├── lead_observe.py        # read-only observation (canvas/fields/sample)
-│   │   │   │   │   ├── lead_intent_signal.py  # request-level intent label (C+B)
+│   │   │   │   │   ├── lead_intent_signal.py  # request-level intent label
 │   │   │   │   │   ├── lead_review_stage.py   # two-stage review (HARD gate + adjudication)
 │   │   │   │   │   ├── lead_dispatch.py       # run_worker + memo/idempotency
 │   │   │   │   │   └── …
