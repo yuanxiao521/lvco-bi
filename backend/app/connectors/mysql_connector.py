@@ -73,7 +73,8 @@ class MySQLConnector(BaseDataSourceConnector):
         # URL-encode password to handle special characters
         from urllib.parse import quote_plus
         encoded_pw = quote_plus(password) if password else ""
-        return f"ATTACH 'mysql://{user}:{encoded_pw}@{host}:{port}/{database}' AS \"{schema_name}\" (TYPE mysql)"
+        # READ_ONLY：联邦源在分析场景只读——LLM 生成的 SQL 多一层"引擎级不可写"保险
+        return f"ATTACH 'mysql://{user}:{encoded_pw}@{host}:{port}/{database}' AS \"{schema_name}\" (TYPE mysql, READ_ONLY)"
 
     def load_to_duckdb(self, client, file_path: str, schema_name: str) -> str:
         raise NotImplementedError("MySQL connector does not support file-based loading")
