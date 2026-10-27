@@ -2222,6 +2222,26 @@ async def canvas_ai_chat(
         task_sid = ""
         # resume：带 session_id 且有运行中任务 → 不重发消息，直接续收
         if getattr(body, "resume", False) and body.session_id:
+            # 归属校验（与对话入口同一语义）：会话必须属于当前用户。否则知道别人
+            # session_id 的人可以续收他的事件流（分析过程/数字全可见）——IDOR。
+            # 校验放在订阅之前：非本人直接收尾，不进续收循环。
+            _rsid = None
+            try:
+                _rsid = uuid.UUID(str(body.session_id))
+            except (ValueError, TypeError):
+                _rsid = None
+            if _rsid is not None:
+                _own = (
+                    await db.execute(
+                        select(AISession).where(
+                            AISession.id == _rsid, AISession.user_id == current_user.id
+                        )
+                    )
+                ).scalar_one_or_none()
+                if _own is None:
+                    yield _sse({"type": "status", "message": "后台任务已结束，画布内容以画布为准", "resumed": True, "finished": True})
+                    yield _sse({"type": "done"})
+                    return
             task_sid = str(body.session_id)
             # 判定"这一轮还在不在跑"必须**模式无关**（与对话入口同一套逻辑）：
             #   · 进程内模式：任务在本进程的 chat_registry 里，查得到；
