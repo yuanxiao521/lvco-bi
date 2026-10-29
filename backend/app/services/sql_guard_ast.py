@@ -645,7 +645,14 @@ def _is_valid_identifier(name: str) -> bool:
     name = name.strip('"').strip("`")
     if not name:
         return False
-    return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name))
+    # 允许 Unicode 字母（中文 schema 名由 get_schema_name 从数据源名生成，属正常形态）。
+    # 仍硬禁：引号（破坏引用闭合）、分号（多语句）、空白与注释符（拼接注入）。
+    if any(ch in name for ch in ('"', "`", ";", "--", "/*", "*/")) or re.search(r"\s", name):
+        return False
+    # 标识符不能以数字开头（SQL 语义；"123invalid" 是字面量式名称，拒绝）
+    if name[0].isdigit():
+        return False
+    return bool(re.match(r"^[\w\u4e00-\u9fff]+$", name))
 
 
 def _looks_like_aggregate(func_name: str) -> bool:

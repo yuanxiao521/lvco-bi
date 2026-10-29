@@ -756,6 +756,17 @@ class TestCheckTableRefs:
         assert passed is False
         assert "非法" in reason or "invalid" in reason.lower()
 
+    def test_中文schema名_通过(self):
+        """中文 schema 名（get_schema_name 从数据源名生成）是合法形态，不应被拦。
+
+        历史 bug：标识符校验用 ^[a-zA-Z_][a-zA-Z0-9_]*$，把带中文的数据源 schema
+        全部判非法 → 上传中文命名的数据源后所有查询被拦（实测踩坑）。
+        修法：放行 Unicode 字母（\w + 中文区间），仍禁引号/分号/空白/注释符/数字开头。
+        """
+        ast = _parse_one('SELECT id FROM "校招岗位_AI应用与Python_228bcec9"."data"')
+        passed, reason = check_table_refs(ast)
+        assert passed is True, reason
+
     def test_非法表名_被拦截(self):
         """不合法的表名应被拦截。"""
         ast = _parse_one("SELECT id FROM schema.\"123invalid\"")
