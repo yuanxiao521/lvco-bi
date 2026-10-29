@@ -151,3 +151,15 @@ def test_sse_relays_forward_confirm_request_and_intent_source():
     for name, src in (("ai.py", ai_src), ("chat_task.py", ct_src)):
         assert '"confirm_request"' in src, f"{name} 未中继 confirm_request（确认卡片会消失）"
         assert 'event.get("source")' in src, f"{name} 未透传 intent.source（推断标记会消失）"
+
+def test_set_pending_uses_instance_method_not_module_import():
+    """回归：unified 曾写 from lead_session_state import set_pending（模块级不存在）
+
+    → ImportError 被吞 → pending 从未写入 → 确认卡片点确认永远走「已过期」分支。
+    锁定：lead_session_state 模块必须提供实例 lead_session_state.set_pending。
+    """
+    from app.services import lead_session_state as m
+
+    assert hasattr(m, 'lead_session_state'), '实例不存在'
+    assert hasattr(m.lead_session_state, 'set_pending')
+    assert not hasattr(m, 'set_pending'), '模块级 set_pending 不应存在（防止再次错误导入）'

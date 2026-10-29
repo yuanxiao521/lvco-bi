@@ -202,8 +202,11 @@ async def stream_unified(
                 if emit_done:
                     yield _finish()
                 return
-            # cancel / 过期：确定性收尾
-            async for ev in _answer(getattr(guard[1], "direct_text", "") or "好的，已取消。"):
+            # cancel / 过期：确定性收尾。guard[1] 是 str（守卫返回的提示文本）——
+            # 历史 bug：按 direct_text 属性取值对 str 恒为空 → 所有提示被吞成兜底"好的，已取消。"，
+            # "确认已过期"与"已取消"用户无法区分。
+            _guard_text = guard[1] if isinstance(guard[1], str) else str(getattr(guard[1], "direct_text", "") or "")
+            async for ev in _answer(_guard_text or "好的，已取消。"):
                 yield ev
             if emit_done:
                 yield _finish()
@@ -371,8 +374,8 @@ async def stream_unified(
                             question[:40],
                         )
                     try:
-                        from app.services.lead_session_state import set_pending
-                        set_pending(ctx.session_id, str(user_msg or ""))
+                        from app.services.lead_session_state import lead_session_state
+                        lead_session_state.set_pending(ctx.session_id, str(user_msg or ""))
                     except Exception:  # noqa: BLE001
                         logger.warning("[lead_unified] set_pending_failed", exc_info=True)
                     async for ev in _answer(question):
