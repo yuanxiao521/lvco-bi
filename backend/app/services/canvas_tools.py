@@ -463,6 +463,18 @@ class AddChartBlockTool(BaseTool):
             return json.dumps({"error": f"add_chart_block 缺少必填参数: {', '.join(missing)}，请补齐后重新调用"}, ensure_ascii=False)
         if not measures:
             return json.dumps({"error": "add_chart_block 需要至少一个度量"}, ensure_ascii=False)
+        # KPI 卡片一卡只放一个指标：kpi_card 是"一个大数字 + 指标名"的展示形态，
+        # 多度量挤一张卡渲染成一坨（实测）。多指标 → 引导模型拆成多张卡（error 里的 hint
+        # 指引"多次调用 add_chart_block"，布局会自动排成一行三个）。
+        if chart_type == "kpi_card" and len(measures) > 1:
+            return json.dumps({
+                "error": "kpi_card 只支持一个度量，收到 "
+                         + str(len(measures)) + " 个。要展示多个关键指标，请拆成多张 KPI 卡："
+                         + "多次调用 add_chart_block，每次 measures 只放一个指标"
+                         + "（布局会自动排成一行三个）；要在同一图里对比多个指标，请改用 bar。",
+                "hint": "拆卡示例：第一次 measures=[{'field': 'total_amount', 'agg': 'SUM'}]，"
+                        + "第二次 measures=[{'field': 'quantity', 'agg': 'COUNT'}]",
+            }, ensure_ascii=False)
         if not dimensions and chart_type != "kpi_card":
             return json.dumps({
                 "error": f"add_chart_block 维度为空：{chart_type} 需要至少一个维度字段；"
