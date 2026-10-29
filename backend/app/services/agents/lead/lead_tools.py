@@ -104,6 +104,27 @@ def _check_acceptance(result: RunAnalysisResult, acceptance: dict | None) -> str
     return "Lead 声明的标准未满足：" + "；".join(problems)
 
 
+# 画布"变更类"操作：这些操作本身就是产物（增/删/改/重排），
+# 成功执行后 blocks_added 可能为 0（清空/删块/改标题）——零落块 ≠ 未产出。
+_CANVAS_MUTATION_TOOLS = frozenset({
+    "clear_canvas", "remove_block", "update_chart_block",
+    "add_chart_block", "add_text_block", "arrange_layout",
+})
+
+
+def _has_canvas_mutation(tool_chain: list[dict]) -> bool:
+    """tool_chain 里是否存在成功的画布变更操作。
+
+    兼容两种键名：直执行路径写 {"tool": ...}，编排器路径写 {"name": ...}
+    （历史不一致，读取时同时兼容，而不是再复制一份不一致）。
+    """
+    for t in tool_chain or []:
+        name = str(t.get("name") or t.get("tool") or "")
+        if name in _CANVAS_MUTATION_TOOLS and t.get("ok", True):
+            return True
+    return False
+
+
 def assess_subtask_detail(
     result: RunAnalysisResult, *,
     entry: str = "chat", user_goal: str = "", acceptance: dict | None = None,
@@ -134,7 +155,11 @@ def assess_subtask_detail(
     if failed:
         items.append(("hard", "存在失败工具: " + ", ".join(str(n) for n in failed[:3])))
     if entry == "canvas" and result.success and result.blocks_added == 0:
-        items.append(("hard", "未在画布上产出内容块"))
+        # 方案 4（修正规则假设）：画布任务的产物不只有"增加内容块"——
+        # 清空/删块/改标题/重排这些变更操作成功后 blocks_added 本来就是 0。
+        # 只有"成功 + 零落块 + 无任何变更操作"才构成"什么都没干"的事实性失败。
+        if not _has_canvas_mutation(result.tool_chain):
+            items.append(("hard", "未在画布上产出内容块"))
     # 维度覆盖检查：画布 + 用户点名 ≥2 维度 + 有图表落块记录
     if entry == "canvas" and result.success and result.blocks_added > 0:
         try:
