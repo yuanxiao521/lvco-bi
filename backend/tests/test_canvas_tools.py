@@ -230,3 +230,47 @@ def test_sort_rows_handles_bucket_alias():
     rows = [{"order_date_month": "2025-03-01", "v": 1}, {"order_date_month": "2024-11-01", "v": 2}]
     out = _sort_rows_by_date(rows, ["order_date"], "line")
     assert [r["order_date_month"] for r in out] == ["2024-11-01", "2025-03-01"]
+
+async def test_kpi_card_rejects_multiple_measures(db_session):
+    """KPI 卡片一卡只放一个指标：多度量 → 结构化 error 引导拆卡（Agent 自纠错）。
+
+    实测：Agent 曾把 4 个度量塞一张 KPI 卡，渲染成一坨。约束放在工具层（不是只靠
+    prompt），error 带拆卡示例，模型能当场自纠错改成多次调用。
+    """
+    tool = AddChartBlockTool()
+    out = await tool.execute(
+        title="多指标 KPI", chart_type="kpi_card", datasource_id=DS_ID,
+        db_session=db_session,
+        measures=[
+            {"field": "total_amount", "agg": "SUM"},
+            {"field": "quantity", "agg": "SUM"},
+        ],
+        dimensions=[],
+    )
+    payload = json.loads(out)
+    assert "error" in payload
+    assert "kpi_card 只支持一个度量" in payload["error"]
+    assert "拆成多张 KPI 卡" in payload["error"]   # 引导自纠错的 hint 必须在
+
+
+async def test_kpi_card_single_measure_passes_guard(db_session, monkeypatch):
+    """单度量 KPI 不被新守卫误伤（守卫只拦 >1）。"""
+    import app.services.metric_service as _ms
+
+    async def _passthrough(db, user_id, raw_measures, dimensions=None):  # noqa: ANN001
+        ms = list(raw_measures or [])
+        return ms, ms
+
+    monkeypatch.setattr(_ms, "resolve_measures", _passthrough)
+    tool = AddChartBlockTool()
+    out = await tool.execute(
+        title="总销售额", chart_type="kpi_card", datasource_id=DS_ID,
+        db_session=db_session,
+        measures=[{"field": "total_amount", "agg": "SUM"}],
+        dimensions=[],
+    )
+    payload = json.loads(out)
+    # 断言点：错误（若有）发生在守卫**之后**的取数阶段（如假 UUID 查询验证失败），
+    # 而不是"KPI 只支持一个度量"——即守卫没有误伤单度量。
+    if "error" in payload:
+        assert "kpi_card 只支持一个度量" not in payload["error"]
