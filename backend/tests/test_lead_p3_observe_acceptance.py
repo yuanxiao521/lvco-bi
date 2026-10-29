@@ -158,3 +158,45 @@ async def test_recon_tool_failure_degrades_and_returns_none():
 async def test_recon_tool_list_metrics_works_without_db():
     got = await recon_tool("list_metrics", ctx=_Ctx(), args={}, db_session=None)
     assert "销售额" in got
+
+# ── 方案 4：清空/删块类任务的零落块豁免 ─────────────────────────────────────
+
+def _result(**kw):
+    base = dict(success=True, report="r", steps=[], blocks_added=0,
+                error=None, verified=True, tool_chain=[])
+    base.update(kw)
+    from app.services.agents.lead.lead_tools import RunAnalysisResult
+    return RunAnalysisResult(**base)
+
+
+def _assess(result, goal=""):
+    from app.services.agents.lead.lead_tools import assess_subtask_detail
+    return assess_subtask_detail(result, entry="canvas", user_goal=goal)
+
+
+def test_clear_canvas_task_zero_blocks_passes():
+    """清空画布：成功 + 零落块 + tool_chain 有 clear_canvas 成功记录 → 不判 HARD。"""
+    out = _assess(_result(tool_chain=[{"tool": "clear_canvas", "ok": True, "cleared": 16}]),
+                  goal="把画布清空")
+    assert out.passed, out.hard
+    assert not any("零落块" in h or "内容块" in h for h in out.hard)
+
+
+def test_remove_block_task_zero_blocks_passes():
+    """删块任务同理（编排器路径 tool_chain 用 name 键）。"""
+    out = _assess(_result(tool_chain=[{"name": "remove_block", "ok": True}]),
+                  goal="删除那张趋势图")
+    assert out.passed, out.hard
+
+
+def test_do_nothing_task_zero_blocks_still_fails():
+    """真·什么都没干（成功但无任何变更操作）→ 仍然 HARD 未达标（豁免不放过懒任务）。"""
+    out = _assess(_result(tool_chain=[]), goal="分析一下销售趋势")
+    assert any("未在画布上产出内容块" in h for h in out.hard), out.hard
+
+
+def test_add_chart_zero_blocks_via_failed_tools_still_hard():
+    """变更工具失败（ok=False）不算"变更成功"——零落块仍判 HARD（豁免只认成功变更）。"""
+    out = _assess(_result(tool_chain=[{"name": "add_chart_block", "ok": False}]),
+                  goal="画一张柱状图")
+    assert any("未在画布上产出内容块" in h for h in out.hard), out.hard
