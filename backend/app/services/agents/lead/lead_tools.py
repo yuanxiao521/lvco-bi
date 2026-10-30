@@ -85,6 +85,19 @@ def make_idempotency_key(args: RunAnalysisArgs) -> str:
     return f"run_analysis:{digest}"
 
 
+def _has_canvas_mutation_removal_only(tool_chain: list[dict]) -> bool:
+    """tool_chain 里是否存在成功的移除类操作（clear_canvas / remove_block）。
+
+    方案 3 轻量版：这类任务的成功标志是"移除"而非"新增"，
+    acceptance 的 min_blocks 核验对它们不适用。
+    """
+    for t in tool_chain or []:
+        name = str(t.get("name") or t.get("tool") or "")
+        if name in ("clear_canvas", "remove_block") and t.get("ok", True):
+            return True
+    return False
+
+
 def _check_acceptance(result: RunAnalysisResult, acceptance: dict | None) -> str:
     """核验 Lead **自己声明**的验收标准（结构化、可核验）。
 
@@ -96,7 +109,13 @@ def _check_acceptance(result: RunAnalysisResult, acceptance: dict | None) -> str
     problems: list[str] = []
     min_blocks = acceptance.get("min_blocks")
     if isinstance(min_blocks, int) and result.blocks_added < min_blocks:
-        problems.append(f"要求至少 {min_blocks} 个内容块，实际 {result.blocks_added}")
+        # 清空/删块类任务（方案 3 轻量版）：成功标志是"移除"，blocks_added 本来就是 0——
+        # 对这类任务跳过 min_blocks 核验（与零落块 HARD 豁免同一豁免信号），否则
+        # Lead 对清空任务误声明 min_blocks 时会被 acceptance 绊住（prompt 已提示不声明，这是保底）。
+        if _has_canvas_mutation_removal_only(result.tool_chain):
+            pass
+        else:
+            problems.append(f"要求至少 {min_blocks} 个内容块，实际 {result.blocks_added}")
     if acceptance.get("require_verified") is True and not result.verified:
         problems.append("要求报告数字经过后验，实际未通过")
     if not problems:

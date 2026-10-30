@@ -200,3 +200,38 @@ def test_add_chart_zero_blocks_via_failed_tools_still_hard():
     out = _assess(_result(tool_chain=[{"name": "add_chart_block", "ok": False}]),
                   goal="画一张柱状图")
     assert any("未在画布上产出内容块" in h for h in out.hard), out.hard
+
+def test_acceptance_min_blocks_skipped_for_clear_task():
+    """方案 3 轻量版：清空任务误声明 min_blocks → acceptance 跳过该核验（不绊 SOFT）。"""
+    out = _assess(
+        _result(tool_chain=[{"tool": "clear_canvas", "ok": True, "cleared": 3}]),
+        goal="把画布清空",
+    )
+    # 构造：手动带 acceptance 重新评一次
+    from app.services.agents.lead.lead_tools import assess_subtask_detail, RunAnalysisResult
+    result = RunAnalysisResult(
+        success=True, report="r", steps=[], blocks_added=0, error=None,
+        verified=True,
+        tool_chain=[{"tool": "clear_canvas", "ok": True, "cleared": 3}],
+    )
+    out2 = assess_subtask_detail(
+        result, entry="canvas", user_goal="把画布清空",
+        acceptance={"min_blocks": 2},
+    )
+    assert out2.passed, out2.hard + out2.soft
+    assert not any("min_blocks" in s or "内容块，实际" in s for s in out2.soft)
+
+
+def test_acceptance_min_blocks_still_enforced_for_add_task():
+    """普通落块任务的 min_blocks 核验不受豁免影响。"""
+    from app.services.agents.lead.lead_tools import assess_subtask_detail, RunAnalysisResult
+    result = RunAnalysisResult(
+        success=True, report="r", steps=[], blocks_added=1, error=None,
+        verified=True,
+        tool_chain=[{"name": "add_chart_block", "ok": True}],
+    )
+    out = assess_subtask_detail(
+        result, entry="canvas", user_goal="画图",
+        acceptance={"min_blocks": 3},
+    )
+    assert any("Lead 声明的标准未满足" in s for s in out.soft)
