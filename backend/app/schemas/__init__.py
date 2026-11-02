@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 from app.models.chart_config import ChartConfig, ChartType
@@ -106,7 +106,10 @@ class DataSourceResponse(CamelModel):
     name: str
     description: str | None
     source_type: SourceType
-    connection_config: dict | None
+    # 连接配置回传前端时只保留"可展示的部分"：密码字段一律剔除，仅给 has_password 标记。
+    # 改造前这里是原样透出 connection_config —— 密码（历史上还是明文）会直接出现在
+    # 浏览器 devtools / 抓包里，属于凭据外泄面。
+    connection_config: dict | None = None
     file_path: str | None
     schema_meta: dict | None
     status: DatasourceStatus
@@ -115,6 +118,19 @@ class DataSourceResponse(CamelModel):
     last_synced_at: datetime | None
     created_at: datetime
     updated_at: datetime | None
+
+    @field_validator("connection_config")
+    @classmethod
+    def _mask_connection_secrets(cls, value: dict | None) -> dict | None:
+        if not value:
+            return None
+        masked = {
+            k: v
+            for k, v in value.items()
+            if k.lower() not in ("password", "pwd", "secret", "access_key", "secret_key")
+        }
+        masked["has_password"] = bool(value.get("password"))
+        return masked
 
 
 class DataSourceListResponse(CamelModel):

@@ -1,3 +1,16 @@
+# =====================================================================
+# 依赖清单（2026-11 校正）
+#
+# 这次校正的背景：旧清单缺了 psycopg2 / mysql-connector / pandas / pytz
+# / sqlglot 等运行期必需包 —— 在开发机上"能用"是因为 venv 里早就装过，
+# 换台机器 pip install -r requirements.txt 后：
+#   · PostgreSQL 数据源同步直接报 ModuleNotFoundError: pytz（ATTACH 失败）
+#   · MySQL 测试连接报"驱动未安装"
+#   · SQLGuard 的 AST 校验 import sqlglot 失败
+# 也就是说"能连数据库"这件事在干净环境里根本跑不起来。
+# =====================================================================
+
+# ── Web / API ──────────────────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.36
@@ -5,20 +18,54 @@ asyncpg==0.30.0
 alembic==1.14.1
 pydantic==2.10.4
 pydantic-settings==2.7.1
+python-multipart==0.0.20
+httpx==0.28.1
+python-dotenv>=1.0
+
+# ── 鉴权 ───────────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.20
-duckdb==1.2.0
+bcrypt>=4.0
+
+# ── 分析引擎（DuckDB + 联邦查询） ──────────────────────────────────
+duckdb==1.5.5
+pandas>=2.2
+numpy>=1.26
+# postgres_scanner 读取 timestamp 时强依赖 pytz：缺了 ATTACH 直接报
+# "Required module 'pytz' failed to import"（真机已验证）
+pytz>=2024.1
+tzdata>=2024.1
 openpyxl==3.1.5
-httpx==0.28.1
-redis>=5.0,<6.0
-# 任务队列（ARQ）：把 Agent 执行从 API 进程搬到独立 worker 进程
-# 启动：.venv/Scripts/python.exe -m arq app.worker.WorkerSettings
+
+# ── 外部数据源驱动（PG / MySQL 直连探测与建连） ────────────────────
+psycopg2-binary==2.9.12
+mysql-connector-python>=9.0,<10
+
+# ── SQL 安全校验（AST 闸门） ───────────────────────────────────────
+sqlglot>=25.0
+
+# ── 图表渲染 / 导出 ────────────────────────────────────────────────
+matplotlib>=3.8
+Jinja2>=3.1
+# canvases.py 在**模块顶层** import playwright（画布导出图片/PDF 用），
+# 缺了会导致整个 API 起不来，所以它是运行期依赖而不是"仅脚本"。
+playwright>=1.40
+requests>=2.31
+
+# ── 任务队列 / 缓存 / 存储 ─────────────────────────────────────────
 arq==0.28.0
+redis>=5.0,<6.0
 minio>=7.2,<8.0
+
+# ── 加密（数据源凭据 AES-256-GCM） ─────────────────────────────────
+pycryptodome>=3.20
+
+# ── 可观测 / 调度 / 限流 ───────────────────────────────────────────
 structlog>=24.4
 slowapi>=0.1,<0.2
-pycryptodome>=3.20
 apscheduler>=3.10,<4.0
 langfuse>=2.0.0,<3.0.0
 pyyaml>=6.0
+
+# ── 仅脚本使用（探针 / 评测） ───────────────────────────────────────
+# 说明：探针脚本用 httpx/requests 已覆盖，无需额外依赖。

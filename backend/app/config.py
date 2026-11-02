@@ -79,8 +79,19 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_bucket: str = "lvco-uploads"
 
-    # DB Encryption
+    # ── 数据源凭据加密（AES-256-GCM，见 app/utils/crypto.py） ─────────────
+    # 落库前必须加密；未配置时连接数据库型数据源会被拒绝（fail-closed），
+    # 避免把用户数据库密码以明文写进 datasources.connection_config。
+    # 生成：python -c "import secrets;print(secrets.token_hex(32))"
     db_encryption_key: str | None = None
+
+    # ── 数据源连接网络边界（见 app/services/connection_guard.py） ─────────
+    # 智能 BI 常连内网库，故默认允许私网/回环；云元数据、组播、0.0.0.0 始终禁止。
+    DB_ALLOW_PRIVATE_HOSTS: bool = True
+    # 逗号分隔白名单；非空时只允许命中项（或其子域），用于生产收口
+    DB_ALLOWED_HOSTS: str = ""
+    # 外部库建连/探测超时（秒）
+    DB_CONNECT_TIMEOUT_SECONDS: int = 10
 
     # Langfuse 可观测性
     LANGFUSE_ENABLED: bool = False

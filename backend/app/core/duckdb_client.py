@@ -226,7 +226,7 @@ class DuckDBClient:
                 # 撤销意图：读者线程会重新打开连接并注册心跳
                 _coordination.clear_intent()
 
-    def ensure_attached(self, schema_name: str, attach_sql: str, *, force: bool = False) -> bool:
+    def ensure_attached(self, schema_name: str, attach_sql, *, force: bool = False) -> bool:
         """确保外部数据库已 ATTACH 到 DuckDB；已附加则直接复用，避免重复建连。
 
         首次对该 schema 调用时执行 ATTACH；后续调用命中进程内缓存直接跳过。
@@ -235,7 +235,8 @@ class DuckDBClient:
 
         Args:
             schema_name: ATTACH 使用的 schema（database）名。
-            attach_sql: 由对应连接器生成的完整 ATTACH SQL。
+            attach_sql: 单条 ATTACH SQL，或语句列表（新形态：先 CREATE SECRET
+                再 ATTACH，密码不进入连接串，见 app/connectors/attach_sql.py）。
             force: 置 True 时跳过缓存，DETACH 旧连接后重新 ATTACH。
 
         Returns:
@@ -251,7 +252,9 @@ class DuckDBClient:
                 self.execute(f'DETACH "{schema_name}"')
             except Exception:
                 pass
-            self.execute(attach_sql)
+            statements = attach_sql if isinstance(attach_sql, (list, tuple)) else [attach_sql]
+            for statement in statements:
+                self.execute(statement)
             self._attached_cache.add(schema_name)
         return True
 

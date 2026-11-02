@@ -55,34 +55,17 @@ def _resolve_table_ref(ds: DataSource, user_id: UUID) -> tuple[str, str]:
 def _ensure_external_attached(ds: DataSource, schema_name: str) -> None:
     """确保外部数据源(PostgreSQL/MySQL)已 ATTACH 到 DuckDB。
 
-    首次 ATTACH 后复用连接：同 schema 已附加时直接跳过，避免重复建连耗时。
+    统一走 datasource_connection（凭据解析 + DuckDB SECRET ATTACH）。改造前这里的
+    解密失败被 except: pass 吞掉，会把"密钥不对"表现成"密码错误"，误导排查方向。
     """
-    from app.utils.crypto import decrypt_value, get_encryption_key
-    from app.connectors.postgres_connector import postgres_connector
-
-    conn_info = dict(ds.connection_config) if ds.connection_config else {}
-    key = get_encryption_key()
-    if key and conn_info.get("password"):
-        try:
-            conn_info["password"] = decrypt_value(conn_info["password"], key)
-        except Exception:
-            pass
-    conn_info["host"] = conn_info.get("host", "localhost")
-    conn_info["port"] = conn_info.get("port", 5432)
-    conn_info["user"] = conn_info.get("username", "postgres")
-    conn_info["database"] = conn_info.get("db_name", "")
+    from app.services.datasource_connection import DatasourceConnectionError, ensure_attached
 
     try:
-        if ds.source_type == SourceType.mysql:
-            from app.connectors.mysql_connector import mysql_connector
-            attach_sql = mysql_connector.get_attach_sql(conn_info, schema_name)
-        else:
-            attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-        duckdb_client.ensure_attached(schema_name, attach_sql)
-    except Exception as e:
+        ensure_attached(ds, schema_name)
+    except DatasourceConnectionError as e:
         raise HTTPException(
             status_code=500,
-            detail={"code": "ATTACH_FAILED", "message": f"外部数据源连接失败: {str(e)[:200]}"},
+            detail={"code": "ATTACH_FAILED", "message": f"外部数据源连接失败：{e}"},
         ) from e
 
 

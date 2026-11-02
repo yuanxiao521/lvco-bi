@@ -17,8 +17,18 @@ from app.core.duckdb_client import duckdb_client
 from app.models.datasource import DataSource, DatasourceStatus, SourceType
 from app.repositories.protocols import DataSourceRepository
 from app.schemas import DataSourceUpdate
+from app.services.connection_guard import ConnectionValidationError
+from app.services.datasource_connection import (
+    DatasourceConnectionError,
+    ensure_attached,
+    needs_secret_upgrade,
+    resolve_credentials,
+    sanitize_error,
+    seal_connection_config,
+    table_ref_for,
+)
 from app.services.storage_service import storage
-from app.utils.crypto import decrypt_value, get_encryption_key
+from app.utils.crypto import seal_secret
 
 
 class DataSourceService:
@@ -177,23 +187,31 @@ class DataSourceService:
         return ds
 
     async def create_connection(self, user_id: UUID, body: dict) -> DataSource:
+        """创建数据库型数据源：校验输入 → 密码加密 → 落库（绝不明文存储）。
+
+        Raises:
+            ConnectionValidationError: 主机/端口/库名等参数不合法（400）；
+            CredentialKeyMissingError: 未配置 DB_ENCRYPTION_KEY（503，fail-closed）。
+        """
         source_type_value = body.get("source_type")
         if isinstance(source_type_value, SourceType):
             source_type = source_type_value
         else:
             source_type = SourceType(source_type_value or "postgresql")
+        connection_config = seal_connection_config(
+            host=body.get("host"),
+            port=body.get("port"),
+            db_name=body.get("db_name"),
+            username=body.get("username"),
+            password=body.get("password"),
+            table_name=body.get("table_name", body.get("tableName", "")),
+            source_type=source_type.value,
+        )
         ds = DataSource(
             user_id=user_id,
             name=body.get("name", ""),
             source_type=source_type,
-            connection_config={
-                "host": body.get("host"),
-                "port": body.get("port"),
-                "db_name": body.get("db_name"),
-                "username": body.get("username"),
-                "password": body.get("password"),
-                "table_name": body.get("table_name", body.get("tableName", "")),
-            },
+            connection_config=connection_config,
             status=DatasourceStatus.disconnected,
         )
         self.db.add(ds)
@@ -211,6 +229,26 @@ class DataSourceService:
         await self.db.flush()
         await self.db.refresh(ds)
         return ds
+
+    async def _upgrade_stored_secret(self, ds: DataSource, conn_info: dict) -> None:
+        """历史明文 / 旧 CBC 密文 → v2 密文（幂等；失败只告警，不影响同步）。"""
+        if not needs_secret_upgrade(ds.connection_config):
+            return
+        plaintext = conn_info.get("password") or ""
+        if not plaintext:
+            return
+        try:
+            sealed = seal_secret(plaintext)
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger("lvco.datasources").warning(
+                "secret_upgrade_skipped datasource_id=%s error=%s", str(ds.id), e
+            )
+            return
+        config = dict(ds.connection_config or {})
+        config["password"] = sealed
+        config["secret_format"] = "v2"
+        ds.connection_config = config
+        await self.db.flush()
 
     async def sync_datasource(self, datasource_id: UUID, user_id: UUID) -> DataSource | None:
         ds = await self.get_by_id(datasource_id, user_id)
@@ -234,33 +272,32 @@ class DataSourceService:
             except Exception as e:
                 ds.status = DatasourceStatus.disconnected
                 # 不覆盖 schema_meta，保留已有的字段信息
-        elif ds.source_type == SourceType.postgresql and ds.connection_config:
-            # Use DuckDB's PostgreSQL ATTACH to sync schema info
-            conn_info = dict(ds.connection_config)
-            schema_name = duckdb_client.get_schema_name(user_id, ds.id, ds.name, db_name=conn_info.get("db_name", ""))
-            # 解密密码
-            key = get_encryption_key()
-            password = conn_info.get("password", "")
-            if key and password:
-                conn_info["password"] = decrypt_value(password, key)
-            # PostgresConnector stores: host, port, db_name, username, password
-            conn_info["host"] = conn_info.get("host", "localhost")
-            conn_info["port"] = conn_info.get("port", 5432)
-            conn_info["user"] = conn_info.get("username", "postgres")
-            conn_info["database"] = conn_info.get("db_name", "")
+        elif ds.source_type in (SourceType.postgresql, SourceType.mysql) and ds.connection_config:
+            # 外部库：凭据解析 + DuckDB ATTACH 统一走 datasource_connection（PG/MySQL 同一段代码）
+            connector = (
+                postgres_connector if ds.source_type == SourceType.postgresql else mysql_connector
+            )
+            table_scope = "public schema" if ds.source_type == SourceType.postgresql else "database"
+            conn_info: dict = {}
             try:
+                conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+                # 历史明文/旧 CBC 密文顺手升级为 v2 密文（幂等，失败不影响同步）
+                await self._upgrade_stored_secret(ds, conn_info)
+                schema_name = duckdb_client.get_schema_name(
+                    user_id, ds.id, ds.name, db_name=conn_info.get("db_name", "")
+                )
                 # 同步需全新连接：force 跳过缓存，DETACH 后重建外部连接并重新拉 schema
-                attach_sql = postgres_connector.get_attach_sql(conn_info, schema_name)
-                duckdb_client.ensure_attached(schema_name, attach_sql, force=True)
-                tables = postgres_connector.list_tables(duckdb_client, schema_name)
-                # Use specified table_name from connection_config, or fall back to first table
+                ensure_attached(ds, schema_name, force=True)
+                tables = connector.list_tables(duckdb_client, schema_name)
                 target_table = conn_info.get("table_name", "")
                 if target_table and target_table in tables:
                     table_name = target_table
                 elif target_table:
-                    # Table specified but not found in public schema
                     ds.status = DatasourceStatus.disconnected
-                    ds.schema_meta = {"error": f"Table '{target_table}' not found in public schema"}
+                    available = "、".join(tables[:10]) or "（无）"
+                    ds.schema_meta = {
+                        "error": f"表 {target_table} 不在该库的 {table_scope} 中。可用表：{available}"
+                    }
                     ds.last_synced_at = datetime.now(timezone.utc)
                     await self.db.flush()
                     await self.db.refresh(ds)
@@ -269,77 +306,30 @@ class DataSourceService:
                     table_name = tables[0]
                 else:
                     ds.status = DatasourceStatus.connected
-                    ds.schema_meta = {"fields": [], "note": "No public tables found"}
+                    ds.schema_meta = {"fields": [], "note": f"No tables found in {table_scope}"}
                     ds.last_synced_at = datetime.now(timezone.utc)
                     await self.db.flush()
                     await self.db.refresh(ds)
                     return ds
 
-                ds.schema_meta = postgres_connector.get_schema_meta(
+                ds.schema_meta = connector.get_schema_meta(
                     duckdb_client, schema_name, table_name
                 )
-                ds.row_count = postgres_connector.get_row_count(
-                    duckdb_client, schema_name, table_name
-                )
-                ds.size_bytes = max(ds.row_count * 200, 0)  # 粗略估算 ~200 bytes/row
-                ds.status = DatasourceStatus.connected
-                # Store table name for later queries
-                ds.schema_meta["table_name"] = table_name
-                ds.schema_meta["available_tables"] = tables
-            except Exception as e:
-                ds.status = DatasourceStatus.disconnected
-                ds.schema_meta = {"error": str(e)}
-        elif ds.source_type == SourceType.mysql and ds.connection_config:
-            # Use DuckDB's MySQL ATTACH to sync schema info
-            conn_info = dict(ds.connection_config)
-            schema_name = duckdb_client.get_schema_name(user_id, ds.id, ds.name, db_name=conn_info.get("db_name", ""))
-            # 解密密码
-            key = get_encryption_key()
-            password = conn_info.get("password", "")
-            if key and password:
-                conn_info["password"] = decrypt_value(password, key)
-            conn_info["host"] = conn_info.get("host", "localhost")
-            conn_info["port"] = conn_info.get("port", 3306)
-            conn_info["user"] = conn_info.get("username", "root")
-            conn_info["database"] = conn_info.get("db_name", "")
-            try:
-                # 同步需全新连接：force 跳过缓存，DETACH 后重建外部连接并重新拉 schema
-                attach_sql = mysql_connector.get_attach_sql(conn_info, schema_name)
-                duckdb_client.ensure_attached(schema_name, attach_sql, force=True)
-                tables = mysql_connector.list_tables(duckdb_client, schema_name)
-                target_table = conn_info.get("table_name", "")
-                if target_table and target_table in tables:
-                    table_name = target_table
-                elif target_table:
-                    ds.status = DatasourceStatus.disconnected
-                    ds.schema_meta = {"error": f"Table '{target_table}' not found in database"}
-                    ds.last_synced_at = datetime.now(timezone.utc)
-                    await self.db.flush()
-                    await self.db.refresh(ds)
-                    return ds
-                elif tables:
-                    table_name = tables[0]
-                else:
-                    ds.status = DatasourceStatus.connected
-                    ds.schema_meta = {"fields": [], "note": "No tables found"}
-                    ds.last_synced_at = datetime.now(timezone.utc)
-                    await self.db.flush()
-                    await self.db.refresh(ds)
-                    return ds
-
-                ds.schema_meta = mysql_connector.get_schema_meta(
-                    duckdb_client, schema_name, table_name
-                )
-                ds.row_count = mysql_connector.get_row_count(
+                ds.row_count = connector.get_row_count(
                     duckdb_client, schema_name, table_name
                 )
                 ds.size_bytes = max(ds.row_count * 200, 0)  # 粗略估算 ~200 bytes/row
                 ds.status = DatasourceStatus.connected
                 ds.schema_meta["table_name"] = table_name
                 ds.schema_meta["available_tables"] = tables
-            except Exception as e:
+            except DatasourceConnectionError as e:
                 ds.status = DatasourceStatus.disconnected
                 ds.schema_meta = {"error": str(e)}
+            except Exception as e:  # noqa: BLE001
+                ds.status = DatasourceStatus.disconnected
+                ds.schema_meta = {
+                    "error": sanitize_error(str(e), secrets=[conn_info.get("password")])
+                }
         else:
             ds.status = DatasourceStatus.disconnected
 
@@ -391,6 +381,8 @@ class DataSourceService:
         if ds is None:
             return None
 
+        if ds.source_type in (SourceType.postgresql, SourceType.mysql):
+            return self._preview_external(ds, user_id, limit)
         if ds.source_type not in (SourceType.csv, SourceType.excel):
             return {"datasource_id": str(ds.id), "columns": [], "rows": [], "total_rows": 0, "preview_rows": 0}
 
@@ -415,3 +407,41 @@ class DataSourceService:
             }
         except Exception:
             return {"datasource_id": str(ds.id), "columns": [], "rows": [], "total_rows": 0, "preview_rows": 0}
+
+    def _preview_external(self, ds: DataSource, user_id: UUID, limit: int) -> dict:
+        """外部库（PG/MySQL）预览：ATTACH 后直接 SELECT LIMIT n。
+
+        改造前这里对数据库型数据源直接返回空数组 —— 用户连上库却"看不到任何数据"，
+        是最典型的"能连不能用"体验缺口。
+        """
+        empty = {"datasource_id": str(ds.id), "columns": [], "rows": [], "total_rows": 0, "preview_rows": 0}
+        try:
+            conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+            schema_name = duckdb_client.get_schema_name(
+                user_id, ds.id, ds.name, db_name=conn_info.get("db_name", "")
+            )
+            ensure_attached(ds, schema_name)
+            meta = ds.schema_meta if isinstance(ds.schema_meta, dict) else {}
+            table_name = meta.get("table_name") or ""
+            if not table_name:
+                return empty
+            ref = table_ref_for(
+                schema_name, ds.source_type, table_name, database=conn_info.get("db_name", "")
+            )
+            fields = [f.get("name") for f in (meta.get("fields") or []) if isinstance(f, dict) and f.get("name")]
+            rows = duckdb_client.fetchall(f"SELECT * FROM {ref} LIMIT {int(limit)}")
+            columns = fields or [f"c{i}" for i in range(len(rows[0]) if rows else 0)]
+            return {
+                "datasource_id": str(ds.id),
+                "columns": columns,
+                "rows": [list(row) for row in rows],
+                "total_rows": ds.row_count,
+                "preview_rows": len(rows),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger("lvco.datasources").warning(
+                "preview_external_failed datasource_id=%s error=%s",
+                str(ds.id),
+                sanitize_error(str(exc), limit=160),
+            )
+            return empty

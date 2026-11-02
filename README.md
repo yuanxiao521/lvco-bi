@@ -179,6 +179,33 @@ User: "Analyze sales by category, brand, and season"
 - **Graceful degradation.** Redis unavailable → in-memory fallbacks + process-local execution. LLM report failure → deterministic template report (zero LLM). Observation/review failures → code verdicts, never a dead end.
 - **Session safety.** Per-session locks with orphan self-heal and stale-task detection; assistant placeholder rows are persisted before execution and patched on interruption.
 
+## Data Source Security
+
+Connecting a customer database is the highest-risk surface in a BI product, so the
+connection layer is treated as a security boundary rather than a feature:
+
+- **Credentials encrypted at rest.** User-supplied DB passwords are sealed with
+  AES-256-GCM (versioned envelope, `enc:v2:`) before they reach PostgreSQL. If
+  `DB_ENCRYPTION_KEY` is absent the API refuses to create DB-backed datasources
+  (fail-closed) instead of silently storing plaintext. Legacy plaintext / old CBC
+  values are still readable and get upgraded on the next sync.
+- **Credentials never leave the server.** API responses expose only
+  `host / port / db_name / username / table_name / has_password`; the password
+  field is stripped by the schema layer.
+- **No credentials in SQL.** External databases are attached through DuckDB
+  `SECRET` objects + `ATTACH '' ... (SECRET ..., READ_ONLY)`. Previously the password
+  was interpolated into the ATTACH connection string, which DuckDB stores in catalog
+  metadata — `SELECT path FROM duckdb_databases()` returned the plaintext password.
+- **SSRF boundary.** Cloud-metadata ranges (169.254.0.0/16, 100.100.100.200), 0.0.0.0,
+  multicast and reserved addresses are always rejected; private networks are allowed
+  by default (on-prem BI) and can be pinned with `DB_ALLOWED_HOSTS`; connect endpoints
+  are rate-limited so they cannot be used as an internal port scanner.
+- **Sanitized errors.** Driver errors are scrubbed of `password=...` / `user:pwd@host`
+  patterns before they reach the API response, `schema_meta` or logs.
+
+Design notes, threat model and the honest TODO list:
+[DATASOURCE_SECURITY.md](DATASOURCE_SECURITY.md).
+
 ## Demo
 
 <!-- TODO: 录屏/GIF/在线地址 -->
@@ -194,7 +221,7 @@ User: "Analyze sales by category, brand, and season"
 | **Task Queue & Events** | ARQ (Redis) • Redis Streams (event log, per-cursor replay) |
 | **Frontend** | React 18 • TypeScript • Vite • ECharts 5 • Zustand |
 | **AI/Agent** | OpenAI-compatible LLM • Langfuse (observability) • Custom graph engine |
-| **Security** | SQLGlot AST whitelist • Parameterized queries • RBAC |
+| **Security** | SQLGlot AST whitelist • AES-256-GCM credential sealing • DuckDB SECRET-based ATTACH • SSRF boundary • RBAC |
 | **Deployment** | Docker • Docker Compose • Nginx |
 
 ---

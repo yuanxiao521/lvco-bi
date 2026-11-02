@@ -14,7 +14,7 @@ from app.core.duckdb_client import duckdb_client
 from app.models.datasource import DataSource, SourceType
 from app.repositories.protocols import CacheRepository
 from app.schemas.query import ChartQueryConfig, MeasureConfig, QueryResult
-from app.utils.crypto import decrypt_value, get_encryption_key
+
 
 ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT_DISTINCT"})
 ALLOWED_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "like"})
@@ -39,21 +39,12 @@ class CircularDependencyError(QueryEngineError):
 
 
 def _decrypt_connection_info(source_type: SourceType, connection_config: dict | None) -> dict:
-    """解密连接配置中的密码，返回配置副本。
+    """解密连接配置中的密码，返回配置副本（薄封装，统一入口见 datasource_connection）。"""
+    from app.services.datasource_connection import resolve_credentials
 
-    Args:
-        source_type: 数据源类型（仅 MySQL/PostgreSQL 需要解密密码）。
-        connection_config: 原始连接配置字典。
-
-    Returns:
-        解密后的连接配置副本（不修改原始字典）。
-    """
-    conn_info = dict(connection_config) if connection_config else {}
-    if source_type in (SourceType.mysql, SourceType.postgresql):
-        key = get_encryption_key()
-        if key and conn_info.get("password"):
-            conn_info["password"] = decrypt_value(conn_info["password"], key)
-    return conn_info
+    if source_type not in (SourceType.mysql, SourceType.postgresql):
+        return dict(connection_config) if connection_config else {}
+    return resolve_credentials(connection_config, source_type)
 
 
 def _get_table_columns(schema_name: str) -> list[tuple[str, str]]:
@@ -663,15 +654,14 @@ async def execute_chart_query(
     # For MySQL/PostgreSQL datasources, ATTACH the external database via DuckDB.
     if db is not None and datasource:
         if source_type in (SourceType.mysql, SourceType.postgresql):
-            # 首次 ATTACH 后复用连接（进程内缓存判定，命中即跳过 DETACH+ATTACH）
-            conn_info = _decrypt_connection_info(source_type, datasource.connection_config)
-            if source_type == SourceType.mysql:
-                from app.connectors.mysql_connector import mysql_connector as mysql_conn
-                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
-            else:
-                from app.connectors.postgres_connector import postgres_connector as pg_conn
-                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            duckdb_client.ensure_attached(schema_name, attach_sql)
+            # 首次 ATTACH 后复用连接（进程内缓存判定，命中即跳过 DETACH+ATTACH）。
+            # 凭据解析与 ATTACH 语句统一走 datasource_connection（密码进 DuckDB SECRET，
+            # 不进 ATTACH 连接串，因此不会出现在 catalog 元数据/错误串里）。
+            from app.services import datasource_connection as _ds_conn
+            try:
+                _ds_conn.ensure_attached(datasource, schema_name)
+            except _ds_conn.DatasourceConnectionError as exc:
+                raise QueryEngineError(str(exc), code="ATTACH_FAILED") from exc
             # 确定 PG/MySQL 数据源对应的实际表名
             if datasource.schema_meta and isinstance(datasource.schema_meta, dict):
                 pg_table_name = datasource.schema_meta.get("table_name", "data")

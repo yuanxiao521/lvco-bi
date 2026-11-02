@@ -600,26 +600,25 @@ class QueryDatasourceTool(BaseTool):
         if not datasource:
             return json.dumps({"error": "数据源不存在或无权限"}, ensure_ascii=False)
 
-        conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
-        schema_name = duckdb_client.get_schema_name(user_id, datasource_id, datasource.name, db_name=conn_info.get("db_name", ""))
+        from app.services.datasource_connection import DatasourceConnectionError, ensure_attached, resolve_credentials
 
-        # 如果数据源是外部数据库（PostgreSQL/MySQL），先解密连接密码并 ATTACH 到 DuckDB
+        try:
+            conn_info = resolve_credentials(datasource.connection_config, datasource.source_type)
+        except DatasourceConnectionError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        schema_name = duckdb_client.get_schema_name(
+            user_id, datasource_id, datasource.name, db_name=conn_info.get("db_name", "")
+        )
+
+        # 外部数据库（PostgreSQL/MySQL）：统一入口 ATTACH（密码进 DuckDB SECRET，不进连接串）
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
-            from app.utils.crypto import decrypt_value, get_encryption_key
-            key = get_encryption_key()
-            if key and conn_info.get("password"):
-                conn_info["password"] = decrypt_value(conn_info["password"], key)
-            # 按连接器各自默认用户/库名填充，避免错连（pg 默认 postgres，mysql 默认 root）
-            conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
-            conn_info["database"] = conn_info.get("db_name", "")
-            if datasource.source_type == SourceType.mysql:
-                from app.connectors.mysql_connector import mysql_connector as mysql_conn
-                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
-            else:
-                from app.connectors.postgres_connector import postgres_connector as pg_conn
-                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            # 首次 ATTACH 后复用连接：同 schema 再次查询直接跳过 DETACH+ATTACH
-            duckdb_client.ensure_attached(schema_name, attach_sql)
+            try:
+                ensure_attached(datasource, schema_name)
+            except DatasourceConnectionError as exc:
+                return json.dumps(
+                    {"error": f"数据源连接失败：{exc}。可尝试重新同步该数据源。"},
+                    ensure_ascii=False,
+                )
 
         # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
         # 本地库 table_ref 为 "schema"."data"（归属在 db），外部库为 "schema".public."table"（归属在 catalog）。

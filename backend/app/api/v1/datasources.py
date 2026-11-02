@@ -16,7 +16,15 @@ from app.models.user import User
 from app.schemas import CamelModel, DataSourceListResponse, DataSourceResponse, DataSourceUpdate, SuccessResponse
 from app.config import settings
 from app.services.ai_service import AIService
-from app.utils.crypto import encrypt_value, get_encryption_key, decrypt_value
+from app.services.connection_guard import ConnectionValidationError, validate_connection_input
+from app.services.datasource_connection import (
+    DatasourceConnectionError,
+    ensure_attached,
+    resolve_credentials,
+    sanitize_error,
+    table_ref_for,
+)
+from app.utils.crypto import CredentialKeyMissingError
 from app.core.duckdb_client import duckdb_client
 from app.services.data_quality import dup_row_count, format_issue_count, null_count, outlier_count, outlier_iqr_count, type_inconsistency_count
 from app.services.datasource_service import DataSourceService
@@ -108,17 +116,39 @@ async def upload_datasource(
 
 
 @router.post("/connect", status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 async def connect_datasource(
+    request: Request,
     body: DataSourceConnectBody,
     service: DataSourceService = Depends(get_datasource_service),
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    body_dict = body.model_dump()
-    if body.source_type in (SourceType.mysql, SourceType.postgresql) and body.password:
-        key = get_encryption_key()
-        if key:
-            body_dict["password"] = encrypt_value(body.password, key)
-    ds = await service.create_connection(current_user.id, body_dict)
+    """创建数据库型数据源。
+
+    凭据处理链路：入参校验（connection_guard）→ AES-256-GCM 加密（crypto.seal_secret）
+    → 落库；未配置 DB_ENCRYPTION_KEY 时拒绝创建（fail-closed），绝不明文存储。
+    """
+    try:
+        ds = await service.create_connection(current_user.id, body.model_dump())
+    except ConnectionValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_CONNECTION", "message": str(e)},
+        ) from e
+    except CredentialKeyMissingError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "ENCRYPTION_KEY_MISSING", "message": str(e)},
+        ) from e
+    _log.info(
+        "datasource_created source_type=%s host=%s port=%s db=%s user=%s by=%s",
+        body.source_type.value,
+        body.host,
+        body.port,
+        body.db_name,
+        body.username,
+        current_user.id,
+    )
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
 
 
@@ -215,16 +245,24 @@ async def list_datasource_tables(
     if ds.source_type != SourceType.postgresql:
         return SuccessResponse(data={"tables": []})
 
-    conn_info = dict(ds.connection_config) if ds.connection_config else {}
-    key = get_encryption_key()
-    if key and conn_info.get("password"):
-        conn_info["password"] = decrypt_value(conn_info["password"], key)
-    conn_info["host"] = conn_info.get("host", "localhost")
-    conn_info["port"] = conn_info.get("port", 5432)
-    conn_info["user"] = conn_info.get("username", "postgres")
-    conn_info["database"] = conn_info.get("db_name", "")
+    try:
+        conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+    except DatasourceConnectionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "CREDENTIAL_UNAVAILABLE", "message": str(e)},
+        ) from e
 
-    tables = await postgres_connector.list_tables_direct(conn_info)
+    try:
+        tables = await postgres_connector.list_tables_direct(conn_info)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "CONNECT_FAILED",
+                "message": sanitize_error(str(e), secrets=[conn_info.get("password")], limit=200),
+            },
+        ) from e
     return SuccessResponse(data={"tables": tables})
 
 
@@ -384,15 +422,51 @@ async def _do_ai_clean(
 
 
 @router.post("/test-connection")
+@limiter.limit("20/minute")
 async def test_connection(
+    request: Request,
     body: TestConnectionRequest,
     current_user = Depends(get_current_user),
 ):
-    """Test a database connection without saving."""
-    if body.source_type == "mysql":
-        result = await mysql_connector.test_connection(body.connection_info)
-    elif body.source_type == "postgresql":
-        result = await postgres_connector.test_connection(body.connection_info)
-    else:
+    """试探数据库连通性（不落库）。
+
+    安全要点：
+    - 入参先过 connection_guard（拒云元数据/保留地址/非法字符），避免被当成 SSRF 探测器；
+    - 限流，防止用本接口做内网端口扫描；
+    - 返回给前端的错误串统一脱敏（不含密码/连接串）。
+    """
+    source_type = (body.source_type or "").lower()
+    if source_type not in ("mysql", "postgresql"):
         raise HTTPException(status_code=400, detail=f"Unsupported source type: {body.source_type}")
+
+    info = dict(body.connection_info or {})
+    try:
+        checked = validate_connection_input(
+            host=info.get("host"),
+            port=info.get("port"),
+            user=info.get("user") or info.get("username"),
+            database=info.get("database") or info.get("db_name"),
+            table_name=info.get("table_name") or "",
+            source_type=source_type,
+        )
+    except ConnectionValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_CONNECTION", "message": str(e)},
+        ) from e
+
+    safe_info = {
+        "host": checked["host"],
+        "port": checked["port"],
+        "user": checked["user"],
+        "password": info.get("password", ""),
+        "database": checked["database"],
+    }
+    connector = mysql_connector if source_type == "mysql" else postgres_connector
+    result = await connector.test_connection(safe_info)
+    _log.info(
+        "datasource_test_connection source_type=%s host=%s port=%s db=%s success=%s by=%s",
+        source_type, checked["host"], checked["port"], checked["database"],
+        bool(result.get("success")), current_user.id,
+    )
     return SuccessResponse(data=result)

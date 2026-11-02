@@ -1408,22 +1408,10 @@ async def ai_query(
                 from app.models.datasource import SourceType
                 if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
                     pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
-                    table_ref = f'"{schema_name}".public."{pg_table}"'
+                    table_ref = table_ref_for(schema_name, datasource.source_type, pg_table)
                     # 首次 ATTACH 后复用连接，确保外部数据库可查（按类型选对应连接器）
-                    from app.utils.crypto import decrypt_value, get_encryption_key
-                    conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
-                    key = get_encryption_key()
-                    if key and conn_info.get("password"):
-                        conn_info["password"] = decrypt_value(conn_info["password"], key)
-                    conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
-                    conn_info["database"] = conn_info.get("db_name", "")
-                    if datasource.source_type == SourceType.mysql:
-                        from app.connectors.mysql_connector import mysql_connector as mysql_conn
-                        attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
-                    else:
-                        from app.connectors.postgres_connector import postgres_connector as pg_conn
-                        attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-                    duckdb_client.ensure_attached(schema_name, attach_sql)
+                    from app.services.datasource_connection import ensure_attached, table_ref_for
+                    ensure_attached(datasource, schema_name)
                 else:
                     table_ref = f'"{schema_name}"."data"'
 
@@ -1586,22 +1574,10 @@ async def generate_insights(
     from app.models.datasource import SourceType
     if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
         pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
-        table_ref = f'"{schema_name}".public."{pg_table}"'
+        table_ref = table_ref_for(schema_name, datasource.source_type, pg_table)
         # 首次 ATTACH 后复用连接（按类型选对应连接器）
-        from app.utils.crypto import decrypt_value, get_encryption_key
-        conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
-        key = get_encryption_key()
-        if key and conn_info.get("password"):
-            conn_info["password"] = decrypt_value(conn_info["password"], key)
-        conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
-        conn_info["database"] = conn_info.get("db_name", "")
-        if datasource.source_type == SourceType.mysql:
-            from app.connectors.mysql_connector import mysql_connector as mysql_conn
-            attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
-        else:
-            from app.connectors.postgres_connector import postgres_connector as pg_conn
-            attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-        duckdb_client.ensure_attached(schema_name, attach_sql)
+        from app.services.datasource_connection import ensure_attached, table_ref_for
+        ensure_attached(datasource, schema_name)
     else:
         table_ref = f'"{schema_name}"."data"'
 
@@ -1799,25 +1775,10 @@ async def canvas_ai_chat(
 
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
             pg_table = (datasource.schema_meta.get("table_name") or "data") if isinstance(datasource.schema_meta, dict) else "data"
-            table_ref = f'"{schema_name}".public."{pg_table}"'
+            table_ref = table_ref_for(schema_name, datasource.source_type, pg_table)
             # 首次 ATTACH 后复用连接（按类型选对应连接器）
-            from app.utils.crypto import decrypt_value, get_encryption_key
-
-            conn_info = dict(datasource.connection_config) if datasource.connection_config else {}
-            key = get_encryption_key()
-            if key and conn_info.get("password"):
-                conn_info["password"] = decrypt_value(conn_info["password"], key)
-            conn_info["user"] = conn_info.get("username", "root" if datasource.source_type == SourceType.mysql else "postgres")
-            conn_info["database"] = conn_info.get("db_name", "")
-            if datasource.source_type == SourceType.mysql:
-                from app.connectors.mysql_connector import mysql_connector as mysql_conn
-
-                attach_sql = mysql_conn.get_attach_sql(conn_info, schema_name)
-            else:
-                from app.connectors.postgres_connector import postgres_connector as pg_conn
-
-                attach_sql = pg_conn.get_attach_sql(conn_info, schema_name)
-            duckdb_client.ensure_attached(schema_name, attach_sql)
+            from app.services.datasource_connection import ensure_attached, table_ref_for
+            ensure_attached(datasource, schema_name)
         else:
             table_ref = f'"{schema_name}"."data"'
 
