@@ -54,6 +54,8 @@ export async function connectDatasource(payload: {
   tableNames?: string[];
   sslMode?: SslMode;
   sslCaPem?: string;
+  credentialSource?: "manual" | "reference";
+  credentialRef?: string;
 }): Promise<ConnectDatasourceResponse> {
   const response = await apiClient.post("/datasources/connect", payload);
   return unwrapApi<ConnectDatasourceResponse>(response.data);
@@ -109,6 +111,8 @@ export async function listDatasourceTables(id: string): Promise<string[]> {
 export async function testConnection(payload: {
   source_type: string;
   connection_info: Record<string, unknown>;
+  /** 服务端凭据引用（env:… / file:…）：前端不持有密码时由后端解析后探测 */
+  credentialRef?: string;
 }): Promise<{ success: boolean; row_count?: number; error?: string; tables?: string[] }> {
   const res = await apiClient.post('/datasources/test-connection', payload)
   return res.data.data

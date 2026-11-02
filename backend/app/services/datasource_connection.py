@@ -176,8 +176,8 @@ def attach_for_connection(conn_info: dict, schema_name: str, source_type) -> boo
 # ── 连接（db_connections）侧的凭据处理 ───────────────────────────────
 
 def build_connection_columns(
-    *, host, port, db_name, username, password, ssl_mode="prefer",
-    ssl_ca_pem=None, source_type="postgresql",
+    *, host, port, db_name, username, password=None, ssl_mode="prefer",
+    ssl_ca_pem=None, source_type="postgresql", credential_ref=None,
 ) -> dict:
     """校验 + 加密，产出可直接写 DBConnection 的列值。
 
@@ -190,21 +190,46 @@ def build_connection_columns(
         table_name="", source_type=str(getattr(source_type, "value", source_type)),
     )
     mode, ca = validate_ssl(ssl_mode, ssl_ca_pem)
+
+    # 凭据来源二选一：服务端引用（不落密码）或手动输入（加密落库）
+    ref = None
+    sealed = None
+    if credential_ref:
+        from app.services.credential_refs import validate_ref
+
+        ref = validate_ref(credential_ref)
+    elif password:
+        sealed = seal_secret(password)
+
     return {
         "host": checked["host"],
         "port": checked["port"],
         "db_name": checked["database"],
         "username": checked["user"],
-        "password_enc": seal_secret(password) if password else None,
+        "password_enc": sealed,
+        "credential_ref": ref,
         "ssl_mode": mode,
         "ssl_ca_enc": seal_secret(ca) if ca else None,
     }
 
 
 def connection_credentials(connection) -> dict:
-    """从连接行解出建连所需的完整配置（含明文密码，只在内存）。"""
+    """从连接行解出建连所需的完整配置（含明文密码，只在内存）。
+
+    凭据来源二选一：
+    - credential_ref（服务端引用）：每次现解析，密码从不落库、也从不经过浏览器；
+    - password_enc（手动输入）：AES-256-GCM 密文按需解密。
+    """
     password = ""
-    if getattr(connection, "password_enc", None):
+    ref = getattr(connection, "credential_ref", None)
+    if ref:
+        from app.services.credential_refs import CredentialRefError, resolve_ref
+
+        try:
+            password = resolve_ref(ref)
+        except CredentialRefError as exc:
+            raise DatasourceConnectionError(str(exc)) from exc
+    elif getattr(connection, "password_enc", None):
         try:
             password = open_secret(connection.password_enc)
         except (CredentialDecryptError, CredentialKeyMissingError) as exc:

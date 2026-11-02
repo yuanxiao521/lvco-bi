@@ -105,16 +105,33 @@ class ConnectionService:
         port,
         db_name: str,
         username: str,
-        password: str | None,
+        password: str | None = None,
         ssl_mode: str = "prefer",
         ssl_ca_pem: str | None = None,
+        credential_ref: str | None = None,
     ) -> DBConnection:
-        """创建连接行（校验 + 加密）。同一用户下相同 host/port/db/user 复用已有连接。"""
+        """创建连接行（校验 + 加密 / 或记录服务端凭据引用）。
+
+        同一用户下相同 host/port/db/user 复用已有连接，避免多份凭据副本。
+        未提供密码也没提供引用时直接拒绝——不存在"空密码也能存"的隐式路径。
+        """
+        if not credential_ref and not password:
+            raise ConnectionValidationError(
+                "请提供数据库密码，或改用服务端凭据引用（env:变量名 / file:/绝对路径）"
+            )
         columns = build_connection_columns(
             host=host, port=port, db_name=db_name, username=username,
             password=password, ssl_mode=ssl_mode, ssl_ca_pem=ssl_ca_pem,
-            source_type=source_type,
+            source_type=source_type, credential_ref=credential_ref,
         )
+        # 引用型凭据：立刻解析一次，环境变量/文件缺失时在"创建"这一步就报错
+        if columns.get("credential_ref"):
+            from app.services.credential_refs import CredentialRefError, resolve_ref
+
+            try:
+                resolve_ref(columns["credential_ref"])
+            except CredentialRefError as exc:
+                raise ConnectionValidationError(str(exc)) from exc
         existing = (
             await self.db.execute(
                 select(DBConnection).where(
@@ -128,8 +145,13 @@ class ConnectionService:
             )
         ).scalar_one_or_none()
         if existing is not None:
-            # 同一个物理连接：复用凭据（密码以本次提交为准），避免多份副本
-            existing.password_enc = columns["password_enc"] or existing.password_enc
+            # 同一个物理连接：复用凭据（本次提交的来源优先），避免多份副本
+            if columns.get("credential_ref"):
+                existing.credential_ref = columns["credential_ref"]
+                existing.password_enc = None
+            elif columns["password_enc"]:
+                existing.password_enc = columns["password_enc"]
+                existing.credential_ref = None
             existing.ssl_mode = columns["ssl_mode"]
             existing.ssl_ca_enc = columns["ssl_ca_enc"] or existing.ssl_ca_enc
             if name:
@@ -147,6 +169,7 @@ class ConnectionService:
             db_name=columns["db_name"],
             username=columns["username"],
             password_enc=columns["password_enc"],
+            credential_ref=columns.get("credential_ref"),
             ssl_mode=columns["ssl_mode"],
             ssl_ca_enc=columns["ssl_ca_enc"],
             status=DatasourceStatus.disconnected.value,
@@ -168,12 +191,39 @@ class ConnectionService:
         name: str | None = None,
         ssl_mode: str | None = None,
         ssl_ca_pem: str | None = None,
+        credential_source: str | None = None,
+        credential_ref: str | None = None,
+        password: str | None = None,
     ) -> DBConnection | None:
         connection = await self.get(connection_id, user_id)
         if connection is None:
             return None
         if name is not None and str(name).strip():
             connection.name = str(name).strip()[:200]
+
+        # 凭据来源切换（manual ⇄ reference）
+        source = (credential_source or "").strip().lower()
+        if source not in ("", "manual", "reference"):
+            raise ConnectionValidationError(
+                "credentialSource 只支持 manual（手动输入密码）或 reference（服务端引用）"
+            )
+        if source == "reference":
+            if not credential_ref:
+                raise ConnectionValidationError("改用服务端引用时请提供 credentialRef（如 env:LVCO_PG_PASSWORD）")
+            from app.services.credential_refs import CredentialRefError, resolve_ref, validate_ref
+
+            try:
+                normalized = validate_ref(credential_ref)
+                resolve_ref(normalized)
+            except CredentialRefError as exc:
+                raise ConnectionValidationError(str(exc)) from exc
+            connection.credential_ref = normalized
+            connection.password_enc = None
+        elif source == "manual":
+            if not password:
+                raise ConnectionValidationError("改回手动密码时请提供新密码")
+            connection.password_enc = seal_secret(password)
+            connection.credential_ref = None
 
         ssl_changed = False
         if ssl_mode is not None or ssl_ca_pem is not None:
@@ -207,6 +257,13 @@ class ConnectionService:
         connection = await self.get(connection_id, user_id)
         if connection is None:
             raise ConnectionServiceError("连接不存在")
+        if getattr(connection, "credential_ref", None):
+            raise ConnectionValidationError(
+                "该连接使用服务端凭据引用（"
+                + str(connection.credential_ref)
+                + "），密码由部署侧管理，无法在此轮换。"
+                "请更新环境变量/密钥文件后重试，或先改为手动密码模式。"
+            )
         password = "" if new_password is None else str(new_password)
         if not password:
             raise ConnectionValidationError("新密码不能为空")

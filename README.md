@@ -213,6 +213,13 @@ connection layer is treated as a security boundary rather than a feature:
   refuse to reference them. Users can override the flag per column in the schema editor.
 - **Connection health.** A scheduler probes each connection periodically (connection-level, not
   per table) so a dead source is visible before a dashboard silently shows stale data.
+- **Transport is encrypted end to end.** The production stack terminates TLS at nginx (80 → 301,
+  HSTS, TLS 1.2/1.3) and forwards X-Forwarded-Proto; with `REQUIRE_HTTPS=true` the API itself
+  rejects plaintext calls, so there is no path where a DB password crosses the wire in clear text.
+- **Credentials can bypass the browser entirely.** A connection may reference a deployment-side
+  secret (`env:LVCO_PG_PASSWORD` or `file:/run/secrets/pg_pw`) instead of storing a password.
+  The reference is resolved per use, never persisted, and app-own secrets / paths outside the
+  allowed roots are refused; rotation for such connections happens in deployment config.
 
 Design notes, threat model and the honest TODO list:
 [DATASOURCE_SECURITY.md](DATASOURCE_SECURITY.md).

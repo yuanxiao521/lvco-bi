@@ -227,3 +227,7 @@ backend/eval_logs/
 # 提交信息草稿（不随代码入库）
 _commit_*.txt
 _patch_*.py
+
+# TLS 证书（A 方案）：只保留目录占位，不提交私钥/证书
+certs/*
+!certs/.gitkeep

@@ -235,6 +235,11 @@ class DataSourceService:
             password=body.get("password"),
             ssl_mode=body.get("ssl_mode") or "prefer",
             ssl_ca_pem=body.get("ssl_ca_pem"),
+            credential_ref=(
+                body.get("credential_ref")
+                if (body.get("credential_source") or "manual") == "reference"
+                else None
+            ),
         )
 
         datasources: list[DataSource] = []

@@ -146,7 +146,11 @@ class ConnectionResponse(CamelModel):
     port: int
     db_name: str
     username: str
+    # has_password 语义 = "当前有可用凭据"（密文或服务端引用都算）
     has_password: bool = False
+    # manual = 前端输入后加密落库；reference = 部署侧注入的引用（密码不落库）
+    credential_source: str = "manual"
+    credential_ref: str | None = None
     ssl_mode: str = "prefer"
     ssl_ca_configured: bool = False
     status: DatasourceStatus
@@ -167,7 +171,13 @@ class ConnectionResponse(CamelModel):
             port=connection.port,
             db_name=connection.db_name or "",
             username=connection.username or "",
-            has_password=bool(connection.password_enc),
+            has_password=bool(
+                connection.password_enc or getattr(connection, "credential_ref", None)
+            ),
+            credential_source=(
+                "reference" if getattr(connection, "credential_ref", None) else "manual"
+            ),
+            credential_ref=getattr(connection, "credential_ref", None),
             ssl_mode=connection.ssl_mode or "prefer",
             ssl_ca_configured=bool(connection.ssl_ca_enc),
             status=DatasourceStatus(

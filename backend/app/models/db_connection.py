@@ -46,7 +46,11 @@ class DBConnection(TimestampMixin, Base):
     db_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     username: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     # 只有密文：enc:v2:<b64(nonce+ct+tag)>（见 app/utils/crypto.py）
+    # 与 credential_ref 互斥：manual = 密文；reference = 部署侧注入的凭据引用
     password_enc: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # 服务端凭据引用，如 env:LVCO_PG_PASSWORD / file:/run/secrets/pg_pw
+    # 有了它，浏览器端一次都不用输入数据库密码（凭据根本不经过前端）
+    credential_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # TLS：disable | prefer | require | verify-ca | verify-full
     ssl_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="prefer")
     # verify-ca / verify-full 时使用的 CA（PEM 文本，落库前与密码同一套加密策略）

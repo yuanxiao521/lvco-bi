@@ -54,11 +54,17 @@ class DataSourceConnectBody(CamelModel):
     table_names: list[str] | None = None
     ssl_mode: str | None = None
     ssl_ca_pem: str | None = None
+    # manual = 前端输入密码；reference = 部署侧凭据引用（env:/file:），密码不经前端
+    credential_source: str | None = None
+    credential_ref: str | None = None
 
 
 class TestConnectionRequest(CamelModel):
     source_type: str  # "mysql" | "postgresql"
     connection_info: dict  # {host, port, user, password, database}
+    # 引用型凭据：前端不持有密码，由后端按引用解析后探测
+    credential_ref: str | None = None
+    credential_source: str | None = None
 
 
 @router.get("")
@@ -516,11 +522,24 @@ async def test_connection(
             detail={"code": "INVALID_CONNECTION", "message": str(e)},
         ) from e
 
+    password = info.get("password", "")
+    ref = body.credential_ref or info.get("credential_ref")
+    if ref:
+        from app.services.credential_refs import CredentialRefError, resolve_ref
+
+        try:
+            password = resolve_ref(ref)
+        except CredentialRefError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_CREDENTIAL_REF", "message": str(e)},
+            ) from e
+
     safe_info = {
         "host": checked["host"],
         "port": checked["port"],
         "user": checked["user"],
-        "password": info.get("password", ""),
+        "password": password,
         "database": checked["database"],
     }
     connector = mysql_connector if source_type == "mysql" else postgres_connector

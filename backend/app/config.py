@@ -95,6 +95,17 @@ class Settings(BaseSettings):
     # verify-ca / verify-full 时把 CA 证书落到本地的目录（DuckDB 只能读路径）
     TLS_CA_DIR: str = "./data/tls"
 
+    # ── 服务端凭据引用（让密码不必经过浏览器，见 services/credential_refs.py） ──
+    # env 引用的白名单（逗号分隔）；非空时只允许这些变量名
+    DB_SECRET_ENV_ALLOWLIST: str = ""
+    # file 引用允许的目录白名单（防 ../ 与符号链接越权读取）
+    DB_SECRET_FILE_ROOTS: str = "/run/secrets,./data/secrets"
+
+    # ── 传输层强制加密（A 方案，见 app/core/https_guard.py） ─────────────
+    # true 时拒绝任何非 HTTPS 的 API 请求（向后端直连/绕过 nginx 的场景兜底）；
+    # 生产环境由 nginx 终止 TLS 并带 X-Forwarded-Proto，本项只作为纵深防御。
+    REQUIRE_HTTPS: bool = False
+
     # ── 连接健康检查（连接级探测，见 app/services/connection_service.py） ──
     # 定时探测"这个连接现在还通不通"，结果写进 db_connections.health_*
     CONNECTION_HEALTH_ENABLED: bool = True

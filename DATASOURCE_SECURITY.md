@@ -267,3 +267,112 @@ cd backend
 - 敏感列只按列名启发式，没做值级识别（身份证/手机号格式校验），也没有行级脱敏/审批流。
 - 健康检查不写时序指标：只有状态字段，想做“连接可用率”需要接指标系统。
 - CA/证书轮换：可以 PATCH 换 CA，但没有到期提醒。
+
+---
+
+# 第三部分（2026-11 追加）：让密码不必经过浏览器 + 传输层强制加密
+
+前两部分解决“凭据进入系统之后”和“连接/治理”的问题，但都默认一个前提：
+**密码由人在浏览器里输入**。这一部分拆掉这个前提。
+
+## 16. 现状风险（为什么要做这两件事）
+
+1. 密码以明文 JSON 从浏览器提交（devtools、扩展、XSS 都能看到）；
+2. 默认部署 nginx 只 listen 80，浏览器→服务器这一段是明文 HTTP；
+3. 密码在浏览器内存停留时间不可控。
+
+补充：前端从不把密码写 localStorage/sessionStorage（只存在 React state），
+后端也不回传、不落日志——所以风险**集中在传输与服务端输入**这两点。
+
+## 17. A：传输层强制加密
+
+部署侧（docker-compose.prod.yml + nginx.conf）：
+
+- 80 端口只留 ACME 验证，其余 301 跳 HTTPS；
+- 443 终止 TLS（TLSv1.2/1.3），下发 HSTS(max-age=1y)、nosniff、SAMEORIGIN；
+- 所有 /api/ 转发都带 X-Forwarded-Proto: https。
+
+应用侧（app/core/https_guard.py）：REQUIRE_HTTPS=true 时，
+凡是非 https 的 API 请求一律 403 HTTPS_REQUIRED（/health 豁免，供内网探活）。
+这一层是纵深防御——防止反向代理配置错误或有人绕过 nginx 直连 8000。
+
+证书目录 ./certs（.gitignore 已忽略，只保留 .gitkeep）。自签（内网）：
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout certs/server.key -out certs/server.crt -subj "/CN=lvco-bi.local"
+```
+
+实测：REQUIRE_HTTPS=true 时 GET /api/v1/datasources 返回 403 HTTPS_REQUIRED；
+带 X-Forwarded-Proto: https 头则正常进入认证（401 Not authenticated）；/health 仍 200。
+
+## 18. B：服务端凭据引用（密码可以不经过前端）
+
+连接表新增 db_connections.credential_ref（0022 迁移），与 password_enc 互斥：
+
+| 来源 | 存储 | 密码经过浏览器？ | 轮换方式 |
+|---|---|---|---|
+| manual | enc:v2 密文 | 是 | 页面轮换（先验证后落库） |
+| reference | env:变量名 / file:/路径 | **否** | 改部署配置后重试 |
+
+解析器 app/services/credential_refs.py 的安全约束：
+
+1. 只支持 env: 与 file:，未知 scheme 明确报错（不静默当密码用）；
+2. env: 禁止引用应用自身密钥（JWT_SECRET_KEY / DB_ENCRYPTION_KEY / OPENAI_API_KEY /
+   LANGFUSE_SECRET_KEY / MINIO_SECRET_KEY / DATABASE_URL / REDIS_URL）——
+   否则用户可借“数据库密码”通道把系统密钥喂给驱动；
+3. DB_SECRET_ENV_ALLOWLIST 可把 env 收口到白名单（生产建议开）；
+4. file: 必须是绝对路径且落在 DB_SECRET_FILE_ROOTS 内（默认 /run/secrets,./data/secrets），
+   先 resolve 再判断，防 ../ 与符号链接越权；
+5. 解析结果只进内存：不落库、不回传、日志只打 scheme+标识。
+
+行为：
+
+- 创建引用型连接时**立即解析一次**，环境变量/文件缺失在创建就报错（不是等到同步才炸）；
+- GET /datasources/test-connection 支持 credentialRef，前端不持有密码也能测通；
+- 引用型连接调用 rotate-secret 返回 400 并说明“密码由部署侧管理”；
+- PATCH /connections/{id} 支持 credentialSource=manual/reference 双向切换（切换后自动重建 ATTACH）。
+
+实测（真机）：
+
+    test-connection by ref  -> 200 success=true (22 张表)
+    connect by ref          -> 201 credentialSource=reference, hasPassword=true
+    sync                    -> connected, 88 行（密码全程由服务端解析）
+    rotate on ref           -> 400「该连接使用服务端凭据引用…」
+    switch to manual        -> 200 manual，随后 rotate 成功
+    switch back to ref      -> 200 reference
+    ref=env:JWT_SECRET_KEY  -> 400「不允许引用应用自身的密钥变量」
+
+前端：连接向导新增“凭据来源”（手动输入 / 服务端引用），引用模式下密码框消失、
+换成 env:/file: 输入与说明；详情弹窗显示凭据来源，引用型连接不展示轮换入口。
+UI 冒烟：切到引用模式后 password input 数量为 0，0 console error。
+
+## 19. 配置项（新增）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| REQUIRE_HTTPS | false | true 时拒绝明文 API 请求（生产 true；本地开发 false） |
+| DB_SECRET_ENV_ALLOWLIST | 空 | env 引用白名单，逗号分隔 |
+| DB_SECRET_FILE_ROOTS | /run/secrets,./data/secrets | file 引用允许目录 |
+
+## 20. 生产部署清单
+
+1. 证书放进 ./certs（server.crt / server.key），compose 用 -f docker-compose.yml -f docker-compose.prod.yml 启动；
+2. .env 设置 REQUIRE_HTTPS=true；
+3. 凭据交给部署侧：
+
+```yaml
+# docker-compose.prod.yml 的 backend.environment（示例）
+environment:
+  LVCO_PG_PASSWORD: ${LVCO_PG_PASSWORD}   # 从宿主/CI secret 注入
+```
+
+4. 页面里建连接时选“服务端凭据引用”，填 env:LVCO_PG_PASSWORD；
+5. 想换密码只改宿主 secret 并重启 backend——不需要在页面点轮换。
+
+## 21. 仍未做（(A)(B) 之外的）
+
+- 组织/共享权限（管理员预注册连接、普通用户只选表）——即原方案的 C，未做；
+- 云上短期令牌（IAM/OAuth）——即原方案 D，未做；
+- Vault/AWS Secrets Manager 等第三方 secret 后端（当前只有 env/file，扩展点在 credential_refs.py）；
+- 证书自动续期（compose 里预留了 certbot_www 卷，未接自动续期流程）。

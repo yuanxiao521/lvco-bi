@@ -87,6 +87,9 @@ async def update_connection(
             name=body.get("name"),
             ssl_mode=body.get("ssl_mode", body.get("sslMode")),
             ssl_ca_pem=body.get("ssl_ca_pem", body.get("sslCaPem")),
+            credential_source=body.get("credential_source", body.get("credentialSource")),
+            credential_ref=body.get("credential_ref", body.get("credentialRef")),
+            password=body.get("password"),
         )
     except ConnectionValidationError as e:
         raise HTTPException(

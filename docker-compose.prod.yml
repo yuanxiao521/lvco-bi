@@ -34,8 +34,19 @@ services:
 
   nginx:
     restart: always
+    # A 方案：对外只暴露 80（跳转）/ 443（TLS）；证书从 ./certs 挂进来
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - certbot_www:/var/www/certbot:ro
     depends_on:
       frontend:
         condition: service_started
       backend:
         condition: service_started
+
+volumes:
+  certbot_www:

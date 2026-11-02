@@ -47,6 +47,9 @@ export interface ConnectionInfo {
   dbName: string;
   username: string;
   hasPassword: boolean;
+  /** manual = 前端输入后加密落库；reference = 部署侧注入的凭据引用（密码不落库、不经浏览器） */
+  credentialSource: "manual" | "reference";
+  credentialRef: string | null;
   sslMode: SslMode;
   sslCaConfigured: boolean;
   status: DatasourceStatus;

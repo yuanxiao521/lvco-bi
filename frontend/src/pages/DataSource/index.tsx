@@ -335,6 +335,9 @@ export default function DataSource() {
     table_names: [] as string[],
     ssl_mode: "prefer" as SslMode,
     ssl_ca_pem: "",
+    // manual = 前端输入密码；reference = 部署侧凭据引用（密码不经浏览器）
+    credential_source: "manual" as "manual" | "reference",
+    credential_ref: "",
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -554,6 +557,8 @@ export default function DataSource() {
       table_names: [],
       ssl_mode: "prefer",
       ssl_ca_pem: "",
+      credential_source: "manual",
+      credential_ref: "",
     });
     setShowAdvanced(false);
     setTestResult(null);
@@ -610,15 +615,17 @@ export default function DataSource() {
     setTestLoading(true);
     setTestResult(null);
     try {
+      const useRef = dbForm.credential_source === "reference";
       const res = await testConnection({
         source_type: dbForm.source_type === "postgres" ? "postgresql" : "mysql",
         connection_info: {
           host: dbForm.host,
           port: dbForm.port,
           user: dbForm.user,
-          password: dbForm.password,
+          password: useRef ? "" : dbForm.password,
           database: dbForm.database,
         },
+        credentialRef: useRef ? dbForm.credential_ref : undefined,
       });
       if (res.success) {
         setTestResult(res);
@@ -676,6 +683,11 @@ export default function DataSource() {
         tableNames: selected,
         sslMode: dbForm.ssl_mode,
         sslCaPem: dbForm.ssl_ca_pem.trim() || undefined,
+        credentialSource: dbForm.credential_source,
+        credentialRef:
+          dbForm.credential_source === "reference"
+            ? dbForm.credential_ref.trim()
+            : undefined,
       });
       // 逐表同步 schema（连接已建好，同步只是拉字段/行数）
       for (const ds of result.datasources) {
@@ -1213,6 +1225,16 @@ export default function DataSource() {
                           {conn.username} · {conn.sslMode}
                           {conn.sslCaConfigured ? "（已配 CA）" : ""}
                         </p>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          凭据：
+                          {conn.credentialSource === "reference" ? (
+                            <span className="text-card-foreground">
+                              服务端引用 <code className="font-mono">{conn.credentialRef}</code>
+                            </span>
+                          ) : (
+                            <span>已加密保存（手动输入）</span>
+                          )}
+                        </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground text-[12px] mb-0.5">
@@ -1239,7 +1261,13 @@ export default function DataSource() {
                       </div>
                     </div>
 
-                    {!rotateOpen ? (
+                    {conn.credentialSource === "reference" ? (
+                      <p className="text-[12px] text-muted-foreground">
+                        该连接的密码由部署侧注入（
+                        <code className="font-mono">{conn.credentialRef}</code>
+                        ），请更新环境变量 / 密钥文件后重试，密码轮换在服务端完成。
+                      </p>
+                    ) : !rotateOpen ? (
                       <button
                         type="button"
                         onClick={() => {
@@ -1554,7 +1582,13 @@ export default function DataSource() {
               <button
                 type="button"
                 onClick={handleTest}
-                disabled={testLoading || !dbForm.host || !dbForm.database || !dbForm.user}
+                disabled={
+                  testLoading ||
+                  !dbForm.host ||
+                  !dbForm.database ||
+                  !dbForm.user ||
+                  (dbForm.credential_source === "reference" && !dbForm.credential_ref.trim())
+                }
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-[13px] font-medium text-card-foreground bg-white border border-border hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {testLoading ? (
@@ -1709,7 +1743,38 @@ export default function DataSource() {
               />
             </div>
 
-            {/* 用户名 + 密码 */}
+            {/* 凭据来源：手动输入 vs 服务端引用（B 方案：密码可不经浏览器） */}
+            <div>
+              <label className="block text-[13px] font-medium text-foreground mb-1.5">
+                凭据来源
+              </label>
+              <div className="flex items-center gap-4">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="credSource"
+                    checked={dbForm.credential_source === "manual"}
+                    onChange={() => updateDbField("credential_source", "manual")}
+                    className="w-3.5 h-3.5 text-primary"
+                  />
+                  <span className="text-[13px] text-card-foreground">手动输入密码</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="credSource"
+                    checked={dbForm.credential_source === "reference"}
+                    onChange={() => updateDbField("credential_source", "reference")}
+                    className="w-3.5 h-3.5 text-primary"
+                  />
+                  <span className="text-[13px] text-card-foreground">
+                    服务端凭据引用（密码不经过浏览器）
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* 用户名 + 凭据（密码 / 引用） */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-[13px] font-medium text-foreground mb-1.5">
@@ -1723,19 +1788,43 @@ export default function DataSource() {
                   className="w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-shadow"
                 />
               </div>
-              <div>
-                <label className="block text-[13px] font-medium text-foreground mb-1.5">
-                  密码
-                </label>
-                <input
-                  type="password"
-                  value={dbForm.password}
-                  onChange={(e) => updateDbField("password", e.target.value)}
-                  placeholder="请输入密码"
-                  className="w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-shadow"
-                />
-              </div>
+              {dbForm.credential_source === "manual" ? (
+                <div>
+                  <label className="block text-[13px] font-medium text-foreground mb-1.5">
+                    密码
+                  </label>
+                  <input
+                    type="password"
+                    value={dbForm.password}
+                    onChange={(e) => updateDbField("password", e.target.value)}
+                    placeholder="请输入密码"
+                    autoComplete="new-password"
+                    className="w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-shadow"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[13px] font-medium text-foreground mb-1.5">
+                    凭据引用
+                  </label>
+                  <input
+                    type="text"
+                    value={dbForm.credential_ref}
+                    onChange={(e) => updateDbField("credential_ref", e.target.value)}
+                    placeholder="env:LVCO_PG_PASSWORD"
+                    className="w-full px-3 py-2 text-[13px] font-mono rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-shadow"
+                  />
+                </div>
+              )}
             </div>
+            {dbForm.credential_source === "reference" ? (
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                支持 <code className="font-mono">env:变量名</code>（部署侧注入环境变量）与{" "}
+                <code className="font-mono">file:/绝对路径</code>
+                （仅允许 DB_SECRET_FILE_ROOTS 目录）。密码由服务端解析，浏览器与数据库都不再接触明文；
+                该连接的密码轮换在部署侧完成。
+              </p>
+            ) : null}
 
             {/* 高级选项：TLS（连接级配置） */}
             <div className="rounded-lg border border-border-light">

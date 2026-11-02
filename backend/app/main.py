@@ -42,6 +42,11 @@ app.add_middleware(
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(OperationLogMiddleware)
 
+# 传输层强制加密（REQUIRE_HTTPS=true 时拒绝明文请求；见 app/core/https_guard.py）
+from app.core.https_guard import HttpsEnforcementMiddleware  # noqa: E402
+
+app.add_middleware(HttpsEnforcementMiddleware)
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
