@@ -376,3 +376,21 @@ environment:
 - 云上短期令牌（IAM/OAuth）——即原方案 D，未做；
 - Vault/AWS Secrets Manager 等第三方 secret 后端（当前只有 env/file，扩展点在 credential_refs.py）；
 - 证书自动续期（compose 里预留了 certbot_www 卷，未接自动续期流程）。
+
+## 17.1 前端 API 地址：必须同源（否则 HTTPS 白做）
+
+做 A 时抓出来的真实问题：前端有 9 处把 API 地址回退成 `http://127.0.0.1:8000/api/v1`
+（`client.ts` 里甚至是 `8001`，是个错误的旧默认值）。后果是：
+
+1. 生产用 HTTPS 打开页面时，浏览器会把这些请求当 **mixed content** 直接拦掉；
+2. 如果不拦（例如页面本身也是 http），数据库密码就会明文发到用户自己机器的 8000 端口；
+3. 换一台机器/用域名访问时，这些绝对地址根本不是服务器地址。
+
+修法：
+
+- 所有回退值统一成同源相对路径 `/api/v1`（7 个文件批量替换，`ForgotPassword` 的硬编码也改掉）；
+- 生产构建不注入 `VITE_API_BASE_URL`，由 nginx 同源转发并终止 TLS；
+- 本地开发用 `frontend/.env`（gitignored）覆盖成绝对地址，并新增 `frontend/.env.example` 说明两种取值；
+- `frontend/Dockerfile` 增加 `ENV VITE_API_BASE_URL=/api/v1`，保证容器内构建的产物指向同源。
+
+验证：不带 dev env 重新构建，产物里 `127.0.0.1:8000/8001` 出现次数 = 0。

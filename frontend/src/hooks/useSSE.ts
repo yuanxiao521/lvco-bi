@@ -23,7 +23,7 @@ export function useSSE() {
     abortRef.current = new AbortController()
 
     const token = tokenStore.getAccess()
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api/v1'
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
     try {
       const response = await fetch(`${baseUrl}/ai/sessions/${sessionId}/messages`, {

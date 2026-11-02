@@ -549,7 +549,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     let stalled = false;
 
     const token = tokenStore.getAccess();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
     // 校验当前图表的维度和度量字段是否在数据源字段列表中，过滤掉已删除的字段
     const validFieldNames = new Set(
@@ -717,7 +717,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
     if (streamingLock) return;
     const sid = get().curSessionId;
     if (!sid) return;
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
     streamingLock = true;
     set({ isStreaming: true });
     activeStreamCanvasId = ctx.canvasId ?? null;

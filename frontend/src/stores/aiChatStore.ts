@@ -140,7 +140,7 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
     set({ agentSteps: [], agentMeta: null });
 
     const token = tokenStore.getAccess();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
     const historySnapshot = get().messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
     const history = isResume
       ? historySnapshot
@@ -429,7 +429,7 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
     set((s) => ({ messages: [...s.messages, assistantMsg] }));
 
     const token = tokenStore.getAccess();
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || "/api/v1";
 
     const patchAssistant = (patch: Partial<Pick<AIMessage, "content" | "chartData">>) =>
       set((s) => ({ messages: s.messages.map((m) => (m.id === assistantId ? { ...m, ...patch } : m)) }));

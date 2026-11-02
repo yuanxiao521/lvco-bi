@@ -18,7 +18,9 @@ export default function ForgotPassword() {
     setError(null);
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:8000/api/v1/auth/forgot-password", {
+      // 默认走同源 /api/v1（生产由 nginx TLS 终止）；本地 dev 用 frontend/.env 覆盖为绝对地址
+      const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+      const response = await fetch(apiBase + "/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

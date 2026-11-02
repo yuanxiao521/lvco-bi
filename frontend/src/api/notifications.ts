@@ -75,6 +75,6 @@ export async function pushNotification(payload: {
 export function getNotificationStreamUrl(): string {
   const token = localStorage.getItem("access_token");
   if (!token) return "";
-  const baseURL = apiClient.defaults.baseURL || "http://127.0.0.1:8000/api/v1";
+  const baseURL = apiClient.defaults.baseURL || "/api/v1";
   return `${baseURL}/notifications/stream?token=${encodeURIComponent(token)}`;
 }

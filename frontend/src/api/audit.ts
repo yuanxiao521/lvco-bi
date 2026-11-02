@@ -61,7 +61,7 @@ export async function getAuditSummary(): Promise<AuditSummary> {
 /** 用当前筛选条件导出 CSV（浏览器直接触发下载） */
 export async function exportLogsCsv(params: OperationLogParams = {}): Promise<void> {
   const baseURL =
-    apiClient.defaults.baseURL || "http://127.0.0.1:8000/api/v1";
+    apiClient.defaults.baseURL || "/api/v1";
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "") qs.append(k, String(v));
