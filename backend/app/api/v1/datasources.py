@@ -19,6 +19,7 @@ from app.services.ai_service import AIService
 from app.services.connection_guard import ConnectionValidationError, validate_connection_input
 from app.services.datasource_connection import (
     DatasourceConnectionError,
+    credentials_for,
     ensure_attached,
     resolve_credentials,
     sanitize_error,
@@ -36,7 +37,13 @@ router = APIRouter(prefix="/datasources", tags=["数据源"])
 
 
 class DataSourceConnectBody(CamelModel):
-    name: str = Field(..., max_length=200)
+    """创建一个连接 + N 张表。
+
+    tableNames 是主入口（一次提交多张表，凭据只存一份）；tableName 保留为单表旧形态。
+    sslMode/sslCaPem 是连接级 TLS 配置。
+    """
+
+    name: str | None = Field(None, max_length=200)
     source_type: SourceType
     host: str | None = None
     port: int | None = None
@@ -44,6 +51,9 @@ class DataSourceConnectBody(CamelModel):
     username: str | None = None
     password: str | None = None
     table_name: str | None = None
+    table_names: list[str] | None = None
+    ssl_mode: str | None = None
+    ssl_ca_pem: str | None = None
 
 
 class TestConnectionRequest(CamelModel):
@@ -129,7 +139,9 @@ async def connect_datasource(
     → 落库；未配置 DB_ENCRYPTION_KEY 时拒绝创建（fail-closed），绝不明文存储。
     """
     try:
-        ds = await service.create_connection(current_user.id, body.model_dump())
+        connection, datasources = await service.create_connection(
+            current_user.id, body.model_dump()
+        )
     except ConnectionValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -141,15 +153,25 @@ async def connect_datasource(
             detail={"code": "ENCRYPTION_KEY_MISSING", "message": str(e)},
         ) from e
     _log.info(
-        "datasource_created source_type=%s host=%s port=%s db=%s user=%s by=%s",
+        "datasource_created source_type=%s host=%s port=%s db=%s user=%s tables=%s tls=%s by=%s",
         body.source_type.value,
         body.host,
         body.port,
         body.db_name,
         body.username,
+        len(datasources),
+        connection.ssl_mode,
         current_user.id,
     )
-    return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
+    from app.schemas import ConnectDatasourceResponse, ConnectionResponse
+
+    payload = ConnectDatasourceResponse(
+        connection=ConnectionResponse.from_connection(connection, len(datasources)),
+        datasources=[
+            DataSourceResponse.model_validate(ds) for ds in datasources
+        ],
+    )
+    return SuccessResponse(data=payload.model_dump(mode="json", by_alias=True))
 
 
 @router.post("/{datasource_id}/disconnect")
@@ -246,7 +268,7 @@ async def list_datasource_tables(
         return SuccessResponse(data={"tables": []})
 
     try:
-        conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+        conn_info = credentials_for(ds)
     except DatasourceConnectionError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -264,6 +286,45 @@ async def list_datasource_tables(
             },
         ) from e
     return SuccessResponse(data={"tables": tables})
+
+
+@router.get("/{datasource_id}/health")
+async def datasource_health(
+    datasource_id: UUID,
+    service: DataSourceService = Depends(get_datasource_service),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """单个数据源视角的健康检查（内部按所属连接探测一次）。
+
+    文件型数据源返回 status=None（健康检查只对数据库连接有意义）。
+    """
+    ds = await service.get_by_id(datasource_id, current_user.id)
+    if ds is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "数据源不存在"},
+        )
+    if ds.connection_id is None:
+        return SuccessResponse(
+            data={"status": None, "error": "非数据库数据源，无需健康检查", "checkedAt": None}
+        )
+    from app.services.connection_service import ConnectionService
+
+    payload = await ConnectionService(db).check_health(ds.connection_id, current_user.id, force=True)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "连接不存在"},
+        )
+    await db.commit()
+    return SuccessResponse(
+        data={
+            "status": payload["status"],
+            "error": payload["error"],
+            "checkedAt": payload["checkedAt"].isoformat() if payload["checkedAt"] else None,
+        }
+    )
 
 
 @router.post("/{datasource_id}/ai-clean")

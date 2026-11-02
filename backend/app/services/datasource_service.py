@@ -20,6 +20,7 @@ from app.schemas import DataSourceUpdate
 from app.services.connection_guard import ConnectionValidationError
 from app.services.datasource_connection import (
     DatasourceConnectionError,
+    credentials_for,
     ensure_attached,
     needs_secret_upgrade,
     resolve_credentials,
@@ -27,6 +28,7 @@ from app.services.datasource_connection import (
     seal_connection_config,
     table_ref_for,
 )
+from app.services.sensitive_columns import mark_fields, mask_rows, sensitive_names
 from app.services.storage_service import storage
 from app.utils.crypto import seal_secret
 
@@ -186,11 +188,22 @@ class DataSourceService:
 
         return ds
 
-    async def create_connection(self, user_id: UUID, body: dict) -> DataSource:
-        """创建数据库型数据源：校验输入 → 密码加密 → 落库（绝不明文存储）。
+    @staticmethod
+    def datasource_name_for_table(table_name: str) -> str:
+        """表名 → 展示名（与前端历史命名保持一致，避免已有习惯被打断）。"""
+        text = str(table_name or "").replace("_", " ").strip()
+        return text[:200] if text else "未命名表"
+
+    async def create_connection(
+        self, user_id: UUID, body: dict
+    ) -> tuple["DBConnection", list[DataSource]]:
+        """创建"一个连接 + N 张表"（凭据只存一份）。
+
+        改造前：前端选了 3 张表就调 3 次本接口，每张表各自存一份密码密文；
+        现在：连接行承载凭据与 TLS 配置，datasource 只记 connection_id + table_name。
 
         Raises:
-            ConnectionValidationError: 主机/端口/库名等参数不合法（400）；
+            ConnectionValidationError: 参数不合法 / 没选表（400）；
             CredentialKeyMissingError: 未配置 DB_ENCRYPTION_KEY（503，fail-closed）。
         """
         source_type_value = body.get("source_type")
@@ -198,26 +211,57 @@ class DataSourceService:
             source_type = source_type_value
         else:
             source_type = SourceType(source_type_value or "postgresql")
-        connection_config = seal_connection_config(
+
+        table_names = body.get("table_names") or body.get("tableNames") or []
+        if isinstance(table_names, str):
+            table_names = [table_names]
+        if not table_names:
+            single = body.get("table_name") or body.get("tableName")
+            table_names = [single] if single else []
+        table_names = [str(t).strip() for t in table_names if str(t or "").strip()]
+        if not table_names:
+            raise ConnectionValidationError("请至少选择一张表")
+
+        from app.services.connection_service import ConnectionService
+
+        connection = await ConnectionService(self.db).create(
+            user_id,
+            name=body.get("name") or "",
+            source_type=source_type,
             host=body.get("host"),
             port=body.get("port"),
             db_name=body.get("db_name"),
             username=body.get("username"),
             password=body.get("password"),
-            table_name=body.get("table_name", body.get("tableName", "")),
-            source_type=source_type.value,
+            ssl_mode=body.get("ssl_mode") or "prefer",
+            ssl_ca_pem=body.get("ssl_ca_pem"),
         )
-        ds = DataSource(
-            user_id=user_id,
-            name=body.get("name", ""),
-            source_type=source_type,
-            connection_config=connection_config,
-            status=DatasourceStatus.disconnected,
-        )
-        self.db.add(ds)
-        await self.db.flush()
-        await self.db.refresh(ds)
-        return ds
+
+        datasources: list[DataSource] = []
+        for table_name in table_names:
+            # datasource 上只保留非敏感连接元数据（历史字段名沿用，兼容旧读取路径）
+            connection_config = {
+                "table_name": table_name,
+                "db_name": connection.db_name,
+                "host": connection.host,
+                "port": connection.port,
+                "username": connection.username,
+            }
+            ds = DataSource(
+                user_id=user_id,
+                name=body.get("name") and len(table_names) == 1
+                    and body.get("name") or self.datasource_name_for_table(table_name),
+                source_type=source_type,
+                connection_id=connection.id,
+                connection=connection,
+                connection_config=connection_config,
+                status=DatasourceStatus.disconnected,
+            )
+            self.db.add(ds)
+            await self.db.flush()
+            await self.db.refresh(ds)
+            datasources.append(ds)
+        return connection, datasources
 
     async def update_status(
         self, datasource_id: UUID, user_id: UUID, new_status: DatasourceStatus
@@ -267,7 +311,9 @@ class DataSourceService:
                 with duckdb_client.write_window():
                     table_name = connector.load_to_duckdb(duckdb_client, ds.file_path, schema_name)
                 ds.row_count = connector.get_row_count(duckdb_client, schema_name, table_name)
-                ds.schema_meta = connector.get_schema_meta(duckdb_client, schema_name, table_name)
+                meta = connector.get_schema_meta(duckdb_client, schema_name, table_name)
+                meta["fields"] = mark_fields(meta.get("fields"))
+                ds.schema_meta = meta
                 ds.status = DatasourceStatus.connected
             except Exception as e:
                 ds.status = DatasourceStatus.disconnected
@@ -280,7 +326,7 @@ class DataSourceService:
             table_scope = "public schema" if ds.source_type == SourceType.postgresql else "database"
             conn_info: dict = {}
             try:
-                conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+                conn_info = credentials_for(ds)
                 # 历史明文/旧 CBC 密文顺手升级为 v2 密文（幂等，失败不影响同步）
                 await self._upgrade_stored_secret(ds, conn_info)
                 schema_name = duckdb_client.get_schema_name(
@@ -312,9 +358,12 @@ class DataSourceService:
                     await self.db.refresh(ds)
                     return ds
 
-                ds.schema_meta = connector.get_schema_meta(
+                meta = connector.get_schema_meta(
                     duckdb_client, schema_name, table_name
                 )
+                # 敏感列治理：按列名识别 → 打标记 + 丢弃样例值（见 sensitive_columns.py）
+                meta["fields"] = mark_fields(meta.get("fields"))
+                ds.schema_meta = meta
                 ds.row_count = connector.get_row_count(
                     duckdb_client, schema_name, table_name
                 )
@@ -322,6 +371,9 @@ class DataSourceService:
                 ds.status = DatasourceStatus.connected
                 ds.schema_meta["table_name"] = table_name
                 ds.schema_meta["available_tables"] = tables
+                # 连接级状态由"这一轮有没有连上"决定（多表共享一条连接）
+                if ds.connection is not None:
+                    ds.connection.status = DatasourceStatus.connected.value
             except DatasourceConnectionError as e:
                 ds.status = DatasourceStatus.disconnected
                 ds.schema_meta = {"error": str(e)}
@@ -369,9 +421,28 @@ class DataSourceService:
             except Exception:
                 pass
 
+        connection = ds.connection
+        schema_name = None
+        if ds.connection_id is not None:
+            schema_name = duckdb_client.get_schema_name(
+                user_id, ds.id, ds.name, db_name=(connection.db_name if connection else "")
+            )
         await self.datasource_repo.delete(ds)
         # 数据源删除后清掉该数据源查询缓存
         self._invalidate_query_cache(datasource_id)
+        # 连接下没有表了就回收连接（凭据不留孤儿副本）
+        if connection is not None:
+            from app.services.connection_service import ConnectionService
+
+            try:
+                await ConnectionService(self.db).delete_if_orphan(
+                    connection, schema_name=schema_name
+                )
+            except Exception as exc:  # noqa: BLE001
+                logging.getLogger("lvco.datasources").warning(
+                    "connection_reclaim_failed connection_id=%s error=%s",
+                    str(connection.id), exc,
+                )
         return True
 
     async def preview(
@@ -398,10 +469,14 @@ class DataSourceService:
 
             columns = [row[0] for row in columns_result]
             rows = duckdb_client.fetchall(f'SELECT * FROM "{schema_name}"."data" LIMIT {limit}')
+            meta = ds.schema_meta if isinstance(ds.schema_meta, dict) else {}
+            masked = mask_rows(
+                columns, [list(row) for row in rows], sensitive_names(meta.get("fields"))
+            )
             return {
                 "datasource_id": str(ds.id),
                 "columns": columns,
-                "rows": [list(row) for row in rows],
+                "rows": masked,
                 "total_rows": ds.row_count,
                 "preview_rows": len(rows),
             }
@@ -416,7 +491,7 @@ class DataSourceService:
         """
         empty = {"datasource_id": str(ds.id), "columns": [], "rows": [], "total_rows": 0, "preview_rows": 0}
         try:
-            conn_info = resolve_credentials(ds.connection_config, ds.source_type)
+            conn_info = credentials_for(ds)
             schema_name = duckdb_client.get_schema_name(
                 user_id, ds.id, ds.name, db_name=conn_info.get("db_name", "")
             )
@@ -431,10 +506,14 @@ class DataSourceService:
             fields = [f.get("name") for f in (meta.get("fields") or []) if isinstance(f, dict) and f.get("name")]
             rows = duckdb_client.fetchall(f"SELECT * FROM {ref} LIMIT {int(limit)}")
             columns = fields or [f"c{i}" for i in range(len(rows[0]) if rows else 0)]
+            # 敏感列在预览里直接打码：预览是最容易被截图/复制的界面
+            masked = mask_rows(
+                columns, [list(row) for row in rows], sensitive_names(meta.get("fields"))
+            )
             return {
                 "datasource_id": str(ds.id),
                 "columns": columns,
-                "rows": [list(row) for row in rows],
+                "rows": masked,
                 "total_rows": ds.row_count,
                 "preview_rows": len(rows),
             }

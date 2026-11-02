@@ -35,10 +35,23 @@ def secret_name_for(schema_name: str) -> str:
     return f"lvco_ds_{digest}"
 
 
+# TLS 模式映射：产品层统一用 libpq 的 sslmode 取值，MySQL 扩展另有自己的枚举
+_PG_SSL_MODES = {"disable", "prefer", "require", "verify-ca", "verify-full"}
+_MYSQL_SSL_MODES = {
+    "disable": "disabled",
+    "prefer": "preferred",
+    "require": "required",
+    "verify-ca": "verify_ca",
+    "verify-full": "verify_identity",
+}
+
+
 def build_attach_statements(conn_info: dict, schema_name: str, source_type) -> list[str]:
     """生成 [CREATE SECRET, ATTACH] 两条语句。
 
-    conn_info 支持 db_name/username，也兼容旧调用方的 database/user。
+    conn_info 支持 db_name/username，也兼容旧调用方的 database/user；
+    可选 ssl_mode（disable/prefer/require/verify-ca/verify-full）与 ssl_ca_path
+    （CA 证书文件路径，仅在 verify-* 模式下有意义）。
     """
     stype = str(getattr(source_type, "value", source_type)).lower()
     host = str(conn_info.get("host") or "localhost")
@@ -64,6 +77,19 @@ def build_attach_statements(conn_info: dict, schema_name: str, source_type) -> l
     if database:
         db_field = "DATABASE" if secret_type == "mysql" else "DBNAME"
         fields.append(f"{db_field} {sql_literal(database)}")
+
+    # TLS：默认 prefer（服务器支持就加密），require 强制加密，verify-* 还要校验证书。
+    # DuckDB 的 postgres/mysql 扩展都支持在 SECRET 里声明 TLS 参数（已实测）。
+    ssl_mode = str(conn_info.get("ssl_mode") or "prefer").strip().lower()
+    ssl_ca_path = str(conn_info.get("ssl_ca_path") or "").strip()
+    if secret_type == "postgres":
+        if ssl_mode not in _PG_SSL_MODES:
+            ssl_mode = "prefer"
+        fields.append(f"SSLMODE {sql_literal(ssl_mode)}")
+        if ssl_ca_path and ssl_mode in ("verify-ca", "verify-full"):
+            fields.append(f"SSLROOTCERT {sql_literal(ssl_ca_path)}")
+    else:
+        fields.append(f"SSL_MODE {sql_literal(_MYSQL_SSL_MODES.get(ssl_mode, 'preferred'))}")
 
     joined = ", ".join(fields)
     create_secret = f"CREATE OR REPLACE SECRET {secret} ({joined})"

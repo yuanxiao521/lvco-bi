@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle,
   Database,
@@ -16,6 +16,9 @@ import {
   ChevronUp,
   X,
   Loader2,
+  EyeOff,
+  ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { useToast } from "../../components/ui/Toast";
 import { useQuery } from "../../hooks/useQuery";
@@ -29,11 +32,18 @@ import {
   testConnection,
   connectDatasource,
   syncDatasource,
+  checkDatasourceHealth,
 } from "../../api/datasources";
+import {
+  listConnections,
+  rotateConnectionSecret,
+} from "../../api/connections";
 import type {
+  ConnectionInfo,
   DataSource,
   DataSourcePreview,
   SchemaField,
+  SslMode,
 } from "../../types/datasource";
 
 type SchemaCategory = SchemaField["category"];
@@ -80,6 +90,16 @@ function formatRelativeTime(iso: string | null): string {
   if (diff < hour) return `${Math.floor(diff / minute)}分钟前`;
   if (diff < day) return `${Math.floor(diff / hour)}小时前`;
   return `${Math.floor(diff / day)}天前`;
+}
+
+function errorMessage(e: unknown): string {
+  const anyErr = e as { response?: { data?: { detail?: unknown } }; message?: string };
+  const detail = anyErr?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "message" in detail) {
+    return String((detail as { message?: unknown }).message ?? "");
+  }
+  return anyErr?.message ?? "请求失败";
 }
 
 function typeBadgeClass(type: DataSource["sourceType"]): {
@@ -163,6 +183,17 @@ function statusBadge(status: DataSource["status"]): {
         dot: "bg-muted-foreground",
       };
   }
+}
+
+/** 连接级健康徽章（来自 GET /connections 的探测结果） */
+function healthBadge(conn?: ConnectionInfo): { label: string; className: string } {
+  if (conn?.healthStatus === "ok") {
+    return { label: "连接正常", className: "bg-success-light text-success border-success/20" };
+  }
+  if (conn?.healthStatus === "failed") {
+    return { label: "连接失败", className: "bg-danger-light text-danger border-danger/20" };
+  }
+  return { label: "未检查", className: "bg-muted text-muted-foreground border-border-light" };
 }
 
 function describeType(type: DataSource["sourceType"], status: DataSource["status"]): string {
@@ -282,6 +313,15 @@ export default function DataSource() {
   const [schemaSaving, setSchemaSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
 
+  // ---- 连接（一份凭据 → 多张表）----
+  // 数据源卡片上的健康徽章来自连接级探测，列表加载后按 connectionId 批量拉一次
+  const [connections, setConnections] = useState<Record<string, ConnectionInfo>>({});
+  const [healthBusyId, setHealthBusyId] = useState<string | null>(null);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotatePassword, setRotatePassword] = useState("");
+  const [rotateBusy, setRotateBusy] = useState(false);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+
   // ---- 创建数据源 Modal ----
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createTab, setCreateTab] = useState<"file" | "db">("file");
@@ -293,7 +333,10 @@ export default function DataSource() {
     user: "root",
     password: "",
     table_names: [] as string[],
+    ssl_mode: "prefer" as SslMode,
+    ssl_ca_pem: "",
   });
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     error?: string;
@@ -302,6 +345,92 @@ export default function DataSource() {
   } | null>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
+
+// ---- 连接健康 / 轮换密码 ----
+
+  // 列表里的数据源所属连接（去重后拼成依赖 key，连接变化时才重新拉）
+  const connectionIdsKey = Array.from(
+    new Set(items.map((it) => it.connectionId).filter((v): v is string => Boolean(v)))
+  ).join(",");
+
+  useEffect(() => {
+    if (!connectionIdsKey) {
+      setConnections({});
+      return;
+    }
+    let cancelled = false;
+    listConnections({ pageSize: 100 })
+      .then((res) => {
+        if (cancelled) return;
+        const map: Record<string, ConnectionInfo> = {};
+        for (const c of res.items) map[c.id] = c;
+        setConnections(map);
+      })
+      .catch(() => {
+        // 连接信息拉取失败不影响列表本身
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionIdsKey]);
+
+  async function reloadConnections() {
+    try {
+      const res = await listConnections({ pageSize: 100 });
+      const map: Record<string, ConnectionInfo> = {};
+      for (const c of res.items) map[c.id] = c;
+      setConnections(map);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleHealthCheck(ds: DataSource) {
+    setHealthBusyId(ds.id);
+    try {
+      const res = await checkDatasourceHealth(ds.id);
+      if (res.status === "ok") {
+        toast.success(ds.name + "：连接正常");
+      } else if (res.status === "failed") {
+        toast.error(ds.name + "：连接失败 — " + (res.error ?? "无法连接"));
+      } else {
+        toast.info(ds.name + "：文件型数据源无需健康检查");
+      }
+      await reloadConnections();
+    } catch (e) {
+      toast.error("健康检查失败：" + errorMessage(e));
+    } finally {
+      setHealthBusyId(null);
+    }
+  }
+
+  async function handleRotateSecret() {
+    if (!detailTarget?.connectionId) return;
+    if (!rotatePassword.trim()) {
+      setRotateError("请输入新密码");
+      return;
+    }
+    setRotateBusy(true);
+    setRotateError(null);
+    try {
+      const res = await rotateConnectionSecret(detailTarget.connectionId, rotatePassword);
+      toast.success("密码已轮换，已重建 " + res.datasources.length + " 张表的连接");
+      setRotateOpen(false);
+      setRotatePassword("");
+      await refetch();
+      await reloadConnections();
+    } catch (e) {
+      setRotateError(errorMessage(e));
+    } finally {
+      setRotateBusy(false);
+    }
+  }
+
+  function updateFieldSensitive(index: number, sensitive: boolean) {
+    setSchemaFields((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, sensitive } : f))
+    );
+  }
 
   function openDetail(ds: DataSource) {
     setDetailTarget(ds);
@@ -423,7 +552,10 @@ export default function DataSource() {
       user: "root",
       password: "",
       table_names: [],
+      ssl_mode: "prefer",
+      ssl_ca_pem: "",
     });
+    setShowAdvanced(false);
     setTestResult(null);
     setTestLoading(false);
     setSaveLoading(false);
@@ -532,37 +664,42 @@ export default function DataSource() {
     }
     setSaveLoading(true);
     try {
-      for (let i = 0; i < selected.length; i++) {
-        const tname = selected[i];
-        const name = tname.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-        const ds = await connectDatasource({
-          name,
-          sourceType: dbForm.source_type === "postgres" ? "postgresql" : "mysql",
-          host: dbForm.host,
-          port: dbForm.port,
-          dbName: dbForm.database,
-          username: dbForm.user,
-          password: dbForm.password,
-          tableName: tname,
-        });
-        // Auto-sync after creation
-        await syncDatasource(ds.id);
-        if (i === selected.length - 1) {
-          // Last one - close modal
-          setShowCreateModal(false);
-          refetch();
-          const label = selected.length > 1 ? `${selected.length} 个数据源` : (selected[0] || "数据源");
-          pushNotification({ type: "system", title: "数据源就绪", body: `${label}已连接成功，可以开始分析了`, resourceType: "datasource" }).catch(() => {});
+      // 一次提交：后端建"一个连接 + N 张表"，凭据只存一份
+      const result = await connectDatasource({
+        name: dbForm.database,
+        sourceType: dbForm.source_type === "postgres" ? "postgresql" : "mysql",
+        host: dbForm.host,
+        port: dbForm.port,
+        dbName: dbForm.database,
+        username: dbForm.user,
+        password: dbForm.password,
+        tableNames: selected,
+        sslMode: dbForm.ssl_mode,
+        sslCaPem: dbForm.ssl_ca_pem.trim() || undefined,
+      });
+      // 逐表同步 schema（连接已建好，同步只是拉字段/行数）
+      for (const ds of result.datasources) {
+        try {
+          await syncDatasource(ds.id);
+        } catch {
+          // 单表同步失败不阻塞整体：列表里会显示 disconnected，可手动重试
         }
       }
+      setShowCreateModal(false);
+      setTestResult(null);
+      await refetch();
+      await reloadConnections();
+      const label =
+        selected.length > 1 ? selected.length + " 张表" : selected[0] || "数据源";
+      pushNotification({
+        type: "system",
+        title: "数据源就绪",
+        body: label + "已连接成功，可以开始分析了",
+        resourceType: "datasource",
+      }).catch(() => {});
+      toast.success(label + "已连接（共享 1 份凭据，可在连接详情里轮换密码）");
     } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : typeof err === "string"
-            ? err
-            : "创建数据源失败";
-      toast.error(msg);
+      toast.error(errorMessage(err));
     } finally {
       setSaveLoading(false);
     }
@@ -802,6 +939,30 @@ export default function DataSource() {
                           />
                           {statusInfo.label}
                         </span>
+                        {ds.connectionId ? (
+                          (() => {
+                            const hb = healthBadge(connections[ds.connectionId!]);
+                            return (
+                              <div className="mt-1">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${hb.className}`}
+                                  title={
+                                    connections[ds.connectionId!]?.healthError ??
+                                    (connections[ds.connectionId!]?.lastHealthAt
+                                      ? "最近检查 " +
+                                        formatRelativeTime(
+                                          connections[ds.connectionId!]?.lastHealthAt ?? null
+                                        )
+                                      : "尚未检查")
+                                  }
+                                >
+                                  <ShieldCheck className="w-3 h-3" />
+                                  {hb.label}
+                                </span>
+                              </div>
+                            );
+                          })()
+                        ) : null}
                       </td>
                       <td className="px-5 py-3.5 text-card-foreground">
                         {(ds.rowCount || 0).toLocaleString()} 行 ·{" "}
@@ -823,6 +984,21 @@ export default function DataSource() {
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
+                          {ds.connectionId ? (
+                            <button
+                              type="button"
+                              onClick={() => handleHealthCheck(ds)}
+                              disabled={healthBusyId === ds.id}
+                              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-success transition-colors disabled:opacity-50"
+                              title="检查连接（连接级探测）"
+                            >
+                              {healthBusyId === ds.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          ) : null}
                           {(ds.sourceType === "postgresql" || ds.sourceType === "mysql") && (
                             <button
                               type="button"
@@ -1011,6 +1187,119 @@ export default function DataSource() {
               </div>
             </section>
 
+            {detailTarget.connectionId && connections[detailTarget.connectionId] ? (() => {
+              const conn = connections[detailTarget.connectionId!];
+              const hb = healthBadge(conn);
+              return (
+                <section>
+                  <h4 className="text-[13px] font-semibold text-foreground mb-2">
+                    数据库连接（同一凭据下的其他表共享此连接）
+                  </h4>
+                  <div className="rounded-md border border-border-light p-3 space-y-2">
+                    <div className="grid grid-cols-2 gap-3 text-[13px]">
+                      <div>
+                        <p className="text-muted-foreground text-[12px] mb-0.5">
+                          地址
+                        </p>
+                        <p className="text-card-foreground font-mono text-[12px]">
+                          {conn.host}:{conn.port}/{conn.dbName}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-[12px] mb-0.5">
+                          账号 / TLS
+                        </p>
+                        <p className="text-card-foreground text-[12px]">
+                          {conn.username} · {conn.sslMode}
+                          {conn.sslCaConfigured ? "（已配 CA）" : ""}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-[12px] mb-0.5">
+                          该连接下的表
+                        </p>
+                        <p className="text-card-foreground text-[12px]">
+                          {conn.datasourceCount} 张
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground text-[12px] mb-0.5">
+                          健康状态
+                        </p>
+                        <span
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${hb.className}`}
+                          title={conn.healthError ?? ""}
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          {hb.label}
+                          {conn.lastHealthAt
+                            ? " · " + formatRelativeTime(conn.lastHealthAt)
+                            : ""}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!rotateOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRotateOpen(true);
+                          setRotatePassword("");
+                          setRotateError(null);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[12px] font-medium text-card-foreground bg-white border border-border hover:bg-muted transition-colors"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        轮换数据库密码
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-[12px] text-muted-foreground">
+                          新密码会先验证可用，再加密落库，并重建该连接下全部表的连接（影响{" "}
+                          {conn.datasourceCount} 张表）。
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="password"
+                            value={rotatePassword}
+                            onChange={(e) => setRotatePassword(e.target.value)}
+                            placeholder="输入新的数据库密码"
+                            className="flex-1 px-3 py-1.5 text-[13px] rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleRotateSecret}
+                            disabled={rotateBusy}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-white bg-primary hover:bg-primary-hover transition-colors disabled:opacity-60"
+                          >
+                            {rotateBusy ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
+                            确认轮换
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRotateOpen(false);
+                              setRotateError(null);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-[12px] text-muted-foreground hover:bg-muted transition-colors"
+                          >
+                            取消
+                          </button>
+                        </div>
+                        {rotateError ? (
+                          <div className="px-2.5 py-1.5 rounded-md bg-danger-light text-danger text-[12px]">
+                            {rotateError}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              );
+            })() : null}
+
             <section>
               <h4 className="text-[13px] font-semibold text-foreground mb-2">
                 数据预览（前 10 行）
@@ -1104,6 +1393,9 @@ export default function DataSource() {
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[12px]">
                           可空
                         </th>
+                        <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[12px]">
+                          敏感
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1144,6 +1436,35 @@ export default function DataSource() {
                           </td>
                           <td className="px-3 py-2 text-card-foreground">
                             {field.nullable ? "是" : "否"}
+                          </td>
+                          <td className="px-3 py-2">
+                            <label
+                              className="inline-flex items-center gap-1.5 cursor-pointer select-none"
+                              title={
+                                field.sensitive
+                                  ? "敏感列：不出样例、预览打码、不可用于查询"
+                                  : "标记为敏感后，该列的样例/预览会被屏蔽且不可用于查询"
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                checked={Boolean(field.sensitive)}
+                                onChange={(e) =>
+                                  updateFieldSensitive(idx, e.target.checked)
+                                }
+                                className="w-3.5 h-3.5 text-danger rounded"
+                              />
+                              {field.sensitive ? (
+                                <span className="inline-flex items-center gap-1 text-[12px] text-danger">
+                                  <EyeOff className="w-3 h-3" />
+                                  敏感
+                                </span>
+                              ) : (
+                                <span className="text-[12px] text-muted-foreground">
+                                  否
+                                </span>
+                              )}
+                            </label>
                           </td>
                         </tr>
                       ))}
@@ -1414,6 +1735,62 @@ export default function DataSource() {
                   className="w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-shadow"
                 />
               </div>
+            </div>
+
+            {/* 高级选项：TLS（连接级配置） */}
+            <div className="rounded-lg border border-border-light">
+              <button
+                type="button"
+                onClick={() => setShowAdvanced((v) => !v)}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] text-card-foreground hover:bg-muted transition-colors"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+                  高级选项（TLS / 加密）
+                </span>
+                <span className="text-[12px] text-muted-foreground">
+                  {dbForm.ssl_mode}
+                  {showAdvanced ? " ▲" : " ▼"}
+                </span>
+              </button>
+              {showAdvanced ? (
+                <div className="px-3 pb-3 space-y-2">
+                  <label className="block text-[13px] font-medium text-foreground">
+                    加密模式
+                  </label>
+                  <select
+                    value={dbForm.ssl_mode}
+                    onChange={(e) =>
+                      setDbForm((prev) => ({
+                        ...prev,
+                        ssl_mode: e.target.value as SslMode,
+                      }))
+                    }
+                    className="w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-white text-card-foreground focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
+                  >
+                    <option value="disable">disable — 不加密（仅内网可信环境）</option>
+                    <option value="prefer">prefer — 优先加密（默认）</option>
+                    <option value="require">require — 强制加密，不校验证书</option>
+                    <option value="verify-ca">verify-ca — 强制加密 + 校验 CA</option>
+                    <option value="verify-full">verify-full — 强制加密 + 校验 CA 与主机名</option>
+                  </select>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    require 及以上会在数据库不支持 SSL 时直接失败；verify-* 需要提供 CA
+                    证书（留空则使用系统 CA）。
+                  </p>
+                  {dbForm.ssl_mode.startsWith("verify") ? (
+                    <textarea
+                      value={dbForm.ssl_ca_pem}
+                      onChange={(e) =>
+                        setDbForm((prev) => ({ ...prev, ssl_ca_pem: e.target.value }))
+                      }
+                      rows={4}
+                      placeholder={"-----BEGIN CERTIFICATE-----\n...（可留空使用系统 CA）"}
+                      className="w-full px-3 py-2 text-[12px] font-mono rounded-lg border border-border bg-input placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {/* 选择表 - 连接成功后批量勾选 */}

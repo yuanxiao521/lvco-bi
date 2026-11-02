@@ -45,6 +45,14 @@ class DataSource(TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    # 数据库型数据源统一挂在一条 db_connections 上（凭据一份、多表共享）；
+    # CSV/Excel 为 None。历史行若密码仍留在 connection_config 里，由兼容路径兜底。
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("db_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     size_bytes: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(
@@ -53,3 +61,12 @@ class DataSource(TimestampMixin, Base):
 
     user = relationship("User", back_populates="datasources")
     canvases = relationship("Canvas", back_populates="datasource")
+    connection = relationship("DBConnection", back_populates="datasources", lazy="selectin")
+
+    @property
+    def has_password(self) -> bool:
+        """是否已保存凭据（新模型看连接行，历史行看 connection_config）。"""
+        connection = getattr(self, "connection", None)
+        if connection is not None:
+            return bool(getattr(connection, "password_enc", None))
+        return bool((self.connection_config or {}).get("password"))

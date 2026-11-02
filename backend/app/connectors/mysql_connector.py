@@ -38,9 +38,19 @@ def _conn_kwargs(conn_info: dict) -> dict:
         "database": conn_info.get("database") or conn_info.get("db_name") or "",
         "connect_timeout": int(settings.DB_CONNECT_TIMEOUT_SECONDS),
     }
-    ssl_mode = conn_info.get("sslmode") or conn_info.get("ssl_mode")
-    if ssl_mode:
-        kwargs["ssl_disabled"] = str(ssl_mode).lower() in ("disable", "disabled", "false")
+    # TLS：产品层统一用 libpq 的 sslmode 命名，这里映射到 mysql-connector 的开关
+    ssl_mode = str(conn_info.get("sslmode") or conn_info.get("ssl_mode") or "prefer").lower()
+    if ssl_mode in ("disable", "disabled", "false"):
+        kwargs["ssl_disabled"] = True
+    else:
+        kwargs["ssl_disabled"] = False
+        ca_path = conn_info.get("ssl_ca_path")
+        if ca_path:
+            kwargs["ssl_ca"] = ca_path
+        if ssl_mode in ("verify-ca", "verify-full"):
+            kwargs["ssl_verify_cert"] = True
+        if ssl_mode == "verify-full":
+            kwargs["ssl_verify_identity"] = True
     return kwargs
 
 

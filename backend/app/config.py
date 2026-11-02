@@ -92,6 +92,17 @@ class Settings(BaseSettings):
     DB_ALLOWED_HOSTS: str = ""
     # 外部库建连/探测超时（秒）
     DB_CONNECT_TIMEOUT_SECONDS: int = 10
+    # verify-ca / verify-full 时把 CA 证书落到本地的目录（DuckDB 只能读路径）
+    TLS_CA_DIR: str = "./data/tls"
+
+    # ── 连接健康检查（连接级探测，见 app/services/connection_service.py） ──
+    # 定时探测"这个连接现在还通不通"，结果写进 db_connections.health_*
+    CONNECTION_HEALTH_ENABLED: bool = True
+    CONNECTION_HEALTH_INTERVAL_MINUTES: int = 15
+    # 单轮最多探测多少个连接（避免连接多时打爆连接池/拖慢事件循环）
+    CONNECTION_HEALTH_MAX_PER_CYCLE: int = 20
+    # 多久之内探测过就跳过（分钟）——手动探测与定时探测共用节流
+    CONNECTION_HEALTH_MIN_AGE_MINUTES: int = 5
 
     # Langfuse 可观测性
     LANGFUSE_ENABLED: bool = False

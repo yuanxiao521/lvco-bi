@@ -85,6 +85,20 @@ async def startup():
     except Exception:  # noqa: BLE001
         logger.warning("seed_default_metrics_failed")
 
+    if settings.CONNECTION_HEALTH_ENABLED:
+        try:
+            from app.services.connection_health_scheduler import ConnectionHealthScheduler
+
+            connection_health_scheduler = ConnectionHealthScheduler()
+            connection_health_scheduler.start()
+            app.state.connection_health_scheduler = connection_health_scheduler
+            logger.info(
+                "connection_health_scheduler_started",
+                interval_minutes=settings.CONNECTION_HEALTH_INTERVAL_MINUTES,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("connection_health_scheduler_start_failed")
+
     if settings.INSIGHT_ENABLED:
         try:
             insight_scheduler = InsightScheduler(
@@ -135,4 +149,10 @@ async def shutdown():
     dashboard_scheduler = getattr(app.state, "dashboard_scheduler", None)
     if dashboard_scheduler:
         dashboard_scheduler.stop()
+    connection_health_scheduler = getattr(app.state, "connection_health_scheduler", None)
+    if connection_health_scheduler is not None:
+        try:
+            await connection_health_scheduler.stop()
+        except Exception:  # noqa: BLE001
+            logger.warning("connection_health_scheduler_stop_failed")
     logger.info("app_shutdown_complete")

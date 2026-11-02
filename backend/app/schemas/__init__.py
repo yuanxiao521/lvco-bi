@@ -106,6 +106,9 @@ class DataSourceResponse(CamelModel):
     name: str
     description: str | None
     source_type: SourceType
+    # 数据库型数据源所属的连接（凭据、TLS、健康状态都在连接上）
+    connection_id: UUID | None = None
+    has_password: bool = False
     # 连接配置回传前端时只保留"可展示的部分"：密码字段一律剔除，仅给 has_password 标记。
     # 改造前这里是原样透出 connection_config —— 密码（历史上还是明文）会直接出现在
     # 浏览器 devtools / 抓包里，属于凭据外泄面。
@@ -131,6 +134,57 @@ class DataSourceResponse(CamelModel):
         }
         masked["has_password"] = bool(value.get("password"))
         return masked
+
+
+class ConnectionResponse(CamelModel):
+    """数据库连接（一份凭据 → 多张表）。"""
+
+    id: UUID
+    name: str
+    source_type: SourceType
+    host: str
+    port: int
+    db_name: str
+    username: str
+    has_password: bool = False
+    ssl_mode: str = "prefer"
+    ssl_ca_configured: bool = False
+    status: DatasourceStatus
+    health_status: str | None = None
+    health_error: str | None = None
+    last_health_at: datetime | None = None
+    datasource_count: int = 0
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_connection(cls, connection, datasource_count: int = 0) -> "ConnectionResponse":
+        return cls(
+            id=connection.id,
+            name=connection.name,
+            source_type=SourceType(getattr(connection.source_type, "value", connection.source_type)),
+            host=connection.host,
+            port=connection.port,
+            db_name=connection.db_name or "",
+            username=connection.username or "",
+            has_password=bool(connection.password_enc),
+            ssl_mode=connection.ssl_mode or "prefer",
+            ssl_ca_configured=bool(connection.ssl_ca_enc),
+            status=DatasourceStatus(
+                getattr(connection.status, "value", connection.status) or "disconnected"
+            ),
+            health_status=connection.health_status,
+            health_error=connection.health_error,
+            last_health_at=connection.last_health_at,
+            datasource_count=datasource_count,
+            created_at=connection.created_at,
+            updated_at=connection.updated_at,
+        )
+
+
+class ConnectDatasourceResponse(CamelModel):
+    connection: ConnectionResponse
+    datasources: list["DataSourceResponse"] = []
 
 
 class DataSourceListResponse(CamelModel):

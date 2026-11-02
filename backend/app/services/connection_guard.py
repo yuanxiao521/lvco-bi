@@ -140,3 +140,39 @@ def validate_connection_input(
         "database": validate_name(database, "数据库名"),
         "table_name": validate_table_name(table_name),
     }
+
+# ── TLS ─────────────────────────────────────────────────────────────
+# 取值对齐 libpq 的 sslmode，MySQL 侧在 attach_sql / mysql_connector 里做映射。
+VALID_SSL_MODES = ("disable", "prefer", "require", "verify-ca", "verify-full")
+# 需要 CA 的模式：没配 CA 时无法真正校验证书，只做提示不硬拒（部分环境用系统 CA）
+_CA_REQUIRED_MODES = ("verify-ca", "verify-full")
+
+
+def validate_ssl(ssl_mode, ssl_ca_pem) -> tuple[str, str | None]:
+    """校验 TLS 配置，返回 (ssl_mode, ssl_ca_pem)。"""
+    mode = ("" if ssl_mode is None else str(ssl_mode)).strip().lower() or "prefer"
+    if mode not in VALID_SSL_MODES:
+        raise ConnectionValidationError(
+            "TLS 模式不合法，可选：" + " / ".join(VALID_SSL_MODES)
+        )
+    ca = "" if ssl_ca_pem is None else str(ssl_ca_pem).strip()
+    if ca:
+        if len(ca) > 200_000:
+            raise ConnectionValidationError("CA 证书过大（最多 200KB）")
+        if "BEGIN CERTIFICATE" not in ca:
+            raise ConnectionValidationError("CA 证书格式不正确（应为 PEM，含 BEGIN CERTIFICATE）")
+        if mode == "disable":
+            raise ConnectionValidationError("TLS 已关闭（disable）时不需要提供 CA 证书")
+    return mode, (ca or None)
+
+
+def ssl_summary(ssl_mode: str | None, has_ca: bool) -> str:
+    """给前端/日志用的可读摘要。"""
+    mode = ssl_mode or "prefer"
+    if mode == "disable":
+        return "未加密"
+    if mode in _CA_REQUIRED_MODES:
+        return f"强制加密 + 校验证书（{mode}）" if has_ca else f"强制加密（{mode}，使用系统 CA）"
+    if mode == "require":
+        return "强制加密（不校验证书）"
+    return "优先加密（服务器支持则加密）"

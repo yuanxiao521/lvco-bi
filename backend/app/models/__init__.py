@@ -7,6 +7,7 @@ from app.models.chart_config import ChartConfig, ChartType
 from app.models.dashboard import Dashboard
 from app.models.dashboard_chart import DashboardChart
 from app.models.datasource import DataSource, DatasourceStatus, SourceType
+from app.models.db_connection import ConnectionHealth, DBConnection
 from app.models.metric import MetricDefinition
 from app.models.metric_lineage import MetricLineage
 from app.models.metric_usage import MetricUsage
@@ -25,6 +26,8 @@ __all__ = [
     "DataSource",
     "SourceType",
     "DatasourceStatus",
+    "DBConnection",
+    "ConnectionHealth",
     "MetricDefinition",
     "MetricLineage",
     "MetricUsage",

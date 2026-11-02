@@ -148,3 +148,122 @@ cd backend
   （单测 patch 了模块属性）。它们产出的 ATTACH 语句已是安全形态，但调用形态未收敛到唯一入口。
 - **凭据轮换/失效**：没有 UI，只有重新连接；ensure_attached(force=True) 支持重建。
 - **连接健康度**：没有连接池与健康检查指标（"这个数据源现在还能连吗"只能靠用户点同步）。
+
+---
+
+# 第二部分（2026-11 追加）：连接形态、TLS、敏感列、轮换与健康
+
+第一部分解决“凭据不被泄漏”。这一部分解决**产品可用性**：能不能连得上（TLS）、
+连上后会不会把隐私数据喂给模型（敏感列）、改密码要不要改 N 次（一份凭据多张表）、
+数据源挂了能不能提前发现（健康检查）。
+
+## 8. 连接模型：一份凭据 → 多张表
+
+改造前：连一张表 = 一个 datasource 行 = 一份密码密文。选 3 张表就有 3 份副本，
+改密码要改 3 次、无原子性，健康检查也要探测 3 次。
+
+现在：
+
+```
+db_connections (id, user_id, source_type, host, port, db_name, username,
+                password_enc, ssl_mode, ssl_ca_enc, status,
+                health_status, health_error, last_health_at)
+      ▲ connection_id
+      │
+datasources (…, connection_id, connection_config = {table_name, db_name, host, port, username})
+```
+
+- 连接向导一次提交 tableNames=[orders, customers] → 后端建 1 个连接 + N 个数据源；
+- 同用户相同 (host, port, db, user) 自动复用连接（dedup），不会产生多份凭据；
+- datasource.connection_config 里不再有 password，只留非敏感元数据（兼容旧读取路径）；
+- 删除最后一张表时自动回收连接并 DETACH 对应 catalog。
+
+迁移：0021_add_db_connections（按物理连接去重生成连接行、回填 connection_id、剥离密码字段）。
+已验证：迁移前插入历史形态数据源 → 迁移后连接行生成、datasource 关联、password 从 config 消失。
+
+## 9. TLS：默认优先加密，可按需强制
+
+db_connections.ssl_mode 取值对齐 libpq：disable / prefer / require / verify-ca / verify-full；
+ssl_ca_enc 存 CA（PEM，与密码同一套 AES-256-GCM 加密）。贯通三层：
+
+| 层 | PG | MySQL |
+|---|---|---|
+| 驱动探测 | sslmode + sslrootcert | ssl_disabled / ssl_ca / ssl_verify_cert / ssl_verify_identity |
+| DuckDB SECRET | SSLMODE + SSLROOTCERT | SSL_MODE(disabled/preferred/required/verify_ca/verify_identity) |
+| 落盘 | CA 由 materialize_ca() 写到 data/tls/ca_<conn>.pem（0600） | 同 |
+
+已验证：把连接从 prefer 改成 require 后，本机 PG（未开 SSL）所有表立即重建为 disconnected
+并带可读错误；改回 prefer 后恢复 connected。
+
+## 10. 敏感列治理（列级）
+
+风险：schema 同步取 3 个样例、预览返回前 N 行，这两条数据都会进 schema_meta 和 LLM 上下文；
+真实库里的 password_hash / id_card / bank_card 一旦进模型，等于把 PII 发给第三方。
+
+策略（app/services/sensitive_columns.py）：
+
+1. 识别：列名启发式（password/pwd/secret/token/api_key/private_key/credential/cvv/id_card/
+   bank_card/ssn/phone/身份证/银行卡/手机号…），命中写 fields[i].sensitive + sensitive_reason；
+2. 不出样例：敏感列同步时 sample = []；
+3. 预览打码：mask_rows() 把敏感列值替换成 ***（文件型与数据库型预览同一函数）；
+4. 工具层：list_fields 把敏感列移到 sensitive_columns 并附 sensitive_hint，不给样例；
+5. 查询层：query_sql 执行前用 referenced_sensitive() 拦 SQL；query_engine 拦图表配置的维度/度量/筛选/排序；
+6. 可覆盖：前端字段编辑器的“敏感”开关写回 schemaMeta.fields[i].sensitive，手工优先。
+
+实测：users 表同步后 password_hash 被标记且样例为空；/preview 返回 ***。
+
+## 11. 轮换与健康
+
+轮换密码 POST /connections/{id}/rotate-secret：
+
+1. 用新密码先探测（不写库）；
+2. 失败 → 400 + 可读原因（旧密文保持不变，绝不覆盖成不可用凭据）；
+3. 成功 → 加密落库 → 重建该连接下所有表 ATTACH（force）→ 逐表更新状态（失败的表标 disconnected，不假绿）。
+
+健康检查（连接级）：
+
+- 手动：POST /connections/{id}/health、GET /datasources/{id}/health（5 分钟内复用结果）；
+- 自动：ConnectionHealthScheduler 每 15 分钟探测“最久没检查/从未检查”的连接（单轮上限 20），
+  写 health_status / health_error / last_health_at；
+- 前端：列表状态列下的健康徽章 + 行内“检查”按钮；详情弹窗展示连接信息与最近检查时间。
+
+## 12. 新增/变更 API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | /datasources/connect | 扩展 tableNames[] / sslMode / sslCaPem；响应 {connection, datasources[]} |
+| GET | /connections | 连接列表（含健康状态、表数量） |
+| GET/PATCH | /connections/{id} | 查看 / 改名称、TLS |
+| POST | /connections/{id}/rotate-secret | 轮换密码（先验证后落库） |
+| POST | /connections/{id}/health | 手动健康探测 |
+| GET | /datasources/{id}/health | 数据源视角的健康探测 |
+
+## 13. 配置项（新增）
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| TLS_CA_DIR | ./data/tls | CA 落地目录（DuckDB 需要文件路径） |
+| CONNECTION_HEALTH_ENABLED | true | 是否启用定时健康检查 |
+| CONNECTION_HEALTH_INTERVAL_MINUTES | 15 | 探测周期 |
+| CONNECTION_HEALTH_MAX_PER_CYCLE | 20 | 单轮最多探测连接数 |
+| CONNECTION_HEALTH_MIN_AGE_MINUTES | 5 | 多久内探测过就跳过 |
+
+## 14. 验证与迁移命令
+
+```bash
+cd backend
+.venv/Scripts/python.exe -m alembic upgrade head                        # 0021 连接表
+.venv/Scripts/python.exe scripts/migrate_datasource_secrets.py --apply  # 历史明文/CBC → v2（含连接表）
+.venv/Scripts/python.exe -m pytest tests/test_connections_and_governance.py -q  # 19 条新用例
+```
+
+全量回归：1119 passed。前端：npx tsc --noEmit 与 npm run build 通过；Playwright 冒烟
+（登录 → 源数据管理 → 新建数据源 → 数据库直连 → TLS 高级选项）0 console error。
+
+## 15. 仍未做
+
+- 一连接多库：目前一个连接对应一个 database；跨库查询仍要建多个连接。
+- 权限自检：连上后没有校验“这个账号是否只读”，只做了 READ_ONLY 附加（引擎层只读）。
+- 敏感列只按列名启发式，没做值级识别（身份证/手机号格式校验），也没有行级脱敏/审批流。
+- 健康检查不写时序指标：只有状态字段，想做“连接可用率”需要接指标系统。
+- CA/证书轮换：可以 PATCH 换 CA，但没有到期提醒。

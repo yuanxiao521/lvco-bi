@@ -731,6 +731,26 @@ async def execute_chart_query(
     measure_dicts = [m.model_dump() for m in config.measures]
     filter_dicts = [f.model_dump() for f in config.filters]
 
+    # ── 敏感列拦截：图表配置（维度/度量/筛选/排序）里出现敏感列一律拒绝 ──
+    if datasource is not None:
+        from app.services.sensitive_columns import sensitive_names
+
+        _meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
+        _sensitive = sensitive_names(_meta.get("fields"))
+        if _sensitive:
+            _requested = set(str(d).lower() for d in (config.dimensions or []))
+            _requested |= {str(m.get("field")).lower() for m in measure_dicts if m.get("field")}
+            _requested |= {str(f.get("field")).lower() for f in filter_dicts if f.get("field")}
+            _sort_field = getattr(config.sort, "field", None) if config.sort else None
+            if _sort_field:
+                _requested.add(str(_sort_field).lower())
+            _blocked = sorted(_sensitive & _requested)
+            if _blocked:
+                raise QueryEngineError(
+                    "以下字段被标记为敏感，不允许用于图表：" + "、".join(_blocked),
+                    code="SENSITIVE_COLUMN",
+                )
+
     # 校验并修正大小写（DuckDB 列名可能跟前端不一致）：普通度量校验字段存在性，
     # 表达式度量（指标语义层）字段已内联在 expression 中，跳过字段校验、仅校验聚合。
     plain_measures = [m for m in measure_dicts if not m.get("expression")]

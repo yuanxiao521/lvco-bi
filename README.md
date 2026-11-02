@@ -202,6 +202,17 @@ connection layer is treated as a security boundary rather than a feature:
   are rate-limited so they cannot be used as an internal port scanner.
 - **Sanitized errors.** Driver errors are scrubbed of `password=...` / `user:pwd@host`
   patterns before they reach the API response, `schema_meta` or logs.
+- **One credential, many tables.** A `db_connections` row owns the encrypted password and TLS
+  settings; each datasource is just `connection_id + table_name`. Rotating a password is one
+  operation for N tables (verified against the live DB before it is persisted).
+- **TLS by policy.** `disable | prefer | require | verify-ca | verify-full` is enforced end to
+  end — pg/MySQL drivers *and* the DuckDB SECRET (`SSLMODE`, `SSLROOTCERT`, `SSL_MODE`) — with the
+  CA stored encrypted and materialized only for the engine at attach time.
+- **Column-level sensitivity.** Credential/PII-looking columns are flagged on sync, their samples
+  are dropped, preview values are masked (`***`), and both the SQL tool and the chart query engine
+  refuse to reference them. Users can override the flag per column in the schema editor.
+- **Connection health.** A scheduler probes each connection periodically (connection-level, not
+  per table) so a dead source is visible before a dashboard silently shows stale data.
 
 Design notes, threat model and the honest TODO list:
 [DATASOURCE_SECURITY.md](DATASOURCE_SECURITY.md).

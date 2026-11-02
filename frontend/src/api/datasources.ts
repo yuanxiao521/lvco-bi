@@ -1,5 +1,7 @@
 import apiClient, { extractData, unwrapApi } from "./client";
 import type {
+  ConnectDatasourceResponse,
+  ConnectionHealthResult,
   DataSource,
   DataSourcePreview,
   DataSourceUpdatePayload,
@@ -7,6 +9,7 @@ import type {
   DatasourceStatus,
   DatasourceType,
   PaginatedResult,
+  SslMode,
 } from "./types";
 
 export async function listDatasources(
@@ -35,8 +38,12 @@ export async function uploadDatasource(
   return unwrapApi<DataSource>(response.data);
 }
 
+/**
+ * 创建数据库数据源：一次提交 N 张表 —— 后端建"一个连接 + N 个数据源"，
+ * 凭据只存一份（轮换密码时一次生效）。
+ */
 export async function connectDatasource(payload: {
-  name: string;
+  name?: string;
   sourceType: DatasourceType;
   host?: string;
   port?: number;
@@ -44,9 +51,20 @@ export async function connectDatasource(payload: {
   username?: string;
   password?: string;
   tableName?: string;
-}): Promise<DataSource> {
+  tableNames?: string[];
+  sslMode?: SslMode;
+  sslCaPem?: string;
+}): Promise<ConnectDatasourceResponse> {
   const response = await apiClient.post("/datasources/connect", payload);
-  return unwrapApi<DataSource>(response.data);
+  return unwrapApi<ConnectDatasourceResponse>(response.data);
+}
+
+/** GET /datasources/{id}/health —— 数据源视角的连接健康检查 */
+export async function checkDatasourceHealth(
+  id: string
+): Promise<ConnectionHealthResult> {
+  const response = await apiClient.get("/datasources/" + id + "/health");
+  return unwrapApi<ConnectionHealthResult>(response.data);
 }
 
 export async function syncDatasource(id: string): Promise<DataSource> {

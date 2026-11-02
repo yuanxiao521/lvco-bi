@@ -39,9 +39,14 @@ def _conn_kwargs(conn_info: dict, default_port: int) -> dict:
         "dbname": conn_info.get("database") or conn_info.get("db_name") or "",
         "connect_timeout": int(settings.DB_CONNECT_TIMEOUT_SECONDS),
     }
-    sslmode = conn_info.get("sslmode") or conn_info.get("ssl_mode")
+    # TLS：sslmode 取值 disable/prefer/require/verify-ca/verify-full（libpq 语义）；
+    # verify-* 需要 CA 文件路径（由 datasource_connection.materialize_ca 落地）
+    sslmode = str(conn_info.get("sslmode") or conn_info.get("ssl_mode") or "").lower()
     if sslmode:
         kwargs["sslmode"] = sslmode
+    ca_path = conn_info.get("ssl_ca_path")
+    if ca_path and sslmode in ("verify-ca", "verify-full"):
+        kwargs["sslrootcert"] = ca_path
     return kwargs
 
 

@@ -480,24 +480,36 @@ class ListFieldsTool(BaseTool):
         columns: list[str] = []
         field_names: list[str] = []
         examples: dict[str, list] = {}
+        sensitive: list[str] = []
         for f in fields:
             if isinstance(f, dict):
                 name = f.get("name", "?")
                 dtype = f.get("data_type", "?")
+                if f.get("sensitive"):
+                    # 敏感列：只告诉模型"存在且不可用"，不给样例、也不在可查询列里
+                    sensitive.append(name)
+                    continue
                 columns.append(name)
                 field_names.append(f"{name}({dtype})")
                 if f.get("sample"):
                     examples[name] = f["sample"]
-        if not columns:
+        if not columns and not sensitive:
             return json.dumps({"error": "数据源表结构为空", "hint": "请先同步该数据源的 schema"}, ensure_ascii=False)
 
-        return json.dumps({
+        payload = {
             "datasource_id": str(datasource.id),
             "name": datasource.name,
             "columns": columns,
             "fields": field_names,
             "samples": examples,
-        }, ensure_ascii=False)
+        }
+        if sensitive:
+            payload["sensitive_columns"] = sensitive
+            payload["sensitive_hint"] = (
+                "以上列被标记为敏感（凭据/个人隐私），不可用于查询、聚合或图表；"
+                "用户明确要求时告知其已被系统屏蔽。"
+            )
+        return json.dumps(payload, ensure_ascii=False)
 
 
 class QueryDatasourceTool(BaseTool):
@@ -628,6 +640,22 @@ class QueryDatasourceTool(BaseTool):
         if not ownership_ok:
             log.warning("Query tool ownership blocked: %s", ownership_reason)
             return self._build_query_error(datasource, schema_name, ownership_reason, attempted_sql=final_sql[:300])
+
+        # ── 敏感列拦截：被标记为敏感（凭据/隐私）的列不允许出现在 SQL 里 ──
+        from app.services.sensitive_columns import referenced_sensitive, sensitive_names
+
+        meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
+        blocked_cols = referenced_sensitive(final_sql, sensitive_names(meta.get("fields")))
+        if blocked_cols:
+            log.warning("Query tool sensitive columns blocked: %s", blocked_cols)
+            return json.dumps(
+                {
+                    "error": "查询包含敏感列，已被安全策略拦截：" + "、".join(blocked_cols),
+                    "hint": "这些列被标记为敏感（凭据/个人隐私），不可用于查询与图表；"
+                            "请改用其他字段，或让用户在数据源详情里取消该列的敏感标记。",
+                },
+                ensure_ascii=False,
+            )
 
         # 执行 SQL 查询并解析结果列名
         # to_thread：DuckDB 为同步调用，放到线程池执行，避免阻塞事件循环；
