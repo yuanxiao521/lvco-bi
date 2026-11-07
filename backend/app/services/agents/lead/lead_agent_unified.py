@@ -256,6 +256,14 @@ async def stream_unified(
         # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
         assembled = provider.for_agent_loop(user_msg, system_text=LEAD_AGENT_SYSTEM)
         messages = assembled.messages
+        # S0-3：每步落一次台账。此前只在循环结束后记一笔"整轮总账"，
+        # 看不到"第几步开始超预算"；上下文是动态曲线，没有逐步台账就无法优化
+        # （见 docs/research/02-orchestration-benchmark.md §4.3 O1）。只在启用 trace 时写。
+        if trace is not None:
+            try:
+                trace.update(metadata={f"ledger_step_{step}": assembled.ledger.as_dict()})
+            except Exception:  # noqa: BLE001
+                pass
         step_msgs: list[dict] = []      # 本步新增消息，步末提交给 provider
         text_parts: list[str] = []
         tool_calls: list[dict] = []
@@ -422,9 +430,13 @@ async def stream_unified(
                     payload = result if isinstance(result, str) else json.dumps(
                         result, ensure_ascii=False, default=str)
                     ok = True
+                # S0-1：SSE 事件是** UI 通道**，保留 4000 字上限（前端渲染预算）；
+                # 但回给模型的工具消息**不在这里截断**——压缩层 compress_tool_message
+                # 是唯一所有者（compress.py 模块头铁律）。此前两处各截一次、单位还不同
+                # （字符 vs token），导致同一结果在不同入口长度不一致、评测不可比。
                 yield {"type": "tool_result", "name": name, "ok": ok, "result": payload[:4000]}
                 step_msgs.append({"role": "tool", "tool_call_id": call_id,
-                                 "content": payload[:4000]})
+                                 "content": payload})
                 continue
 
             # ── 派发：复用 run_worker（子任务摘要/评审/画布刷新与 legacy 同路径）──

@@ -65,10 +65,16 @@
 | 编号 | 问题（证据） | 改法 | 验收 |
 |---|---|---|---|
 | **S0-1** | 工具结果被**截两次**：`lead_agent_unified.py:425-427` 的 `[:4000]` + `compress` 的 800 token 预算，违反 `compress.py:1-10` 自述「所有截断只允许出现在这里」 | 删掉循环里的 `[:4000]`，只留压缩层一处 | 同一结果在不同入口长度一致；`test_lead_p4_tool_result_compression.py` 绿 |
-| **S0-2** | 观察类工具**串行 await**（`lead_agent_unified.py:307`），模型并行发 3 个观察实际仍是 3 次往返 | 按 `tool_class == observe` 分组 `asyncio.gather` | 3 个观察的 step 耗时 ≤ 最慢一个；事件顺序仍按原顺序 emit |
+| **S0-2** | 观察类工具**串行 await**（`lead_agent_unified.py:307`），模型并行发 3 个观察实际仍是 3 次往返 | 按 `tool_class == observe` 分组并发 | 3 个观察的 step 耗时 ≤ 最慢一个；事件顺序仍按原顺序 emit |
 | **S0-3** | ledger 只在**循环结束**落 trace（`:537-543`），看不到「第几步开始超预算」 | 移到每步末尾（循环内） | trace 里每步一份 ledger；总账仍保留 |
 | **S0-4** | LLM 一次 5xx 就把整轮推进「确定性收尾」（`:271-280`），无重试、不区分错误类型 | `tool_call_round` 外层加 1 次退避重试，仅对上游 5xx/超时；JSON 非法不重试 | 上游抖动不打穿整轮；新增 `test_llm_retry_classification.py` |
 | **S0-5** | `degradation` 是 `list[str]`，「配额打满 3 次」与「偶发 1 次」在事件里长得一样 | 改成计数（`dict[str,int]`），done 事件保留原字段 + 新增 `degradation_counts`（向下兼容） | 前端不改也不炸；能按次数排序降级原因 |
+
+**实施记录（2026-11-07）**
+- ✅ **S0-1 已落**：删掉回喂模型的 `payload[:4000]`，压缩层成为唯一截断所有者；SSE 事件保留 4000 字（UI 通道预算，与模型上下文不是一回事）。测试：`test_lead_p4_tool_result_compression` 等 35 项通过。
+- ✅ **S0-3 已落**：每步 `trace.update(metadata={f"ledger_step_{step}": ...})`，整轮总账保留。
+- ⚠️ **S0-2 实施时发现真障碍，已降级**：`recon_tool` 里 `list_fields`/`query_sample` 都要用 `db_session` 查库，而 **SQLAlchemy AsyncSession 不允许并发使用**（同一 session 并发会抛 "concurrent operations are not permitted"）。naive `asyncio.gather` 会从"慢"变成"偶发报错"，比不改更糟。正解是给每个 observe 分配独立短会话（或只读连接池），属于会话生命周期改造 → **挪到 B1 里附带做**（B1 本来就要给 `trace_id` 贯通执行器，正好一起改 `recon_tool`）。
+- ⬜ S0-4（LLM 退避重试）、S0-5（degradation 计数）待做。
 
 ### Batch 1 · 可观测底座：**工具调用日志**（3–4 天）← 用户点名要补的那件事
 
