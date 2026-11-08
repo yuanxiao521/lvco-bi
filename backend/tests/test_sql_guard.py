@@ -345,8 +345,8 @@ class TestLLMHallucinationGuard:
             ('SELECT amount FROM "my_schema"."nonexistent"', None),  # 字段白名单之外,语法层放行
             ('SELECT amount FROM "my_schema"."data"', None),
             ('SELECT amount FROM "my_schema"."data"; DROP TABLE "my_schema"."data"', "多条"),
-            ('SELECT amount FROM "my_schema"."data" UNION SELECT pwd FROM "my_schema"."users"', "Union"),
-            ('SELECT amount FROM "my_schema"."data" UNION ALL SELECT col FROM "my_schema"."ext"', "Union"),
+            ('SELECT amount FROM "my_schema"."data" UNION SELECT pwd FROM "my_schema"."users"', None),
+            ('SELECT amount FROM "my_schema"."data" UNION ALL SELECT col FROM "my_schema"."ext"', None),
             ('SELECT amount FROM "my_schema"."data"', None),  # 简单查询，语法层放行
         ],
     )
@@ -360,15 +360,12 @@ class TestLLMHallucinationGuard:
             assert reason_keyword in reason
 
     def test_union_attack_with_fake_password_table(self):
-        """UNION SELECT 攻击防护。"""
-        sql, reason = SQLGuard.validate_sql(
+        """UNION 本身放行；裸表名（users/products）仍被表引用格式拦下。"""
+        _sql, reason = SQLGuard.validate_sql(
             "SELECT name FROM products UNION SELECT password FROM users"
         )
-        # UNION 攻击应被 L3 命中（关键词 ATTACH/UNION 共同路径，或 L1 输入）
-        # 这里走 L3 单层校验,UNION 本身不在 L3 黑名单中
-        # 所以期望语法层放行;真正的 UNION 攻击防护由后续 validate_sql 增强
-        # 此用例只验证不会崩溃
-        assert sql is not None
+        assert reason is not None
+        assert "schema" in reason.lower()
 
     def test_long_sql_does_not_crash(self):
         """超长 SQL 不应崩溃。"""
@@ -444,3 +441,79 @@ class TestIntegrationGuardFlow:
         result2 = sql_guard.full_check("", "DROP TABLE orders")
         assert result2.allowed is False
         assert result2.layer == 3
+
+# ---- P3-A：放宽后的 SQLGuard 语义（AST 只保留安全规则）----
+
+
+class TestRelaxedGuardForLLMSQL:
+    def test_select_star_放行(self):
+        sql, reason = SQLGuard.validate_sql("SELECT * FROM \"my_schema\".\"data\"")
+        assert reason is None
+        assert f"LIMIT {DEFAULT_LIMIT}" in sql
+
+    def test_窗口函数与高级聚合_放行(self):
+        for expr in (
+            "LAG(amount) OVER (ORDER BY id)",
+            "RANK() OVER (ORDER BY amount)",
+            "PERCENTILE_CONT(amount, 0.5)",
+            "SUM(SUM(amount)) OVER ()",
+        ):
+            sql, reason = SQLGuard.validate_sql(
+                f'SELECT id, {expr} FROM "my_schema"."data"'
+            )
+            assert reason is None, f"{expr}: {reason}"
+
+    def test_显式_cross_join_放行(self):
+        _sql, reason = SQLGuard.validate_sql(
+            'SELECT a.id FROM "my_schema"."data" a CROSS JOIN "my_schema"."data" b'
+        )
+        assert reason is None
+
+    def test_隐式笛卡尔_被拦(self):
+        _sql, reason = SQLGuard.validate_sql(
+            'SELECT a.id FROM "my_schema"."data" a, "my_schema"."data" b'
+        )
+        assert reason is not None
+        assert "隐式笛卡尔" in reason
+
+    def test_文件表函数_被拦(self):
+        # 文件函数是表函数：只跳过 schema 校验会被打开文件通道，必须由黑名单拦住
+        for sql in (
+            "SELECT a FROM read_csv_auto('C:/tmp/x.csv')",
+            "SELECT a FROM parquet_scan('x.parquet')",
+            "SELECT a FROM glob('*.csv')",
+        ):
+            _safe_sql, reason = SQLGuard.validate_sql(sql)
+            assert reason is not None, f"应拦截: {sql}"
+            assert "危险函数" in reason
+
+    def test_文件路径当表引用_被拦(self):
+        _sql, reason = SQLGuard.validate_sql("SELECT a FROM 'C:/tmp/x.csv'")
+        assert reason is not None
+
+    def test_裸表名自动补全_validate_sql(self):
+        sql, reason = SQLGuard.validate_sql(
+            "SELECT id FROM data", allowed_schemas={"s"}, known_tables={"data"}
+        )
+        assert reason is None
+        assert '"s"' in sql.split("FROM", 1)[1]
+        assert f"LIMIT {DEFAULT_LIMIT}" in sql
+
+    def test_裸表名无参数_保持旧行为拒绝(self):
+        _sql, reason = SQLGuard.validate_sql("SELECT id FROM data")
+        assert reason is not None
+
+    def test_full_check_透传自动补全参数(self):
+        result = sql_guard.full_check(
+            "", "SELECT id FROM data", allowed_schemas={"s"}, known_tables={"data"}
+        )
+        assert result.allowed is True
+        assert '"s"' in (result.sanitized_sql or "").split("FROM", 1)[1]
+
+    def test_full_check_外域schema_被拦(self):
+        result = sql_guard.full_check(
+            "", 'SELECT id FROM "tenant_other"."data"', allowed_schemas={"s"}
+        )
+        assert result.allowed is False
+        assert result.layer == 3
+        assert "tenant_other" in result.reason

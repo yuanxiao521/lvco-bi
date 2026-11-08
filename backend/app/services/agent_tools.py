@@ -577,23 +577,6 @@ class QueryDatasourceTool(BaseTool):
             JSON 字符串，成功时包含 columns（列名）、row_count（行数）、rows（数据行）；
             失败时包含 error 信息和纠错 hint
         """
-        # L3 安全检查：通过 sql_guard 对 SQL 进行完整校验（拦截危险操作）
-        guard: GuardResult = sql_guard.full_check("", sql)
-        if not guard.allowed:
-            # 日志：拦截时同时输出实际 SQL 和 reason，便于排查 AST 误报（如 COUNT(*) 被当成 SELECT *）
-            # ast_details 若有 failed_rule 一起打，可精确定位到是哪一条 AST 规则命中
-            failed_rule = (guard.ast_details or {}).get("failed_rule")
-            log.warning(
-                "[QueryDatasourceTool] GUARD BLOCKED layer=%s rule=%s reason=%s sql=%s",
-                guard.layer, failed_rule or "-", guard.reason, sql[:500],
-            )
-            # P4-B：把守卫层号透出给 agent_calls.error_layer（不改 guard 实现）。
-            # guard.layer 只有 1/2/3；AST 校验被折进 L3 的 reason 前缀里，按 L4 记。
-            layer = 4 if "AST 校验" in str(guard.reason or "") else guard.layer
-            return json.dumps({"error": guard.reason, "layer": layer}, ensure_ascii=False)
-
-        final_sql = guard.sanitized_sql or sql
-
         # ── 安全说明 ────────────────────────────────────────────────────────────
         # 此处使用 raw SQL 执行（duckdb_client.fetchall），而非参数化查询，原因如下：
         #
@@ -601,9 +584,10 @@ class QueryDatasourceTool(BaseTool):
         #    无法像传统应用那样将值与模板分离，因此参数化在此场景下不适用。
         #
         # 2. 安全防护由多层机制构成，形成纵深防御（defense-in-depth）：
-        #    - AST 层：sql_guard 的 AST 校验已分析 SQL 语法树，确保仅允许 SELECT 语句，
-        #      禁止子查询、SELECT *、危险函数（如 read_parquet / load / ATTACH / DETACH）
-        #      以及非常用聚合函数，并对列名/表名进行引用校验。
+        #    - AST 层：sql_guard 的 AST 校验确保仅允许查询语句、禁止多语句、拦截危险
+        #      函数（文件读取/写导出/挂载，含 DuckDB 表函数家族），并做表归属 schema
+        #      白名单校验（防跨租户）。UNION / CROSS JOIN / SELECT * / 窗口函数不再
+        #      语法拦截——它们是成本风险，由 LIMIT 注入 + 查询超时兜底。
         #    - 正则层（L3）：在 AST 层之前或作为 fallback，通过正则表达式拦截危险模式。
         #    - LIMIT 注入：AST 防护已在 SQL 末尾注入 LIMIT 子句，防止全表扫描。
         # 3. duckdb_client.fetchall() 为只读操作，不会修改数据库状态。
@@ -645,6 +629,50 @@ class QueryDatasourceTool(BaseTool):
                     ensure_ascii=False,
                 )
 
+        # ── L3 + L4 安全校验（sql_guard）──
+        # 放在数据源解析之后：裸表名自动补全需要 schema_name + 当前数据源的已知表名。
+        meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
+        if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
+            # 外部库：已知表名取同步时记录的 table_name；缺失则传 None（保持旧行为=拒绝）
+            _ext_table = meta.get("table_name")
+            known_tables = {str(_ext_table)} if _ext_table else None
+        else:
+            # 本地 CSV/Excel：DuckDB schema 下只有一张宽表 data
+            known_tables = {"data"}
+        guard: GuardResult = sql_guard.full_check(
+            "",
+            sql,
+            allowed_schemas={schema_name},
+            known_tables=known_tables,
+        )
+        if not guard.allowed:
+            details = guard.ast_details
+            if not details:
+                # validate_sql 在 AST 阶段拦截时只返回文本 reason（不带 ast_details）；
+                # 失败路径补跑一次拿规则名，保证 GUARD BLOCKED 日志可统计。
+                try:
+                    from app.services.sql_guard_ast import ast_full_check
+
+                    _, _, _, details = ast_full_check(
+                        sql, allowed_schemas={schema_name}, known_tables=known_tables,
+                    )
+                except Exception:  # noqa: BLE001
+                    details = None
+            failed_rule = (details or {}).get("failed_rule")
+            # 护栏命中可观测：规则名 + SQL 摘要（前 200 字符），供 blocked_rate/retries 统计
+            log.warning(
+                "[QueryDatasourceTool] GUARD BLOCKED rule=%s sql=%s",
+                failed_rule or "-", sql[:200],
+            )
+            # P4-B：守卫层号透出给 agent_calls.error_layer（AST 命中按 L4 记）
+            layer = 4 if "AST 校验" in str(guard.reason or "") else guard.layer
+            payload = {"error": guard.reason, "layer": layer}
+            if failed_rule:
+                payload["rule"] = failed_rule
+            return json.dumps(payload, ensure_ascii=False)
+
+        final_sql = guard.sanitized_sql or sql
+
         # ── 表归属白名单校验：SQL 中所有表引用的 schema 必须属于当前数据源 ──
         # 本地库 table_ref 为 "schema"."data"（归属在 db），外部库为 "schema".public."table"（归属在 catalog）。
         # 防止 LLM 生成 SQL 访问不属于当前数据源的 schema。
@@ -654,11 +682,15 @@ class QueryDatasourceTool(BaseTool):
             log.warning("Query tool ownership blocked: %s", ownership_reason)
             return self._build_query_error(datasource, schema_name, ownership_reason, attempted_sql=final_sql[:300])
 
-        # ── 敏感列拦截：被标记为敏感（凭据/隐私）的列不允许出现在 SQL 里 ──
-        from app.services.sensitive_columns import referenced_sensitive, sensitive_names
+        # ── 敏感列拦截（AST 版）：显式列 + 裸 Star 投影都要覆盖 ──
+        # 旧实现是 SQL 文本正则找列名 → SELECT * 不出现列名即可绕过；表达式度量也会把
+        # 字段名藏进字符串。这里解析 AST：收集 exp.Column 的显式列名；若存在裸 Star
+        # 投影（SELECT * / t.*），用"该数据源 schema 列 ∩ 敏感列"求交（整行都会被读出）。
+        from app.services.sensitive_columns import sensitive_names
 
-        meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
-        blocked_cols = referenced_sensitive(final_sql, sensitive_names(meta.get("fields")))
+        blocked_cols = self._sensitive_columns_in_sql(
+            final_sql, sensitive_names(meta.get("fields")), meta
+        )
         if blocked_cols:
             log.warning("Query tool sensitive columns blocked: %s", blocked_cols)
             return json.dumps(
@@ -761,11 +793,68 @@ class QueryDatasourceTool(BaseTool):
             # 复用统一错误构造：table_ref + 可用列 hint 供 LLM 自纠错
             return self._build_query_error(datasource, schema_name, str(e)[:200], attempted_sql=final_sql[:300])
 
+    @staticmethod
+    def _sensitive_columns_in_sql(sql: str, sensitive: set[str], meta: dict) -> list[str]:
+        """返回 SQL 命中的敏感列名（显式列 + SELECT * 隐含列）。
+
+        为什么必须解析 AST：旧实现只在 SQL 文本里正则找列名，SELECT * 不出现列名
+        即可绕过（整行数据仍会被读出）；表达式度量也可能把字段名藏进字符串。
+        解析失败时退回旧的正则实现（fail-safe：宁可多拦）。
+        """
+        if not sensitive:
+            return []
+        from app.services.sensitive_columns import referenced_sensitive
+
+        try:
+            from sqlglot import exp
+
+            from app.services.sql_guard_ast import parse_sql
+
+            parsed = parse_sql(sql) or []
+            root = next((stmt for stmt in parsed if stmt is not None), None)
+            if root is None:
+                return referenced_sensitive(sql, sensitive)
+
+            sensitive_lower = {str(name).lower() for name in sensitive}
+            explicit = {
+                str(col.name).lower()
+                for col in root.find_all(exp.Column)
+                if col.name and col.name != "*"
+            }
+            hits = sensitive_lower & explicit
+
+            # 裸 Star 投影（SELECT * / t.*）：整行都会被读出 → 与 schema 列集合求交
+            star_found = False
+            for select_node in root.find_all(exp.Select):
+                for proj in select_node.expressions:
+                    expr = proj.this if isinstance(proj, exp.Alias) else proj
+                    if isinstance(expr, exp.Star) or (
+                        isinstance(expr, exp.Column) and isinstance(expr.this, exp.Star)
+                    ):
+                        star_found = True
+                        break
+                if star_found:
+                    break
+            if star_found:
+                schema_cols = {
+                    str(field.get("name")).lower()
+                    for field in (meta.get("fields") or [])
+                    if isinstance(field, dict) and field.get("name")
+                }
+                hits = hits | (sensitive_lower & schema_cols)
+            return sorted(hits)
+        except Exception:  # noqa: BLE001
+            return referenced_sensitive(sql, sensitive)
+
     def _build_query_error(self, datasource, schema_name: str, error_msg: str, attempted_sql: str = "") -> str:
         """构造查询失败的错误 JSON（含正确 table_ref 与可用列 hint，供 LLM 自纠错）。
 
         归属校验失败与执行异常共用此方法，保证错误契约一致。
         """
+        # 局部导入：模块级未导入 SourceType，此前任何"查询执行失败"路径都会
+        # 抛 NameError，导致 LLM 拿不到自纠错 hint（HEAD 既存 bug，一行修复）。
+        from app.models.datasource import SourceType
+
         if datasource.source_type in (SourceType.postgresql, SourceType.mysql):
             meta = datasource.schema_meta if isinstance(datasource.schema_meta, dict) else {}
             table_name = meta.get("table_name", "data")

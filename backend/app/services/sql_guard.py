@@ -185,7 +185,12 @@ class SQLGuard:
     # ---- L3: SQL 输出控制 ----
 
     @staticmethod
-    def validate_sql(sql: str) -> tuple[str, str | None]:
+    def validate_sql(
+        sql: str,
+        *,
+        allowed_schemas: set[str] | None = None,
+        known_tables: set[str] | None = None,
+    ) -> tuple[str, str | None]:
         """L3 SQL 输出控制：对最终生成的 SQL 语句做安全校验。
 
         检查要点：
@@ -197,6 +202,8 @@ class SQLGuard:
 
         Args:
             sql: LLM 生成的原始 SQL 语句。
+            allowed_schemas: 当前数据源允许的 schema 集合（裸表名自动补全用，可选）。
+            known_tables: 当前数据源已知表名集合（裸表名自动补全用，可选）。
 
         Returns:
             (安全 SQL, 拦截原因或 None)。
@@ -204,7 +211,9 @@ class SQLGuard:
         """
         # 第 0 步：AST 语法树校验（新增，优先级最高）
         from app.services.sql_guard_ast import ast_full_check
-        ast_allowed, ast_reason, ast_sql, _ = ast_full_check(sql)
+        ast_allowed, ast_reason, ast_sql, _ = ast_full_check(
+            sql, allowed_schemas=allowed_schemas, known_tables=known_tables,
+        )
         if not ast_allowed:
             return sql, f"安全拦截（AST 校验）: {ast_reason}"
 
@@ -241,7 +250,14 @@ class SQLGuard:
     # ---- 全链路 ----
 
     @classmethod
-    def full_check(cls, user_input: str, generated_sql: str = "") -> GuardResult:
+    def full_check(
+        cls,
+        user_input: str,
+        generated_sql: str = "",
+        *,
+        allowed_schemas: set[str] | None = None,
+        known_tables: set[str] | None = None,
+    ) -> GuardResult:
         """三层完整检测入口，按顺序执行 L1 -> L2 -> L3。
 
         当 user_input 为空时（例如 agent 工具内部直接调用 query_sql），
@@ -251,6 +267,8 @@ class SQLGuard:
         Args:
             user_input:   用户输入的原始文本，可透传为空字符串。
             generated_sql: LLM 根据用户输入生成的 SQL 语句，可选。
+            allowed_schemas: 当前数据源允许的 schema 集合（裸表名自动补全，可选）。
+            known_tables: 当前数据源已知表名集合（裸表名自动补全，可选）。
 
         Returns:
             GuardResult 对象，包含是否放行、拦截层级、拦截原因以及各层中间产物。
@@ -269,13 +287,18 @@ class SQLGuard:
 
         # === L3：仅在有 SQL 时执行 ===
         if generated_sql:
-            final_sql, l3_block = cls.validate_sql(generated_sql)
+            final_sql, l3_block = cls.validate_sql(
+                generated_sql,
+                allowed_schemas=allowed_schemas, known_tables=known_tables,
+            )
             if l3_block:
                 return GuardResult(allowed=False, layer=3, reason=l3_block)
 
             # 运行 AST 校验并获取详细信息（validate_sql 内部已通过，此处仅收集细节）
             from app.services.sql_guard_ast import ast_full_check
-            _, _, _, ast_details = ast_full_check(final_sql)
+            _, _, _, ast_details = ast_full_check(
+                final_sql, allowed_schemas=allowed_schemas, known_tables=known_tables,
+            )
 
             return GuardResult(
                 allowed=True, layer=0,

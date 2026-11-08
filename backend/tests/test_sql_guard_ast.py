@@ -1,17 +1,15 @@
 """基于 AST 的 SQL 安全校验层（L4）单元测试。
 
-覆盖范围：
+覆盖范围（P3-A 放宽后）：
 - parse_sql 解析
-- check_statement_type 语句类型校验
-- check_subquery_depth 子查询嵌套深度
-- check_union 集合操作检测
-- check_cross_join CROSS JOIN 检测
-- check_select_star SELECT * 检测
-- check_aggregations 聚合函数白名单
-- check_dangerous_functions 危险函数黑名单
-- check_table_refs 表引用格式校验
+- check_statement_type 语句类型校验（含 UNION/PIVOT 放行）
+- check_cross_join：只拦隐式笛卡尔，显式 CROSS JOIN / 标量广播放行
+- SELECT * / 子查询深度 / 聚合白名单：已放行，只留 observable 标记
+- check_dangerous_functions 危险函数黑名单（含 DuckDB 文件表函数家族）
+- check_table_refs 表引用格式校验（表函数跳过、文件路径拒绝）
 - inject_limit 自动 LIMIT 注入
-- ast_full_check 全量校验入口
+- ast_full_check 全量校验入口（含裸表名自动补全 / 表归属）
+- 敏感列旁路（agent_tools AST 版）
 - 边界与异常情况
 
 运行：
@@ -23,15 +21,10 @@ from __future__ import annotations
 import pytest
 
 from app.services.sql_guard_ast import (
-    ALLOWED_AGGREGATIONS,
     DANGEROUS_FUNCTIONS,
     parse_sql,
     check_statement_type,
-    check_subquery_depth,
-    check_union,
     check_cross_join,
-    check_select_star,
-    check_aggregations,
     check_dangerous_functions,
     check_table_refs,
     check_table_ownership,
@@ -225,159 +218,50 @@ class TestCheckStatementType:
         assert "仅允许" in reason
 
 
-# ==================== 3. check_subquery_depth 子查询嵌套深度 ====================
+# ==================== 3. 集合运算 / PIVOT（放行：分支必须是查询）====================
 
 
-class TestCheckSubqueryDepth:
-    """check_subquery_depth：限制子查询嵌套深度。"""
+class TestSetOperationsRelaxed:
+    """UNION / EXCEPT / INTERSECT 不再拦截：表归属校验遍历所有分支，集合操作不构成提权。"""
 
-    def test_无子查询_通过(self):
-        """没有子查询的 SELECT 应通过。"""
-        ast = _parse_one("SELECT id, name FROM schema.users")
-        passed, reason = check_subquery_depth(ast)
+    def test_union_all_通过(self):
+        ast = _parse_one("SELECT id FROM schema.a UNION ALL SELECT id FROM schema.b")
+        passed, reason = check_statement_type(ast)
         assert passed is True
         assert reason == ""
 
-    def test_1层子查询_通过(self):
-        """1 层子查询嵌套应通过（默认最大深度 2）。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "WHERE id IN (SELECT user_id FROM schema.orders)"
-        )
-        passed, reason = check_subquery_depth(ast)
+    def test_union_distinct_通过(self):
+        ast = _parse_one("SELECT id FROM schema.a UNION SELECT id FROM schema.b")
+        passed, reason = check_statement_type(ast)
         assert passed is True
-        assert reason == ""
 
-    def test_2层子查询_通过_边界(self):
-        """2 层子查询嵌套应通过（达到默认最大深度边界）。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "WHERE id IN ("
-            "  SELECT user_id FROM schema.orders "
-            "  WHERE order_id IN (SELECT order_id FROM schema.items)"
-            ")"
-        )
-        passed, reason = check_subquery_depth(ast)
+    def test_except_通过(self):
+        ast = _parse_one("SELECT id FROM schema.a EXCEPT SELECT id FROM schema.b")
+        passed, reason = check_statement_type(ast)
         assert passed is True
-        assert reason == ""
 
-    def test_3层子查询_被拦截(self):
-        """3 层子查询嵌套应被拦截（超过默认最大深度 2）。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "WHERE id IN ("
-            "  SELECT user_id FROM schema.orders "
-            "  WHERE order_id IN ("
-            "    SELECT order_id FROM schema.items "
-            "    WHERE item_id IN (SELECT item_id FROM schema.inventory)"
-            "  )"
-            ")"
-        )
-        passed, reason = check_subquery_depth(ast)
-        assert passed is False
-        assert "嵌套深度" in reason
-
-    def test_子查询_in_from_也计入深度(self):
-        """FROM 子句中的子查询也应计入嵌套深度。"""
-        ast = _parse_one(
-            "SELECT AVG(sub.total) FROM ("
-            "  SELECT total FROM ("
-            "    SELECT amount AS total FROM schema.orders"
-            "  ) inner_sub"
-            ") sub"
-        )
-        passed, reason = check_subquery_depth(ast)
-        assert passed is True  # 2 层，边界
-
-    def test_自定义最大深度_1(self):
-        """设置 max_depth=1 时，2 层子查询应被拦截（1 层是边界，通过）。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "WHERE id IN ("
-            "  SELECT user_id FROM schema.orders "
-            "  WHERE order_id IN (SELECT order_id FROM schema.items)"
-            ")"
-        )
-        passed, reason = check_subquery_depth(ast, max_depth=1)
-        assert passed is False
-        assert "嵌套深度" in reason
-
-    def test_scalar_subquery_也计入深度(self):
-        """标量子查询（SELECT 列表中）也应计入嵌套深度。"""
-        ast = _parse_one(
-            "SELECT id, (SELECT MAX(amount) FROM schema.orders) AS max_amt "
-            "FROM schema.users"
-        )
-        passed, reason = check_subquery_depth(ast)
-        assert passed is True  # 1 层，通过
-
-
-# ==================== 4. check_union 集合操作检测 ====================
-
-
-class TestCheckUnion:
-    """check_union：检测 UNION / EXCEPT / INTERSECT。"""
-
-    def test_简单_select_通过(self):
-        """普通 SELECT 不含集合操作，应通过。"""
-        ast = _parse_one("SELECT id, name FROM schema.users")
-        passed, reason = check_union(ast)
+    def test_intersect_通过(self):
+        ast = _parse_one("SELECT id FROM schema.a INTERSECT SELECT id FROM schema.b")
+        passed, reason = check_statement_type(ast)
         assert passed is True
-        assert reason == ""
 
-    def test_union_all_被拦截(self):
-        """UNION ALL 应被拦截。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "UNION ALL "
-            "SELECT id FROM schema.admins"
-        )
-        passed, reason = check_union(ast)
-        assert passed is False
-        assert "UNION" in reason
+    def test_pivot_通过(self):
+        ast = _parse_one("PIVOT schema.t ON a USING SUM(b)")
+        passed, reason = check_statement_type(ast)
+        assert passed is True
 
-    def test_union_distinct_被拦截(self):
-        """UNION（默认 DISTINCT）应被拦截。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "UNION "
-            "SELECT id FROM schema.admins"
-        )
-        passed, reason = check_union(ast)
-        assert passed is False
-        assert "UNION" in reason
-
-    def test_except_被拦截(self):
-        """EXCEPT 操作应被拦截。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "EXCEPT "
-            "SELECT id FROM schema.admins"
-        )
-        passed, reason = check_union(ast)
-        assert passed is False
-        assert "EXCEPT" in reason
-
-    def test_intersect_被拦截(self):
-        """INTERSECT 操作应被拦截。"""
-        ast = _parse_one(
-            "SELECT id FROM schema.users "
-            "INTERSECT "
-            "SELECT id FROM schema.admins"
-        )
-        passed, reason = check_union(ast)
-        assert passed is False
-        assert "INTERSECT" in reason
+    def test_集合运算_分支含写语句_无法构造但仍由语句类型兜底(self):
+        """DML 不能作为集合运算分支（解析层即失败），这里确认解析失败不入执行。"""
+        assert parse_sql("SELECT 1 UNION INSERT INTO x VALUES (1)") is None
 
 
 # ==================== 5. check_cross_join CROSS JOIN 检测 ====================
 
 
 class TestCheckCrossJoin:
-    """check_cross_join：检测 CROSS JOIN。"""
+    """check_cross_join：只拦"隐式笛卡尔"，显式 CROSS JOIN / 标量广播放行。"""
 
     def test_inner_join_通过(self):
-        """INNER JOIN 应通过校验。"""
         ast = _parse_one(
             "SELECT a.id, b.name "
             "FROM schema.orders a "
@@ -388,233 +272,109 @@ class TestCheckCrossJoin:
         assert reason == ""
 
     def test_left_join_通过(self):
-        """LEFT JOIN 应通过校验。"""
         ast = _parse_one(
-            "SELECT a.id, b.name "
-            "FROM schema.orders a "
+            "SELECT a.id FROM schema.orders a "
             "LEFT JOIN schema.customers b ON a.cid = b.id"
         )
-        passed, reason = check_cross_join(ast)
-        assert passed is True
-        assert reason == ""
+        assert check_cross_join(ast) == (True, "")
 
-    def test_right_join_通过(self):
-        """RIGHT JOIN 应通过校验。"""
+    def test_显式_cross_join_放行(self):
+        """显式 CROSS JOIN 是成本风险（超时/内存兜底），不再语法拦截。"""
         ast = _parse_one(
-            "SELECT a.id, b.name "
-            "FROM schema.orders a "
-            "RIGHT JOIN schema.customers b ON a.cid = b.id"
+            "SELECT a.id, b.name FROM schema.orders a CROSS JOIN schema.customers b"
         )
         passed, reason = check_cross_join(ast)
-        assert passed is True
-        assert reason == ""
+        assert passed is True, reason
 
-    def test_full_outer_join_通过(self):
-        """FULL OUTER JOIN 应通过校验。"""
+    def test_标量广播子查询_放行(self):
+        """CROSS JOIN (SELECT 聚合 ...) 是单行标量广播，合法。"""
         ast = _parse_one(
-            "SELECT a.id, b.name "
-            "FROM schema.orders a "
-            "FULL OUTER JOIN schema.customers b ON a.cid = b.id"
+            "SELECT * FROM schema.orders "
+            "CROSS JOIN (SELECT MIN(amount) AS m FROM schema.orders) s"
         )
         passed, reason = check_cross_join(ast)
-        assert passed is True
-        assert reason == ""
+        assert passed is True, reason
 
-    def test_cross_join_被拦截(self):
-        """CROSS JOIN 应被拦截。"""
-        ast = _parse_one(
-            "SELECT a.id, b.name "
-            "FROM schema.orders a "
-            "CROSS JOIN schema.customers b"
-        )
+    def test_隐式逗号笛卡尔_被拦截(self):
+        """FROM a, b 是隐式笛卡尔（无 ON）——这才是该拦的形态。"""
+        ast = _parse_one("SELECT a.id, b.name FROM schema.orders a, schema.customers b")
         passed, reason = check_cross_join(ast)
         assert passed is False
-        assert "CROSS JOIN" in reason
+        assert "隐式笛卡尔" in reason
 
-    def test_隐式笛卡尔积_逗号分隔_不拦截(self):
-        """逗号分隔的隐式笛卡尔积不在拦截范围内（仅拦截显式 CROSS JOIN）。"""
+    def test_无_on的_join_被拦截(self):
+        ast = _parse_one("SELECT * FROM schema.orders JOIN schema.customers")
+        passed, reason = check_cross_join(ast)
+        assert passed is False
+        assert "隐式笛卡尔" in reason
+
+    def test_无_on但右侧是标量子查询_放行(self):
         ast = _parse_one(
-            "SELECT a.id, b.name "
-            "FROM schema.orders a, schema.customers b"
+            "SELECT * FROM schema.orders t JOIN (SELECT MAX(x) AS m FROM schema.orders) s"
         )
         passed, reason = check_cross_join(ast)
-        # 逗号分隔不是 CROSS JOIN 关键字，应放行（由上层业务决定是否拦截）
-        assert passed is True
-        assert reason == ""
+        assert passed is True, reason
 
 
-# ==================== 6. check_select_star SELECT * 检测 ====================
+# ==================== 6. SELECT * / 子查询深度 / 聚合白名单（已放行，标 disabled）====================
 
 
-class TestCheckSelectStar:
-    """check_select_star：检测 SELECT *。"""
+class TestRelaxedSyntaxRules:
+    """这些语法形态是成本风险，不是安全问题：放行并在 ast_details 里标记。"""
 
-    def test_select_显式列名_通过(self):
-        """SELECT 显式指定列名应通过。"""
-        ast = _parse_one("SELECT id, name FROM schema.users")
-        passed, reason = check_select_star(ast)
-        assert passed is True
-        assert reason == ""
+    def test_select_star_放行并告警(self):
+        allowed, reason, sanitized, details = ast_full_check("SELECT * FROM schema.users")
+        assert allowed is True, reason
+        assert details["select_star"]["blocked"] is False
+        assert "warning" in details["select_star"]
+        assert details["rules"]["select_star"]["passed"] is True
+        assert "LIMIT 100" in sanitized
 
-    def test_select_star_被拦截(self):
-        """SELECT * 应被拦截。"""
-        ast = _parse_one("SELECT * FROM schema.users")
-        passed, reason = check_select_star(ast)
-        assert passed is False
-        assert "SELECT *" in reason
+    def test_table_star_放行(self):
+        allowed, reason, _sanitized, details = ast_full_check("SELECT t.* FROM schema.users t")
+        assert allowed is True, reason
+        assert "warning" in details["select_star"]
 
-    def test_select_table_star_被拦截(self):
-        """SELECT table.* 应被拦截（table.* 也生成 Star 节点）。"""
-        ast = _parse_one("SELECT t.* FROM schema.users t")
-        passed, reason = check_select_star(ast)
-        assert passed is False
-        assert "SELECT *" in reason
+    def test_无_star_不产生告警(self):
+        allowed, _reason, _sanitized, details = ast_full_check("SELECT id FROM schema.users")
+        assert allowed is True
+        assert details["select_star"]["blocked"] is False
+        assert "warning" not in details["select_star"]
 
-    def test_select_多表_star_被拦截(self):
-        """SELECT a.*, b.name 中 a.* 应被拦截。"""
-        ast = _parse_one(
-            "SELECT a.*, b.name "
-            "FROM schema.orders a "
-            "INNER JOIN schema.customers b ON a.cid = b.id"
+    def test_三层子查询_放行(self):
+        sql = (
+            "SELECT id FROM schema.a WHERE id IN ("
+            "SELECT x FROM schema.b WHERE x IN ("
+            "SELECT y FROM schema.c WHERE y IN ("
+            "SELECT z FROM schema.d)))"
         )
-        passed, reason = check_select_star(ast)
-        assert passed is False
-        assert "SELECT *" in reason
+        allowed, reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is True, reason
+        assert details["subquery_depth"] == "disabled"
+        assert details["rules"]["subquery_depth"]["disabled"] is True
 
-    def test_count_star_不被拦截(self):
-        """COUNT(*) 中的 Star 是函数参数，按实现逻辑也会被拦截。"""
-        # 注意：COUNT(*) 在 SQLGlot 中可能生成 Star 节点，要看实际实现
-        # 当前实现中 check_select_star 查找所有 Star 节点
-        # 如果 COUNT(*) 生成了 Star 节点，也会被拦截
-        # 此测试验证实际行为
-        ast = _parse_one("SELECT COUNT(*) FROM schema.orders")
-        passed, reason = check_select_star(ast)
-        # 按当前实现，COUNT(*) 中的 * 也是 Star 节点，会被拦截
-        # 如果开发团队希望放行 COUNT(*)，需要修改实现
-        # 此处记录当前行为
-        if not passed:
-            assert "SELECT *" in reason
-
-    def test_select_表达式_通过(self):
-        """SELECT 表达式（非常量）应通过。"""
-        ast = _parse_one("SELECT 1 AS num, 'hello' AS greeting")
-        passed, reason = check_select_star(ast)
-        assert passed is True
-        assert reason == ""
-
-
-# ==================== 7. check_aggregations 聚合函数白名单 ====================
-
-
-class TestCheckAggregations:
-    """check_aggregations：聚合函数白名单校验。"""
-
-    def test_sum_通过(self):
-        """SUM 应在白名单中。"""
-        ast = _parse_one("SELECT SUM(amount) FROM schema.orders")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_avg_通过(self):
-        """AVG 应在白名单中。"""
-        ast = _parse_one("SELECT AVG(price) FROM schema.products")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_count_通过(self):
-        """COUNT 应在白名单中。"""
-        ast = _parse_one("SELECT COUNT(id) FROM schema.users")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_max_通过(self):
-        """MAX 应在白名单中。"""
-        ast = _parse_one("SELECT MAX(salary) FROM schema.employees")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_min_通过(self):
-        """MIN 应在白名单中。"""
-        ast = _parse_one("SELECT MIN(salary) FROM schema.employees")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_stddev_通过(self):
-        """STDDEV 应在白名单中。"""
-        ast = _parse_one("SELECT STDDEV(amount) FROM schema.orders")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_median_通过(self):
-        """MEDIAN 应在白名单中。"""
-        ast = _parse_one("SELECT MEDIAN(amount) FROM schema.orders")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_多聚合函数_通过(self):
-        """多个白名单聚合函数同时使用应通过。"""
-        ast = _parse_one(
-            "SELECT SUM(amount), AVG(price), COUNT(id) "
-            "FROM schema.orders"
+    def test_高级聚合_放行(self):
+        sql = (
+            "SELECT PERCENTILE_CONT(amount, 0.5), MEDIAN(amount), "
+            "COUNT_IF(x > 1), ARRAY_AGG(name) FROM schema.orders"
         )
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
+        allowed, reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is True, reason
+        assert details["aggregations"] == "disabled"
+        assert details["rules"]["aggregations"]["disabled"] is True
 
-    def test_未注册聚合函数_不拦截(self):
-        """不在白名单且不像聚合函数的函数（如 MY_AGG）应通过（视为普通函数）。"""
-        ast = _parse_one("SELECT MY_AGG(amount) FROM schema.orders")
-        passed, reason = check_aggregations(ast)
-        # MY_AGG 不被识别为聚合函数，视为普通函数，放行
-        assert passed is True
-        assert reason == ""
-
-    def test_看起来像聚合_但不在白名单_被拦截(self):
-        """看起来像聚合函数但不在白名单中的函数应被拦截。"""
-        # PERCENTILE 在 _looks_like_aggregate 中，但不在 ALLOWED_AGGREGATIONS
-        # （白名单只放行 PERCENTILE_CONT / PERCENTILE_DISC）
-        ast = _parse_one("SELECT PERCENTILE(amount) FROM schema.orders")
-        passed, reason = check_aggregations(ast)
-        assert passed is False
-        assert "PERCENTILE" in reason
-
-    def test_普通函数_不被误判为聚合(self):
-        """普通函数如 LOWER 不应被误判为聚合函数。"""
-        ast = _parse_one("SELECT LOWER(name) FROM schema.users")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_聚合函数和普通函数混合_通过(self):
-        """聚合函数与普通函数混合使用，应通过。"""
-        ast = _parse_one(
-            "SELECT SUM(amount), LOWER(name) "
-            "FROM schema.orders o "
-            "INNER JOIN schema.users u ON o.uid = u.id"
-        )
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_无聚合函数_通过(self):
-        """不含聚合函数的 SELECT 应通过。"""
-        ast = _parse_one("SELECT id, name FROM schema.users")
-        passed, reason = check_aggregations(ast)
-        assert passed is True
-        assert reason == ""
-
-    def test_白名单完整(self):
-        """验证 ALLOWED_AGGREGATIONS 包含预期的核心聚合函数。"""
-        expected = {"SUM", "AVG", "COUNT", "MAX", "MIN"}
-        for func in expected:
-            assert func in ALLOWED_AGGREGATIONS, f"{func} 应在白名单中"
+    def test_窗口函数_全部放行(self):
+        for func in (
+            "LAG(x) OVER (ORDER BY id)",
+            "LEAD(x) OVER (ORDER BY id)",
+            "RANK() OVER (ORDER BY x)",
+            "NTILE(4) OVER (ORDER BY x)",
+            "FIRST_VALUE(x) OVER (PARTITION BY a ORDER BY b)",
+            "SUM(SUM(x)) OVER ()",
+        ):
+            sql = f"SELECT id, {func} FROM schema.orders"
+            allowed, reason, _sanitized, _details = ast_full_check(sql)
+            assert allowed is True, f"{func}: {reason}"
 
 
 # ==================== 8. check_dangerous_functions 危险函数黑名单 ====================
@@ -639,11 +399,35 @@ class TestCheckDangerousFunctions:
 
     def test_read_csv_被拦截(self):
         """READ_CSV 应被拦截。"""
-        ast = _parse_one("SELECT * FROM READ_CSV('/etc/passwd')")
-        # 注意：SELECT * 本身会被 check_select_star 拦截，但 check_dangerous_functions 独立检测
+        ast = _parse_one("SELECT a FROM READ_CSV('/etc/passwd')")
         passed, reason = check_dangerous_functions(ast)
         assert passed is False
         assert "READ_CSV" in reason
+
+    def test_duckdb_文件表函数家族_全部被拦截(self):
+        """文件读取表函数家族必须整体拦（否则"表函数跳过 schema 校验"会打开文件通道）。"""
+        family = [
+            ("READ_CSV_AUTO", "SELECT a FROM read_csv_auto('C:/tmp/x.csv')"),
+            ("READ_CSV", "SELECT a FROM read_csv('x.csv')"),
+            ("READ_JSON", "SELECT a FROM read_json('x.json')"),
+            ("READ_JSON_AUTO", "SELECT a FROM read_json_auto('x.json')"),
+            ("READ_PARQUET", "SELECT a FROM read_parquet('x.parquet')"),
+            ("PARQUET_SCAN", "SELECT a FROM parquet_scan('x.parquet')"),
+            ("READ_TEXT", "SELECT a FROM read_text('x.txt')"),
+            ("READ_BLOB", "SELECT a FROM read_blob('x.bin')"),
+            ("GLOB", "SELECT a FROM glob('*.csv')"),
+            ("SNIFF_CSV", "SELECT a FROM sniff_csv('x.csv')"),
+            ("DELTA_SCAN", "SELECT a FROM delta_scan('x')"),
+            ("ICEBERG_SCAN", "SELECT a FROM iceberg_scan('x')"),
+            ("POSTGRES_SCAN", "SELECT a FROM postgres_scan('x', 't')"),
+            ("MYSQL_SCAN", "SELECT a FROM mysql_scan('x', 't')"),
+            ("SQLITE_SCAN", "SELECT a FROM sqlite_scan('x.db', 't')"),
+        ]
+        for name, sql in family:
+            ast = _parse_one(sql)
+            passed, reason = check_dangerous_functions(ast)
+            assert passed is False, f"{name} 未被拦截: {sql}"
+            assert name in reason, f"{name} 拦截原因异常: {reason}"
 
     def test_read_text_被拦截(self):
         """READ_TEXT 应被拦截。"""
@@ -692,7 +476,12 @@ class TestCheckDangerousFunctions:
 
     def test_黑名单完整(self):
         """验证 DANGEROUS_FUNCTIONS 包含关键危险函数。"""
-        key_funcs = {"READ_CSV", "READ_TEXT", "WRITE_CSV", "LOAD", "INSTALL", "PRAGMA", "SET"}
+        key_funcs = {
+            "READ_CSV", "READ_CSV_AUTO", "READ_TEXT", "WRITE_CSV",
+            "PARQUET_SCAN", "GLOB", "SNIFF_CSV", "ICEBERG_SCAN",
+            "ATTACH", "DETACH", "COPY", "EXPORT_DATABASE", "IMPORT_DATABASE",
+            "LOAD", "INSTALL", "PRAGMA", "SET",
+        }
         for func in key_funcs:
             assert func in DANGEROUS_FUNCTIONS, f"{func} 应在黑名单中"
 
@@ -738,6 +527,19 @@ class TestCheckTableRefs:
         assert passed is False
         assert "schema" in reason.lower()
 
+    def test_表函数_跳过schema校验(self):
+        """FROM generate_series(...) 是表函数（无 schema 形态），格式层放行。"""
+        ast = _parse_one("SELECT * FROM generate_series(1, 3)")
+        passed, reason = check_table_refs(ast)
+        assert passed is True, reason
+
+    def test_文件路径当成表引用_仍被拒绝(self):
+        """FROM 'C:/x.csv' 会被解析成无 schema 的表引用 → 必须继续拒绝。"""
+        ast = _parse_one("SELECT a FROM 'C:/tmp/x.csv'")
+        passed, reason = check_table_refs(ast)
+        assert passed is False
+        assert "schema" in reason.lower()
+
     def test_部分表有schema_部分没有_被拦截(self):
         """部分表有 schema 前缀、部分没有，应被拦截。"""
         ast = _parse_one(
@@ -761,7 +563,7 @@ class TestCheckTableRefs:
 
         历史 bug：标识符校验用 ^[a-zA-Z_][a-zA-Z0-9_]*$，把带中文的数据源 schema
         全部判非法 → 上传中文命名的数据源后所有查询被拦（实测踩坑）。
-        修法：放行 Unicode 字母（\w + 中文区间），仍禁引号/分号/空白/注释符/数字开头。
+        修法：放行 Unicode 字母（\\w + 中文区间），仍禁引号/分号/空白/注释符/数字开头。
         """
         ast = _parse_one('SELECT id FROM "校招岗位_AI应用与Python_228bcec9"."data"')
         passed, reason = check_table_refs(ast)
@@ -1040,32 +842,39 @@ class TestAstFullCheck:
         assert details is not None
         assert details["failed_rule"] == "dangerous_functions"
 
-    def test_select_star_被拦截(self):
-        """SELECT * 应被拦截。"""
+    def test_select_star_放行并告警(self):
+        """SELECT * 不再拦截：只记 warning（成本风险交给超时/内存上限）。"""
         sql = "SELECT * FROM schema.users"
         allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is False
-        assert "SELECT *" in reason
-        assert details["failed_rule"] == "select_star"
+        assert allowed is True, reason
+        assert details["select_star"]["blocked"] is False
+        assert "warning" in details["select_star"]
 
-    def test_union_被拦截(self):
-        """UNION 操作应被拦截（由语句类型检查先行捕获，因为 UNION 解析为 Union 节点而非 Select）。"""
-        sql = "SELECT id FROM schema.users UNION SELECT id FROM schema.admins"
-        allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is False
-        # UNION 被解析为 Union 节点，由 check_statement_type 先行拦截
-        assert "类型" in reason or "Union" in reason
-        assert details["failed_rule"] == "statement_type"
+    def test_union_放行(self):
+        """UNION / EXCEPT / INTERSECT 放行：表归属校验会遍历所有分支。"""
+        for sql in (
+            "SELECT id FROM schema.users UNION SELECT id FROM schema.admins",
+            "SELECT id FROM schema.users UNION ALL SELECT id FROM schema.admins",
+            "SELECT id FROM schema.users EXCEPT SELECT id FROM schema.admins",
+        ):
+            allowed, reason, _sanitized, details = ast_full_check(sql)
+            assert allowed is True, f"{sql}: {reason}"
+            assert details["statement_type"] == "Union" or details["statement_type"] == "Except"
 
-    def test_cross_join_被拦截(self):
-        """CROSS JOIN 应被拦截。"""
+    def test_显式_cross_join_放行(self):
         sql = "SELECT * FROM schema.orders CROSS JOIN schema.customers"
-        allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is False
-        assert "CROSS JOIN" in reason
+        allowed, reason, _sanitized, _details = ast_full_check(sql)
+        assert allowed is True, reason
 
-    def test_子查询超深_被拦截(self):
-        """超过 2 层的子查询嵌套应被拦截。"""
+    def test_隐式笛卡尔_被拦截(self):
+        sql = "SELECT * FROM schema.orders, schema.customers"
+        allowed, reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is False
+        assert "隐式笛卡尔" in reason
+        assert details["failed_rule"] == "cross_join"
+
+    def test_子查询超深_放行(self):
+        """子查询深度限制已删除（零安全价值）：多层级联查询必须能跑。"""
         sql = (
             "SELECT id FROM schema.users "
             "WHERE id IN ("
@@ -1076,10 +885,9 @@ class TestAstFullCheck:
             "  )"
             ")"
         )
-        allowed, reason, sanitized, details = ast_full_check(sql)
-        assert allowed is False
-        assert "嵌套深度" in reason
-        assert details["failed_rule"] == "subquery_depth"
+        allowed, reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is True, reason
+        assert details["subquery_depth"] == "disabled"
 
     def test_裸表名_被拦截(self):
         """不带 schema 前缀的表引用应被拦截。"""
@@ -1098,9 +906,8 @@ class TestAstFullCheck:
         assert "rules" in details
         # 验证所有规则都在 details 中
         expected_rules = [
-            "statement_type", "subquery_depth", "union",
-            "cross_join", "select_star", "aggregations",
-            "dangerous_functions", "table_refs",
+            "statement_type", "dangerous_functions", "cross_join",
+            "table_refs", "subquery_depth", "aggregations", "select_star",
         ]
         for rule in expected_rules:
             assert rule in details["rules"], f"规则 {rule} 应出现在 details 中"
@@ -1237,11 +1044,12 @@ class TestEdgeCases:
             "FROM schema.orders"
         )
         ast = _parse_one(sql)
-        # ROW_NUMBER 不是聚合函数，也不是危险函数，应通过
-        passed_agg, _ = check_aggregations(ast)
-        assert passed_agg is True
-        passed_danger, _ = check_dangerous_functions(ast)
-        assert passed_danger is True
+        # 窗口函数不在任何黑名单里，应通过；聚合白名单已删除（disabled）
+        passed, reason = check_dangerous_functions(ast)
+        assert passed is True, reason
+        allowed, reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is True, reason
+        assert details["aggregations"] == "disabled"
 
     def test_带别名_through(self):
         """带别名的查询应通过。"""
@@ -1273,19 +1081,25 @@ class TestRulePriority:
     """ast_full_check 中多个规则同时触发时的行为。"""
 
     def test_多条规则同时违规_返回首个失败(self):
-        """多条规则同时违规时，应返回第一个失败的规则。"""
-        # SELECT * + UNION + CROSS JOIN，第一个失败的规则是 select_star
-        sql = "SELECT * FROM schema.orders CROSS JOIN schema.customers UNION SELECT * FROM schema.products"
-        allowed, reason, sanitized, details = ast_full_check(sql)
+        """多条规则同时违规时，应返回 checks 顺序里的第一个失败规则。
+
+        新顺序：statement_type → dangerous_functions → cross_join → table_refs
+        （allowed_schemas 传入时再追加 table_ownership）。
+        """
+        sql = (
+            "SELECT a FROM read_csv_auto('x.csv') CROSS JOIN "
+            "schema.orders, schema.customers"
+        )
+        allowed, reason, _sanitized, details = ast_full_check(sql)
         assert allowed is False
-        # 第一个检查的规则是 statement_type，然后是 subquery_depth，然后是 union
-        # 在 checks 列表中顺序是: statement_type, subquery_depth, union, cross_join, select_star, ...
-        # 注意：SQLGlot 解析时会先解析成什么？UNION 可能被解析为 Union 节点
-        # 第一个被触发的规则可能是 union（因为它先于 select_star 和 cross_join）
-        # 也可能是其他，取决于 AST 结构
-        # 我们只验证确实被拦截了
         assert details is not None
-        assert "failed_rule" in details
+        assert details["failed_rule"] == "dangerous_functions", details.get("failed_rule")
+
+    def test_危险函数优先于表引用(self):
+        sql = "SELECT a FROM users, read_csv('x.csv')"
+        allowed, _reason, _sanitized, details = ast_full_check(sql)
+        assert allowed is False
+        assert details["failed_rule"] == "dangerous_functions"
 
     def test_先通过后违规_顺序正确(self):
         """先通过所有语法检查，再被 LIMIT 注入，不应出错。"""
@@ -1295,3 +1109,151 @@ class TestRulePriority:
         assert "LIMIT 100" in sanitized
         # 验证 LIMIT 只出现一次
         assert sanitized.count("LIMIT") == 1
+
+# ==================== 14. 放宽后的回归集（P3-A 验收：真实被拦 SQL 全部解锁）====================
+
+_PASS_SQLS = [
+    'SELECT a FROM "s"."data"',
+    'SELECT id, LAG(x) OVER (ORDER BY id) FROM "s"."data"',
+    'SELECT LEAD(x) OVER (ORDER BY id) AS n FROM "s"."data"',
+    'SELECT RANK() OVER (ORDER BY x) AS r FROM "s"."data"',
+    'SELECT NTILE(4) OVER (ORDER BY x) FROM "s"."data"',
+    'SELECT FIRST_VALUE(x) OVER (PARTITION BY a ORDER BY b) FROM "s"."data"',
+    'SELECT SUM(SUM(x)) OVER () FROM "s"."data"',
+    'SELECT PERCENTILE_CONT(x, 0.5) FROM "s"."data"',
+    'SELECT CASE WHEN x > 1 THEN \'a\' ELSE \'b\' END AS seg FROM "s"."data"',
+    'WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT * FROM a JOIN b ON TRUE',
+    'SELECT id FROM "s"."a" UNION ALL SELECT id FROM "s"."b"',
+    'PIVOT "s"."data" ON a USING SUM(b)',
+    'SELECT * FROM "s"."data" CROSS JOIN (SELECT MIN(x) AS m FROM "s"."data") s',
+    'SELECT * FROM generate_series(1, 3)',
+    'SELECT COUNT_IF(x > 1) FROM "s"."data"',
+    'SELECT * FROM (SELECT x, ROW_NUMBER() OVER () rn FROM "s"."data") t WHERE rn <= 3',
+    "SELECT id FROM data",   # 裸表名 + known_tables 自动补全
+]
+
+_REJECT_SQLS = [
+    "SELECT 1; SELECT 2",
+    'INSERT INTO "s"."data" VALUES (1)',
+    'UPDATE "s"."data" SET a = 1',
+    'DROP TABLE "s"."data"',
+    "SELECT a FROM read_csv_auto('C:/tmp/x.csv')",
+    "SELECT a FROM read_csv('x.csv')",
+    "SELECT a FROM parquet_scan('x.parquet')",
+    "SELECT a FROM glob('*.csv')",
+    "SELECT a FROM sniff_csv('x.csv')",
+    "SELECT a FROM 'C:/tmp/x.csv'",
+    'SELECT id FROM "tenant_other"."data"',
+    'SELECT * FROM "s"."a", "s"."b"',
+    'SELECT id FROM users',   # 未知名：不猜、不补、拒绝
+]
+
+
+class TestRelaxedRegression:
+    @pytest.mark.parametrize("sql", _PASS_SQLS)
+    def test_应通过(self, sql):
+        allowed, reason, _sanitized, _details = ast_full_check(
+            sql, allowed_schemas={"s"}, known_tables={"data"}
+        )
+        assert allowed is True, f"应放行却被拦: {sql} -> {reason}"
+
+    @pytest.mark.parametrize("sql", _REJECT_SQLS)
+    def test_应拒绝(self, sql):
+        allowed, reason, _sanitized, _details = ast_full_check(
+            sql, allowed_schemas={"s"}, known_tables={"data"}
+        )
+        assert allowed is False, f"应拦截却放行: {sql}"
+        assert reason, f"拦截必须给原因: {sql}"
+
+
+# ==================== 15. 裸表名自动补全 ====================
+
+
+class TestBareTableAutocomplete:
+    def _chk(self, sql, schemas, known):
+        return ast_full_check(sql, allowed_schemas=schemas, known_tables=known)
+
+    def test_单schema已知表_补全并通过(self):
+        allowed, reason, sanitized, details = self._chk(
+            "SELECT id FROM data", {"s"}, {"data"}
+        )
+        assert allowed is True, reason
+        assert details["completed_tables"] == ["s.data"]
+        assert '"s"' in sanitized.split("FROM", 1)[1]
+
+    def test_外部库表名_也可补全(self):
+        allowed, reason, _sanitized, details = self._chk(
+            'SELECT id FROM orders', {"s"}, {"orders"}
+        )
+        assert allowed is True, reason
+        assert details["completed_tables"] == ["s.orders"]
+
+    def test_未知名_不补仍拒绝(self):
+        allowed, reason, _sanitized, details = self._chk(
+            "SELECT id FROM users", {"s"}, {"data"}
+        )
+        assert allowed is False
+        assert details["failed_rule"] == "table_refs"
+        assert "schema" in reason.lower()
+
+    def test_无known_tables_保持旧行为拒绝(self):
+        allowed, _reason, _sanitized, details = self._chk(
+            "SELECT id FROM data", {"s"}, None
+        )
+        assert allowed is False
+        assert details["failed_rule"] == "table_refs"
+
+    def test_多schema_不补仍拒绝(self):
+        allowed, _reason, _sanitized, details = self._chk(
+            "SELECT id FROM data", {"s", "s2"}, {"data"}
+        )
+        assert allowed is False
+        assert details["failed_rule"] == "table_refs"
+
+    def test_已带schema_不重复补全(self):
+        allowed, reason, _sanitized, details = self._chk(
+            'SELECT id FROM "s"."data"', {"s"}, {"data"}
+        )
+        assert allowed is True, reason
+        assert not details.get("completed_tables")
+
+
+# ==================== 16. 敏感列旁路（agent_tools AST 版）====================
+
+
+class TestSensitiveColumnBypass:
+    """旧实现是 SQL 文本正则；SELECT * 不出现列名即可绕过。新实现解析 AST 求交。"""
+
+    META = {"fields": [{"name": "phone", "sensitive": True}, {"name": "region"}]}
+
+    @staticmethod
+    def _hits(sql, sensitive=None):
+        from app.services.agent_tools import QueryDatasourceTool
+
+        return QueryDatasourceTool._sensitive_columns_in_sql(
+            sql, sensitive or {"phone"}, TestSensitiveColumnBypass.META
+        )
+
+    def test_显式敏感列被拦(self):
+        assert self._hits('SELECT phone FROM "s"."data"') == ["phone"]
+
+    def test_select_star_命中敏感列(self):
+        assert self._hits('SELECT * FROM "s"."data"') == ["phone"]
+
+    def test_表前缀星号_命中敏感列(self):
+        assert self._hits('SELECT t.* FROM "s"."data" t') == ["phone"]
+
+    def test_表达式里的字段名_命中敏感列(self):
+        assert self._hits('SELECT SUM("phone") FROM "s"."data"') == ["phone"]
+
+    def test_无敏感列时_select_star_不拦(self):
+        meta_only_region = {"fields": [{"name": "region"}]}
+        from app.services.agent_tools import QueryDatasourceTool
+
+        hits = QueryDatasourceTool._sensitive_columns_in_sql(
+            'SELECT * FROM "s"."data"', {"phone"}, meta_only_region
+        )
+        assert hits == []
+
+    def test_解析失败_退回正则(self):
+        assert self._hits("SELECT phone FROM") == ["phone"]

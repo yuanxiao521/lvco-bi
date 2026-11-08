@@ -745,6 +745,16 @@ async def execute_chart_query(
             if _sort_field:
                 _requested.add(str(_sort_field).lower())
             _blocked = sorted(_sensitive & _requested)
+            if not _blocked:
+                # 表达式度量把字段名内联进 expression 字符串（如 SUM("phone")），
+                # 只按 field 比对会漏；对表达式文本做一次敏感列扫描（最小改动）。
+                from app.services.sensitive_columns import referenced_sensitive as _ref_sensitive
+
+                _expr_text = " ".join(
+                    [str(m.get("expression") or "") for m in measure_dicts]
+                    + [str(f.get("expression") or "") for f in filter_dicts]
+                )
+                _blocked = sorted(_ref_sensitive(_expr_text, _sensitive))
             if _blocked:
                 raise QueryEngineError(
                     "以下字段被标记为敏感，不允许用于图表：" + "、".join(_blocked),

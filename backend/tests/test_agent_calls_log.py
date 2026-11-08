@@ -307,11 +307,29 @@ def test_error_layer_recorded_from_tool_error(monkeypatch, recorder):
 
 
 def test_query_sql_guard_error_carries_layer():
-    """query_sql 的 guard 拦截结果要带 layer：AST 折进 L3 时按 L4 记（不改 guard 实现）。"""
+    """query_sql 的 guard 拦截结果要带 layer：AST 折进 L3 时按 L4 记（不改 guard 实现）。
+
+    注：P3-A 起 guard 移到数据源解析之后（裸表名自动补全需要 schema/known_tables），
+    所以这里用假 db_session 提供最小 datasource，不需要真实数据库。
+    """
     from app.services.agent_tools import QueryDatasourceTool
 
+    class _Result:
+        def scalar_one_or_none(self):
+            return SimpleNamespace(
+                id="ds",
+                name="demo",
+                source_type="csv",
+                schema_meta={"fields": []},
+                connection_config={},
+            )
+
+    class _DB:
+        async def execute(self, *args, **kwargs):
+            return _Result()
+
     out = _run(QueryDatasourceTool().execute(
-        datasource_id="ds", sql="DROP TABLE t", user_id="u", db_session=None,
+        datasource_id="ds", sql="DROP TABLE t", user_id="u", db_session=_DB(),
     ))
     data = json.loads(out)
     assert "error" in data
