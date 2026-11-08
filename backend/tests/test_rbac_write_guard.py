@@ -32,8 +32,16 @@ from app.api.v1.canvases import router as canvases_router
 from app.api.v1.connections import router as connections_router
 from app.api.v1.dashboards import router as dashboards_router
 from app.api.v1.datasources import router as datasources_router
-from app.api.v1.permissions import UserStatusUpdateRequest, update_user_status
+from app.api.v1.insights import router as insights_router
+from app.api.v1.metrics import router as metrics_router
+from app.api.v1.permissions import (
+    UserStatusUpdateRequest,
+    list_users,
+    update_user_status,
+)
 from app.api.v1.reports import router as reports_router
+from app.api.v1.statistics import statistics_router
+from app.api.v1.trash import router as trash_router
 # 导入 router 会执行"给 AI 额度入口追加依赖"的装配逻辑（必须在使用 ai_module.routes 断言前导入）
 from app.api.v1.router import AI_EDITOR_ONLY_PATHS
 from app.main import app
@@ -50,6 +58,22 @@ INTENTIONAL_UNGUARDED = {
     # 连接级健康探测：只读网络操作（不改配置、不动凭据）。与 datasources 的 GET /health 同语义，
     # 两处保持一致都按"只读"处理（Lead 原话既说"健康检查触发要挂"又说"不要挂 GET"，冲突时取后者）。
     ("POST", "/connections/{connection_id}/health"),
+    # ── 只读统计（statistics.py）────────────────────────────────────────────
+    # 这 6 个 POST 只是"用 JSON body 传参"的统计计算：全文件没有 db.add/commit/
+    # insert/update/delete（已 grep 核对），只往 DuckDB 发 SELECT 并把结果算好返回。
+    # 按 Lead 的"只读统计不要挂"处理；它们的 POST 是传参便利，不是写语义。
+    ("POST", "/statistics/describe"),
+    ("POST", "/statistics/correlation"),
+    ("POST", "/statistics/ranking"),
+    ("POST", "/statistics/summary"),
+    ("POST", "/statistics/comparison"),
+    ("POST", "/statistics/preview"),
+    # ── 彻底删除 ────────────────────────────────────────────────────────────
+    # trash.py:148 已有比 require_editor **更严格**的 admin-only 内联闸：
+    # 挂上 require_editor 只会把 viewer 看到的提示从"彻底删除仅限管理员操作"
+    # 降级成泛化的"只读账号不能执行该操作"，信息量更差，故不重复挂。
+    # 该行为由 test_trash_permanent_delete_is_admin_only 单独盯住。
+    ("DELETE", "/trash/{item_type}/{item_id}"),
 }
 
 # AI 路由里"写但不算额度"的会话簿记端点（建会话/改名/删会话/取消任务），不做编辑闸
@@ -82,6 +106,12 @@ def _has_editor_guard(route) -> bool:
         if getattr(dep, "dependency", None) is require_editor:
             return True
     return False
+
+
+_ALL_ROUTERS = (
+    datasources_router, connections_router, canvases_router, dashboards_router,
+    reports_router, metrics_router, insights_router, statistics_router, trash_router,
+)
 
 
 def _iter_routes(router):
@@ -135,6 +165,10 @@ def test_every_write_route_has_editor_guard():
         "canvases": canvases_router,
         "dashboards": dashboards_router,
         "reports": reports_router,
+        "metrics": metrics_router,
+        "insights": insights_router,
+        "statistics": statistics_router,
+        "trash": trash_router,
     }
     missing = []
     for name, router in routers.items():
@@ -151,8 +185,7 @@ def test_every_write_route_has_editor_guard():
 def test_no_get_route_is_guarded():
     """只读账号必须还能看，GET 一律不许挂 require_editor。"""
     guarded = []
-    for router in (datasources_router, connections_router, canvases_router,
-                   dashboards_router, reports_router):
+    for router in _ALL_ROUTERS:
         for method, route in _iter_routes(router):
             if method == "GET" and _has_editor_guard(route):
                 guarded.append(route.path)
@@ -162,7 +195,7 @@ def test_no_get_route_is_guarded():
 def test_intentional_unguarded_list_is_accurate():
     """白名单不能腐烂：列进去的端点必须真的没挂，没列进去的必须挂了。"""
     by_path = {}
-    for router in (canvases_router, dashboards_router, connections_router):
+    for router in _ALL_ROUTERS:
         for method, route in _iter_routes(router):
             by_path[(method, route.path)] = _has_editor_guard(route)
     for key in INTENTIONAL_UNGUARDED:
@@ -400,3 +433,111 @@ def test_disabled_account_cannot_login(monkeypatch):
 def test_status_body_accepts_camel_case():
     body = UserStatusUpdateRequest.model_validate({"isActive": False})
     assert body.is_active is False
+
+# ── 6) P4-A：指标 / 洞察 / 统计 / 回收站 + isActive 暴露 ─────────────────────
+
+
+@pytest.mark.parametrize(
+    "method,path,body",
+    [
+        ("POST", "/api/v1/metrics", {}),
+        ("PATCH", f"/api/v1/metrics/{uuid.uuid4()}", {"name": "x"}),
+        ("DELETE", f"/api/v1/metrics/{uuid.uuid4()}", None),
+        ("POST", "/api/v1/insights/rules", {}),
+        ("DELETE", f"/api/v1/insights/rules/{uuid.uuid4()}", None),
+        ("POST", f"/api/v1/trash/canvas/{uuid.uuid4()}/restore", None),
+    ],
+)
+def test_viewer_blocked_on_p4a_write_endpoints(method, path, body):
+    """viewer 打指标/洞察/回收站的写端点 → 403（早于 body 校验，所以空 body 也应是 403）。"""
+    client = _client(UserRole.viewer)
+    try:
+        resp = client.request(method, path, json=body) if body is not None else client.request(method, path)
+    finally:
+        _cleanup_overrides()
+    assert resp.status_code == 403, f"{method} {path} 期望 403，实际 {resp.status_code}: {resp.text[:200]}"
+    assert resp.json()["detail"]["code"] == "FORBIDDEN"
+
+
+def test_editor_passes_metrics_guard():
+    """editor 不该被 403 挡住：空 body 会走到 422（参数校验），说明已越过权限闸。"""
+    client = _client(UserRole.editor)
+    try:
+        resp = client.post("/api/v1/metrics", json={})
+    finally:
+        _cleanup_overrides()
+    assert resp.status_code != 403, f"editor 被误拦: {resp.text[:200]}"
+    assert resp.status_code == 422
+
+
+def test_read_only_statistics_stays_open_to_viewer():
+    """statistics 的 6 个 POST 是无副作用的统计计算 → 不挂闸，viewer 应走到参数校验(422) 而不是 403。"""
+    client = _client(UserRole.viewer)
+    try:
+        resp = client.post("/api/v1/statistics/describe", json={})
+    finally:
+        _cleanup_overrides()
+    assert resp.status_code != 403, f"只读统计被误挂了写闸: {resp.text[:200]}"
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("role", [UserRole.viewer, UserRole.editor])
+def test_trash_permanent_delete_is_admin_only(role):
+    """彻底删除由更严格的 admin-only 内联闸守着（trash.py:148）：viewer/editor 都 403，且提示是管理员口径。"""
+    client = _client(role)
+    try:
+        resp = client.delete(f"/api/v1/trash/canvas/{uuid.uuid4()}")
+    finally:
+        _cleanup_overrides()
+    assert resp.status_code == 403, resp.text[:200]
+    assert "管理员" in resp.json()["detail"]["message"]
+
+
+def test_user_response_exposes_is_active():
+    from app.schemas import UserResponse
+
+    payload = UserResponse.model_validate(_user(UserRole.editor, is_active=False)).model_dump(
+        mode="json", by_alias=True
+    )
+    assert payload["isActive"] is False
+    # 既有字段仍在（没有因为新增字段而改变契约）
+    assert payload["email"] == "probe@example.invalid"
+    assert payload["role"] == "editor"
+
+
+def test_user_response_is_active_defaults_true():
+    """老调用方不传 is_active / 对象上没有该属性时，默认 True——新字段不能把既有构造炸掉。"""
+    from app.schemas import UserResponse
+
+    class _Lite:
+        id = uuid.uuid4()
+        email = "lite@example.invalid"
+        display_name = "lite"
+        avatar_url = None
+        role = UserRole.editor
+        created_at = datetime.now(timezone.utc)
+
+    payload = UserResponse.model_validate(_Lite()).model_dump(mode="json", by_alias=True)
+    assert payload["isActive"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_user_list_exposes_is_active():
+    """管理界面靠 GET /permissions/users 看谁被停用 → 列表项必须带 isActive。"""
+    admin = _user(UserRole.admin)
+    disabled = _user(UserRole.editor, is_active=False)
+
+    count_res = MagicMock()
+    count_res.scalar.return_value = 1
+    users_res = MagicMock()
+    users_res.scalars.return_value.all.return_value = [disabled]
+    empty_res = MagicMock()
+    empty_res.all.return_value = []
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[count_res, users_res, empty_res, empty_res, empty_res])
+
+    resp = await list_users(1, 20, None, None, db, admin)
+    item = resp.data["items"][0]
+    assert item["isActive"] is False
+    assert item["email"] == "probe@example.invalid"

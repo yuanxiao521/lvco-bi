@@ -71,6 +71,12 @@ class UserResponse(CamelModel):
     avatar_url: str | None
     role: UserRole
     created_at: datetime
+    # P4-A：账号是否启用。放在最后 + 给默认值 True：
+    #   - 不打乱既有字段的声明顺序与序列化顺序；
+    #   - 老调用方（手工构造 UserResponse 不传该字段）不会因必填而炸；
+    #   - CamelModel 的 alias_generator 会输出 isActive，前端直接可用。
+    # from_attributes=True 下 model_validate(User) 会自动读 user.is_active。
+    is_active: bool = True
 
 
 class UserCreate(CamelModel):

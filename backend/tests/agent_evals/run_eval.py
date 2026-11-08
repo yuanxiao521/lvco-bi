@@ -366,15 +366,21 @@ def question_expected_types(q: dict[str, Any]) -> list[str]:
     return []
 
 
-def build_sql_executor(attempt: AttemptTrace):
+def build_sql_executor(attempt: AttemptTrace, expected_datasource: str | None = None):
     """从 attempt 的 list_datasources 结果解析真实 table_ref，构造 SQL 执行器。
 
-    评测数据集的 expected_sql_template 使用裸表名（如 ecommerce_orders），
-    而 Agent 使用真实 DuckDB 表引用（"schema"."data"）。执行器把裸表名替换为
-    真实引用，分别执行 expected_sql 与 agent_sql 并比较结果集，
-    得到真实 SQL 准确率（替代关键字重叠的文本近似）。
+    评测数据集的 expected_sql_template 使用**裸表名**（如 ecommerce_orders），
+    而 Agent 使用真实 DuckDB 表引用（"schema"."data"）。执行器把裸表名替换成真实引用，
+    分别执行 expected_sql 与 agent_sql 并比较结果集，得到真实 SQL 准确率。
+
+    两个历史坑（2026-11-08 实测踩到，SQL 准确率因此恒为 0）：
+      1. 原来硬编码只替换 `ecommerce_orders`，数据集里的 `product_performance` 等
+         表名原样发下去 → Binder Error；
+      2. 原来取**第一个**有 table_ref 的数据源，而不是这道题声明的那个 →
+         用 A 表去跑 B 表的 SQL。现在按 `expected_datasource` 名字优先匹配。
     """
-    table_ref = None
+    # name -> table_ref（list_datasources 的每一项都带 name/table_ref）
+    mapping: dict[str, str] = {}
     for e in attempt.events:
         if e.get("type") == "tool_result" and e.get("name") == "list_datasources":
             try:
@@ -382,20 +388,34 @@ def build_sql_executor(attempt: AttemptTrace):
             except Exception:
                 continue
             for it in parsed.get("datasources") or []:
-                if isinstance(it, dict) and it.get("table_ref"):
-                    table_ref = it["table_ref"]
-                    break
-            if table_ref:
-                break
-    if not table_ref:
+                if isinstance(it, dict) and it.get("table_ref") and it.get("name"):
+                    mapping[str(it["name"]).strip().lower()] = it["table_ref"]
+            break
+    if not mapping:
         return None
+
+    wanted = (expected_datasource or "").strip().lower()
+    if wanted and wanted in mapping:
+        table_ref = mapping[wanted]
+    else:
+        if wanted:
+            log.warning(
+                "judge_datasource_not_listed expected=%s available=%s",
+                expected_datasource, list(mapping.keys()),
+            )
+        table_ref = next(iter(mapping.values()))
+
+    # 所有已知数据源名都参与替换（长名优先，避免 "orders" 先吃掉 "ecommerce_orders"）
+    names = sorted(mapping, key=len, reverse=True)
 
     def exec_sql(sql: str) -> list:
         if not sql:
             return []
         from app.core.duckdb_client import duckdb_client
 
-        final = re.sub(r"\becommerce_orders\b", table_ref, sql)
+        final = sql
+        for name in names:
+            final = re.sub(rf"\b{re.escape(name)}\b", mapping[name], final, flags=re.IGNORECASE)
         rows = duckdb_client.fetchall(final)
         return [list(r) for r in rows]
 
@@ -633,7 +653,11 @@ async def main_async(args: argparse.Namespace) -> int:
                     user_msg=q.get("query", ""),
                     error=f"per_question_timeout={per_q_timeout:.0f}s",
                 )
-        executor = build_sql_executor(attempt) if args.mode in ("real", "orchestrator") else None
+        executor = (
+            build_sql_executor(attempt, q.get("expected_datasource"))
+            if args.mode in ("real", "orchestrator")
+            else None
+        )
         result = judge_attempt(q, attempt, sql_executor=executor)
         results.append(result)
         rec = {

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_editor
 from app.core.database import get_db
 from app.models.canvas import Canvas
 from app.models.dashboard import Dashboard
@@ -77,7 +77,7 @@ async def list_trash(
     return SuccessResponse(data={"items": items, "total": len(items)})
 
 
-@router.post("/{item_type}/{item_id}/restore")
+@router.post("/{item_type}/{item_id}/restore", dependencies=[Depends(require_editor)])
 async def restore_trash_item(
     item_type: str,
     item_id: UUID,

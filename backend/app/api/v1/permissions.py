@@ -36,6 +36,8 @@ class UserListItem(CamelModel):
     datasource_count: int = 0
     canvas_count: int = 0
     dashboard_count: int = 0
+    # P4-A：账号是否启用（管理界面需要看到"谁被停用了"，否则停用入口等于没有观测面）
+    is_active: bool = True
 
 
 class UserListResponse(CamelModel):
@@ -115,6 +117,7 @@ async def list_users(
             datasource_count=ds_counts.get(u.id, 0),
             canvas_count=canvas_counts.get(u.id, 0),
             dashboard_count=dash_counts.get(u.id, 0),
+            is_active=bool(getattr(u, "is_active", True)),
         )
         for u in users
     ]

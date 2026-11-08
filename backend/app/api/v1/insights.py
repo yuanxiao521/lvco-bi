@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_editor
 from app.core.database import get_db
 from app.models.datasource import DataSource, SourceType
 from app.models.insight_record import InsightRecord
@@ -64,7 +64,7 @@ async def list_rules(
     )
 
 
-@router.post("/rules", status_code=status.HTTP_201_CREATED)
+@router.post("/rules", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_rule(
     body: InsightRuleCreate,
     db: AsyncSession = Depends(get_db),
@@ -106,7 +106,7 @@ async def get_rule(
     )
 
 
-@router.patch("/rules/{rule_id}")
+@router.patch("/rules/{rule_id}", dependencies=[Depends(require_editor)])
 async def update_rule(
     rule_id: uuid.UUID,
     body: InsightRuleUpdate,
@@ -129,7 +129,7 @@ async def update_rule(
     )
 
 
-@router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/rules/{rule_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_editor)])
 async def delete_rule(
     rule_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -141,7 +141,7 @@ async def delete_rule(
     return Response(status_code=204)
 
 
-@router.post("/rules/{rule_id}/run")
+@router.post("/rules/{rule_id}/run", dependencies=[Depends(require_editor)])
 async def run_rule_now(
     rule_id: uuid.UUID,
     body: InsightRecordRunRequest,
@@ -173,7 +173,7 @@ async def run_rule_now(
 
 
 # ============ Suggestions ============
-@router.post("/discover/{datasource_id}")
+@router.post("/discover/{datasource_id}", dependencies=[Depends(require_editor)])
 async def discover_datasource(
     datasource_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -221,7 +221,7 @@ async def list_suggestions(
     )
 
 
-@router.post("/suggestions/{suggestion_id}/accept")
+@router.post("/suggestions/{suggestion_id}/accept", dependencies=[Depends(require_editor)])
 async def accept_suggestion(
     suggestion_id: uuid.UUID,
     body: InsightSuggestionAccept,
@@ -260,7 +260,7 @@ async def accept_suggestion(
     )
 
 
-@router.post("/suggestions/{suggestion_id}/dismiss")
+@router.post("/suggestions/{suggestion_id}/dismiss", dependencies=[Depends(require_editor)])
 async def dismiss_suggestion(
     suggestion_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

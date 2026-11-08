@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_editor
 from app.core.database import get_db
 from app.models.metric import MetricDefinition
 from app.models.metric_usage import MetricUsage
@@ -128,7 +128,7 @@ async def list_metrics(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_metric(
     body: MetricCreate,
     current_user: User = Depends(get_current_user),
@@ -211,7 +211,7 @@ async def get_metric_detail(
     )
 
 
-@router.patch("/{metric_id}")
+@router.patch("/{metric_id}", dependencies=[Depends(require_editor)])
 async def update_metric(
     metric_id: UUID,
     body: MetricUpdate,
@@ -261,7 +261,7 @@ async def update_metric(
     )
 
 
-@router.delete("/{metric_id}")
+@router.delete("/{metric_id}", dependencies=[Depends(require_editor)])
 async def delete_metric(
     metric_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -420,7 +420,7 @@ async def list_metric_versions(
     )
 
 
-@router.post("/{metric_id}/versions", status_code=status.HTTP_201_CREATED)
+@router.post("/{metric_id}/versions", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def publish_metric_version(
     metric_id: UUID,
     body: _PublishVersionRequest,
@@ -449,7 +449,7 @@ async def publish_metric_version(
     )
 
 
-@router.post("/{metric_id}/rollback")
+@router.post("/{metric_id}/rollback", dependencies=[Depends(require_editor)])
 async def rollback_metric(
     metric_id: UUID,
     body: _RollbackRequest,
