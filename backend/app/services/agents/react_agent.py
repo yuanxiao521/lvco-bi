@@ -20,6 +20,9 @@ import re
 from typing import Any
 
 from app.services.agents.graph import Graph
+# P0-3：取消位读取（同一条链路三个编排器共用；实现在 agent_orchestrator，
+# 它是本包内唯一「被 canvas_orchestrator 反向依赖」的模块，放这里避免循环）。
+from app.services.agents.agent_orchestrator import cancel_requested
 from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
 from app.services.context_utils import compact_result_json
 
@@ -120,6 +123,20 @@ class ReactGraphAgent:
         emit = shared["emit"]
         messages = state["messages"]
         iteration = state.get("iteration", 0)
+        # P0-3：用户已取消 → 不再调 LLM，直接给一句可见的收尾文本并结束循环；
+        # 保留已有消息（已完成的分析/工具结果都在里面），外层照常产报告 + done。
+        if cancel_requested(state.get("user_id", "")):
+            logger.info(f"[react] cancelled iteration={iteration + 1}，跳过本轮 LLM 调用")
+            await emit({
+                "type": "text",
+                "content": "\n\n> 已按你的要求停止本轮分析（已完成的部分保留在上下文中）。",
+            })
+            return {
+                "tool_calls": [],
+                "has_text_output": True,
+                "iteration": iteration,
+                "done_reason": "cancelled",
+            }
         tools = self._tools_for_state(state)
 
         # 观测：agent_trace 存在时走 Langfuse generation（同 Lead/Planner 口径，
@@ -242,6 +259,8 @@ class ReactGraphAgent:
             return ""
 
     async def _route_reason(self, state: dict, **shared) -> str:
+        if state.get("done_reason") == "cancelled":
+            return "done"
         if state.get("tool_calls") and state.get("iteration", 0) <= MAX_ITERATIONS:
             return "execute"
         return "done"

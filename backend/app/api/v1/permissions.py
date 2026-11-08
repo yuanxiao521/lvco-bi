@@ -47,9 +47,14 @@ async def list_users(
     search: str | None = None,
     role: UserRole | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    """列出所有用户（任何登录用户可看，admin/editor/viewer 都行）。"""
+    """列出所有用户（仅 admin：含全员 email / role 与各人资源数，属管理面数据）。"""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "仅管理员可查看用户列表"},
+        )
     from app.models.dashboard import Dashboard
     from app.models.datasource import DataSource
     from app.models.canvas import Canvas

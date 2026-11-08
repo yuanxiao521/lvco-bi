@@ -1,7 +1,8 @@
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import DateTime, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,5 +42,10 @@ class Report(TimestampMixin, Base):
         Enum(ReportStatus, name="report_status"), default=ReportStatus.draft, nullable=False
     )
     share_token: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    # 分享链接过期时间：NULL = 永久有效；撤销分享时与 share_token 一起清空。
+    # 由 0023_share_link_controls 迁移新增（报表的"软删"是 status=deleted，没有 deleted_at 列）。
+    share_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user = relationship("User", back_populates="reports")

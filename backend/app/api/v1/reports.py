@@ -6,8 +6,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_report_service
+from app.core.database import get_db
+from app.models.report import ReportStatus
 from app.models.user import User
 from app.schemas import CamelModel, SuccessResponse
 from app.services.chart_export import build_option, render_options_to_svg_uris
@@ -35,6 +38,34 @@ class ReportUpdateBody(CamelModel):
     title: str = Field(..., max_length=200)
 
 
+class ShareLinkBody(CamelModel):
+    """分享链接期限参数（语义与 dashboards.ShareLinkBody 逐字一致）。
+
+    expiresInDays：不传 → 默认 30 天；传 null 或 0 → 永久；传 N>0 → now + N 天。
+    """
+
+    expires_in_days: int | None = Field(default=None, ge=0, le=3650)
+
+
+SHARE_DEFAULT_DAYS = 30
+
+
+def _requested_share_days(body: "ShareLinkBody | None") -> int:
+    """把请求体解析成"有效天数"（0 = 永久）；字段不传 = 默认 30 天。"""
+    if body is None or "expires_in_days" not in body.model_fields_set:
+        return SHARE_DEFAULT_DAYS
+    if body.expires_in_days is None:
+        return 0
+    return body.expires_in_days
+
+
+def _resolve_share_expiry(days: int) -> datetime | None:
+    """天数 → 绝对过期时间；0 表示永久有效（落 NULL）。"""
+    if days == 0:
+        return None
+    return datetime.now(timezone.utc) + timedelta(days=days)
+
+
 def _summary(r) -> dict:
     return {
         "id": str(r.id),
@@ -44,6 +75,12 @@ def _summary(r) -> dict:
         "sourceId": str(r.source_id) if r.source_id else None,
         "status": r.status.value if r.status else None,
         "shareToken": r.share_token,
+        # 分享链接过期时间：从库里读（NULL = 永久有效或未分享）；不再由接口现编
+        "shareExpiresAt": (
+            r.share_expires_at.isoformat()
+            if isinstance(getattr(r, "share_expires_at", None), datetime)
+            else None
+        ),
         "createdAt": r.created_at.isoformat() if r.created_at else None,
         "updatedAt": r.updated_at.isoformat() if r.updated_at else None,
     }
@@ -154,9 +191,15 @@ async def update_report_status(
 @router.post("/{report_id}/share")
 async def share_report(
     report_id: UUID,
+    body: ShareLinkBody | None = None,
     service: ReportService = Depends(get_report_service),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
+    """生成 / 续期报表分享链接（仅属主）。
+
+    过期时间真的写进 reports.share_expires_at，返回的 expiresAt 是 commit 后 refresh 读回的值。
+    """
     report = await service.share(report_id, current_user.id)
     if report is None:
         raise HTTPException(
@@ -164,12 +207,60 @@ async def share_report(
             detail={"code": "NOT_FOUND", "message": "报表不存在"},
         )
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    expires_in_days = _requested_share_days(body)
+    report.share_expires_at = _resolve_share_expiry(expires_in_days)
+    await db.flush()
+    await db.commit()
+    await db.refresh(report)
+
     return SuccessResponse(
         data={
             "shareToken": report.share_token,
             "shareUrl": f"/share/report/{report.share_token}",
-            "expiresAt": expires_at.isoformat(),
+            # 库里读回；None = 永久有效
+            "expiresAt": (
+                report.share_expires_at.isoformat()
+                if report.share_expires_at
+                else None
+            ),
+            "permanent": report.share_expires_at is None,
+            "expiresInDays": expires_in_days,
+        }
+    )
+
+
+@router.delete("/{report_id}/share")
+async def revoke_report_share(
+    report_id: UUID,
+    service: ReportService = Depends(get_report_service),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """撤销报表分享：清空 token 与过期时间，链接立即失效（仅属主）。
+
+    非属主统一 404（不用 403）。若报表状态此前因分享被置为 shared，一并回落到 published，
+    否则列表里会一直显示"已分享"而实际上没有可用链接。
+    """
+    report = await service.get_by_id(report_id, current_user.id)
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "报表不存在"},
+        )
+
+    report.share_token = None
+    report.share_expires_at = None
+    if getattr(report, "status", None) == ReportStatus.shared:
+        report.status = ReportStatus.published
+    await db.flush()
+    await db.commit()
+
+    return SuccessResponse(
+        data={
+            "reportId": str(report_id),
+            "revoked": True,
+            "shareToken": None,
+            "expiresAt": None,
         }
     )
 

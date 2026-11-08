@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.operation_log import OperationLog
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas import CamelModel, SuccessResponse
 
 router = APIRouter(prefix="/audit", tags=["日志审计"])
@@ -57,9 +57,14 @@ async def list_logs(
     start_at: datetime | None = None,
     end_at: datetime | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    """查询操作日志（任何登录用户可访问，便于自助审计）。"""
+    """查询操作日志（仅 admin：日志含全站用户的路径、IP、UA，属管理面数据）。"""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "仅管理员可查看操作日志"},
+        )
     conditions = []
     if user_id is not None:
         conditions.append(OperationLog.user_id == user_id)
@@ -136,9 +141,18 @@ async def list_logs(
 @router.get("/logs/summary")
 async def logs_summary(
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    """汇总最近 24 小时的操作分布（用于 dashboard 顶部统计）。"""
+    """汇总最近 24 小时的操作分布（用于 dashboard 顶部统计）。
+
+    仅 admin：与 /logs、/logs/export 同源同类（全站用户的行为分布），
+    单独放开等于留了一个"看别人在干什么"的侧门。
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "仅管理员可查看操作统计"},
+        )
     from datetime import timedelta, timezone
 
     now = datetime.now(timezone.utc)
@@ -189,9 +203,14 @@ async def export_logs_csv(
     start_at: datetime | None = None,
     end_at: datetime | None = None,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """导出日志为 CSV（按当前筛选条件）。"""
+    """导出日志为 CSV（按当前筛选条件）。仅 admin 可导出（含全站用户数据）。"""
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "仅管理员可导出操作日志"},
+        )
     conditions = []
     if user_id is not None:
         conditions.append(OperationLog.user_id == user_id)

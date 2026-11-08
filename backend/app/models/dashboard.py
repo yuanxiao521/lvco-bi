@@ -23,6 +23,11 @@ class Dashboard(TimestampMixin, Base):
     refresh_interval: Mapped[int] = mapped_column(Integer, default=300, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     share_token: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    # 分享链接过期时间：NULL = 永久有效；撤销分享时与 share_token 一起清空。
+    # 由 0023_share_link_controls 迁移新增（此前接口返回的 expiresAt 是现编的）。
+    share_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

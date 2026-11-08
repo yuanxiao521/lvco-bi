@@ -254,6 +254,22 @@ async def stream_unified(
     intent_emitted = False
     intent_value = ""
     for step in range(limit):
+        # P0 止血：用户点「停止」后，**Lead 层也要停**。
+        # worker（三个执行内核）已各自在循环里检查取消位，但 Lead 每步还有一次完整
+        # LLM 调用、并且可能重派——只停 worker 等于"停了一半"，账单还在涨。
+        # 取消位由 POST /ai/sessions/{id}/cancel 置入，按 user_id 作用域（粘性，新轮清除）。
+        try:
+            from app.services.agents.agent_orchestrator import cancel_requested
+
+            if cancel_requested(ctx.user_id):
+                degradation.append("user_cancelled")
+                yield {"type": "status", "message": "已按你的要求停止本轮分析。"}
+                finished = True
+                break
+        except Exception:  # noqa: BLE001
+            # 取消位读不到（缓存降级等）时不能阻断主链路：宁可不取消，也不让本轮崩
+            logger.debug("[lead_unified] cancel_check_failed", exc_info=True)
+
         # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
         assembled = provider.for_agent_loop(user_msg, system_text=LEAD_AGENT_SYSTEM)
         messages = assembled.messages

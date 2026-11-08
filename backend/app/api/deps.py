@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.security import decode_token
+from app.core.security import decode_token, token_version_of
 from app.models.user import User
 from app.repositories.ai_session_repository import (
     SQLAlchemyAIMessageRepository,
@@ -54,6 +54,37 @@ from app.services.user_preference_service import UserPreferenceService
 security_scheme = HTTPBearer()
 
 
+def assert_token_state(payload: dict, user: User) -> None:
+    """校验"令牌"与"用户当前状态"是否还匹配（P0 止血）。
+
+    两条规则：
+    - 账号已停用（is_active=False）→ **403**。停用是比"令牌过期"更强的信号，
+      不该被"请重新登录"掩盖（用户重新登录也没用，得找管理员）。
+    - token_version 与 users.token_version 不一致 → **401**：登出/改密已把该账号
+      所有已签发令牌作废，重新登录即可恢复。
+
+    兼容性：令牌里没有 token_version claim（升级前签发的老 token）按 0 处理，
+    与 DB 默认值 0 一致 → **存量用户不会被强制重新登录**。
+
+    为什么抽成公开函数而不是内联在 get_current_user：本项目不止一条鉴权路径。
+    `app/api/v1/notifications.py` 的 SSE 端点因为 EventSource 不能带自定义头，
+    自行 decode 了 token（见该文件 :160-184）。它同样需要调用本函数，否则
+    "登出/停用后旧 token 仍能订阅通知流"，止血会出现旁路。
+    """
+    if getattr(user, "is_active", True) is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "账号已停用，请联系管理员"},
+        )
+    claim_version = token_version_of(payload)
+    current_version = int(getattr(user, "token_version", 0) or 0)
+    if claim_version != current_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "UNAUTHORIZED", "message": "登录状态已失效，请重新登录"},
+        )
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: AsyncSession = Depends(get_db),
@@ -78,6 +109,8 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNAUTHORIZED", "message": "用户不存在"},
         )
+    # P0 止血：仅"令牌有效 + 用户存在"不够——还要看账号是否被停用、令牌是否已被吊销。
+    assert_token_state(payload, user)
     return user
 
 

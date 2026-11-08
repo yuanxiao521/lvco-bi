@@ -79,7 +79,13 @@ class AuthService:
         return True
 
     def create_tokens(self, user: User) -> dict:
-        """生成 access + refresh 双令牌。"""
+        """生成 access + refresh 双令牌。
+
+        ⚠️ 不要用它签发登录态：本方法**不读 user.token_version**，签出的令牌版本视为 0。
+        登出/改密会把 DB 版本 +1，此时再用本方法签发 → 令牌一出生就被判 401，
+        用户表现为"登录成功但立刻被踢"。签发统一走 `api.v1.auth._issue_tokens`（读当前版本）。
+        保留该方法只为兼容既有测试/外部调用。
+        """
         extra_claims = {"email": user.email}
         access_token = create_access_token(str(user.id), extra_claims)
         refresh_token = create_refresh_token(str(user.id))

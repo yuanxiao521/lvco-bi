@@ -42,6 +42,41 @@ class ManualRefreshBody(CamelModel):
     async_mode: bool = False
 
 
+class ShareLinkBody(CamelModel):
+    """分享链接期限参数（三态语义，显式写死，避免再出现"接口现编 expiresAt"）。
+
+    expiresInDays：
+      - **整个字段不传**（含不传 body）→ 默认 30 天（向后兼容：老前端 POST 空 body）
+      - **传 null**                   → 永久有效（share_expires_at = NULL）
+      - **传 0**                      → 永久有效（与 null 同义，方便前端用数字表达）
+      - **传 N > 0**                  → now + N 天（上限 3650，防手滑填 99999）
+
+    "不传" 与 "显式传 null" 的区分靠 pydantic 的 model_fields_set，不是靠 None 值——
+    否则老前端（不带字段）会被误判成"永久"，那是最危险的方向。
+    """
+
+    expires_in_days: int | None = Field(default=None, ge=0, le=3650)
+
+
+SHARE_DEFAULT_DAYS = 30
+
+
+def _requested_share_days(body: "ShareLinkBody | None") -> int:
+    """把请求体解析成"有效天数"（0 = 永久）。三态语义见 ShareLinkBody docstring。"""
+    if body is None or "expires_in_days" not in body.model_fields_set:
+        return SHARE_DEFAULT_DAYS  # 没传 → 默认 30 天
+    if body.expires_in_days is None:
+        return 0  # 显式 null → 永久
+    return body.expires_in_days
+
+
+def _resolve_share_expiry(days: int) -> datetime | None:
+    """天数 → 绝对过期时间；0 表示永久有效（落 NULL）。"""
+    if days == 0:
+        return None
+    return datetime.now(timezone.utc) + timedelta(days=days)
+
+
 def _summary(d: Dashboard, owner_name: str | None = None, chart_count: int = 0) -> dict:
     owner_id = str(d.user_id) if d.user_id else None
     return {
@@ -51,6 +86,12 @@ def _summary(d: Dashboard, owner_name: str | None = None, chart_count: int = 0) 
         "chartCount": chart_count,
         "ownerName": owner_name,
         "ownerId": owner_id,
+        # 分享链接过期时间：从库里读（NULL = 永久有效或未分享）；不再由接口现编
+        "shareExpiresAt": (
+            d.share_expires_at.isoformat()
+            if isinstance(getattr(d, "share_expires_at", None), datetime)
+            else None
+        ),
         "createdAt": d.created_at.isoformat() if d.created_at else None,
         "updatedAt": d.updated_at.isoformat() if d.updated_at else None,
     }
@@ -292,9 +333,16 @@ async def refresh_dashboard(
 @router.post("/{dashboard_id}/share")
 async def share_dashboard(
     dashboard_id: UUID,
+    body: ShareLinkBody | None = None,
     service: DashboardService = Depends(get_dashboard_service),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SuccessResponse:
+    """生成 / 续期分享链接（仅属主）。
+
+    过期时间按 body.expiresInDays 解析后**真的写进 dashboards.share_expires_at**，
+    返回的 expiresAt 是 commit 后从库里 refresh 读回来的值——不再是 now()+30d 现编。
+    """
     dashboard = await service.share(dashboard_id, current_user.id)
     if dashboard is None:
         raise HTTPException(
@@ -302,12 +350,58 @@ async def share_dashboard(
             detail={"code": "NOT_FOUND", "message": "仪表盘不存在"},
         )
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    expires_in_days = _requested_share_days(body)
+    dashboard.share_expires_at = _resolve_share_expiry(expires_in_days)
+    await db.flush()
+    await db.commit()
+    await db.refresh(dashboard)
+
     return SuccessResponse(
         data={
             "shareToken": dashboard.share_token,
             "shareUrl": f"/share/{dashboard.share_token}",
-            "expiresAt": expires_at.isoformat(),
+            # 库里读回；None = 永久有效
+            "expiresAt": (
+                dashboard.share_expires_at.isoformat()
+                if dashboard.share_expires_at
+                else None
+            ),
+            "permanent": dashboard.share_expires_at is None,
+            "expiresInDays": expires_in_days,
+        }
+    )
+
+
+@router.delete("/{dashboard_id}/share")
+async def revoke_dashboard_share(
+    dashboard_id: UUID,
+    service: DashboardService = Depends(get_dashboard_service),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """撤销分享：清空 token 与过期时间，链接立即失效（仅属主）。
+
+    非属主统一 404（不用 403）——与公开访问口径一致，不泄漏"该仪表盘是否存在"。
+    """
+    dashboard = await service.get_by_id(dashboard_id, current_user.id)
+    if dashboard is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "仪表盘不存在"},
+        )
+
+    dashboard.share_token = None
+    dashboard.share_expires_at = None
+    dashboard.is_public = False
+    await db.flush()
+    await db.commit()
+
+    return SuccessResponse(
+        data={
+            "dashboardId": str(dashboard_id),
+            "revoked": True,
+            "shareToken": None,
+            "expiresAt": None,
         }
     )
 

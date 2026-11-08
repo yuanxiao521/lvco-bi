@@ -26,6 +26,7 @@ import re
 from typing import Any, AsyncIterator
  
 from app.config import settings
+from app.core.cache import get_cache_repository
 from app.services.agents.base_agent import AgentResult
 from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
 from app.services.agents.graph import Graph
@@ -55,6 +56,25 @@ _K_NAME = "name"
 _K_TYPE = "type"
 _K_EMPTY = "''"
 _K_NO_TOOL = "(谢谢选择)"
+
+# ── P0-4：纠错提示词里的工具名必须是**注册表里真实存在**的工具 ─────────────
+# 事故复盘：这里曾教模型调 describe_table（以及幂等清单里的 list_tables /
+# get_datasource_info / analyze_column）——这些工具**不在** ToolRegistry 里，
+# 模型照做 → ToolExecutor 返回 fatal「未知工具」→ 整个步骤终止（整轮白跑）。
+# 修法不是"删掉那句话"，而是把工具名收敛成常量、由守卫测试钉住：
+#   tests/test_p0_ghost_tools.py 断言 —— 提示词里出现的每个工具名 ∈ 注册表，
+#   且 ∈ Executor 可见白名单（orchestrator_safe 去掉 AGENT_HIDDEN_TOOLS 之后）。
+_CORRECTION_HINT_TOOLS: tuple[str, ...] = (
+    "query_engine",     # 结构化查数（参数化 ChartQueryConfig，首选举措）
+    "query_sql",        # 裸 SQL（query_engine 表达不了时的兜底）
+    "stats_analyzer",   # 统计/相关性
+    "render_chart",     # 出图配置
+)
+_NO_TOOL_CORRECTION_PROMPT = (
+    "步骤未完成：本步骤的目标是调用工具完成一件事，但本轮没有调用任何工具。"
+    "请立即调用合适的工具（如 " + " / ".join(_CORRECTION_HINT_TOOLS) + " 等）完成本步骤，"
+    "禁止只输出文字后结束步骤。"
+)
  
  
 def _topo_sort(steps: list[dict]) -> list[dict]:
@@ -91,13 +111,13 @@ def _rows_to_2d(columns: list, rows: list) -> list:
 
 
 # Task 8 (P1-6)：只读幂等工具集合 —— 这些工具的相同参数结果在同一轮（会话内）可被 memo 缓存复用。
+# P0-4：清单必须 ⊆ 注册表。历史问题：原来的 6 个里有 4 个是幽灵名
+# （list_tables / get_datasource_info / describe_table / analyze_column）——
+# 它们永远匹配不到真实工具 → 幂等对它们静默失效（同参数重复调用不会被缓存）。
+# 守卫：tests/test_p0_ghost_tools.py 断言 _IDEMPOTENT_TOOLS ⊆ 注册表。
 _IDEMPOTENT_TOOLS = frozenset({
     "list_datasources",
-    "list_tables",
-    "get_datasource_info",
-    "describe_table",
     "list_fields",
-    "analyze_column",
 })
 
 # 成功态缓存工具：结果成功才写 memo（error 不缓存，避免固化错误阻断自纠错）。
@@ -105,6 +125,65 @@ _IDEMPOTENT_TOOLS = frozenset({
 # 是主要浪费（恐慌重查）；任务级成功 memo 让同 SQL 第二次秒回。query_engine 已有
 # Redis 缓存覆盖，不重复加 memo。
 _SUCCESS_CACHED_TOOLS = frozenset({"query_sql"})
+
+# ── P0-3：用户取消位（跨进程：Redis 优先 / 内存降级）─────────────────────
+# 用户点"停止"时，API 只置一个取消位，**不杀 asyncio 任务、不释放会话锁**：
+# 三个编排循环在下一轮迭代前读到即"优雅收尾"（跳过剩余步骤 → 仍出报告 + done），
+# 前端才能解锁（直接杀任务会让 SSE 断在半截、任务态停在 running）。
+#
+# 为什么按 user_id 而不是 session_id：编排器的 execute_task 只拿得到
+# user_id / canvas_id（session_id 没有传下来，lead_tools 的调用点不在本次改动范围）。
+# 取消端点已先做**会话归属校验**（非属主 404），所以"用户级取消位"不会跨用户；
+# 单用户同时开多个会话时可能多停一条——P0 取"宁可停住"。等 session_id 能传进来，
+# 只改 key 前缀即可（函数签名不变）。
+#
+# 为什么是"粘性位 + 新轮清除"：同一轮里的**重派/重试**都应继续停住（否则 Lead
+# 一重派，分析又跑起来了），所以位一旦置上，本轮内所有循环都读得到；只有用户发来
+# **新消息**（ai.py 的两个入口在"确实要起新任务"的分支里）才清掉它。
+# 这样既不会"停不彻底"，也不会"下一条消息被误停"。
+_CANCEL_KEY_PREFIX = "ai:session:cancel:"
+_CANCEL_TTL_SECONDS = 120
+
+
+def request_cancel(user_id: object) -> None:
+    """置取消位（只由取消端点调用）。失败只记日志——取消是优化，不能把用户挡在门外。
+
+    值写 "1" 即可：语义是"**当前这一轮**停止"，不是在位期间永久禁用。
+    TTL 兜底，避免用户再也不回来时 key 永久驻留。
+    """
+    if not user_id:
+        return
+    try:
+        get_cache_repository().set(f"{_CANCEL_KEY_PREFIX}{user_id}", "1", ttl=_CANCEL_TTL_SECONDS)
+        logger.info("[orchestrator] cancel_requested user=%s", user_id)
+    except Exception:  # noqa: BLE001
+        logger.warning("[orchestrator] cancel_request_failed user=%s", user_id, exc_info=True)
+
+
+def cancel_requested(user_id: object) -> bool:
+    """当前是否有取消请求；缓存异常 → False（fail-open：宁可不停，不能误停）。"""
+    if not user_id:
+        return False
+    try:
+        return bool(get_cache_repository().get(f"{_CANCEL_KEY_PREFIX}{user_id}"))
+    except Exception:  # noqa: BLE001
+        logger.debug("[orchestrator] cancel_probe_failed user=%s", user_id, exc_info=True)
+        return False
+
+
+def clear_cancel(user_id: object) -> None:
+    """清取消位（新的一轮真正开始时调用）。
+
+    为什么需要"清"：取消位是**粘性**的（同一轮内的重派/重试都应继续停住），
+    只有用户发来**新消息**才代表重新开始——不清的话，取消后 120 秒内的下一条
+    消息会被误停。
+    """
+    if not user_id:
+        return
+    try:
+        get_cache_repository().delete(f"{_CANCEL_KEY_PREFIX}{user_id}")
+    except Exception:  # noqa: BLE001
+        logger.debug("[orchestrator] cancel_clear_failed user=%s", user_id, exc_info=True)
 
 
 # goal 达成校验：连续"无工具调用直接收尾"的最大容忍次数（对齐 canvas_orchestrator）。
@@ -375,6 +454,14 @@ class AgentOrchestrator:
         results = dict(state.get("results") or {})
         ordered = state.get("ordered_steps") or []
         steps = [s for s in ordered if s.get("tool") != _CHART_TOOL]
+        user_id = state.get("user_id", "")
+        # P0-3：进节点前已被取消 → 全部按既有 skipped 语义跳过，直接去 report 收尾
+        if cancel_requested(user_id):
+            await self._cancel_skip_steps(steps, results, emit, "执行步骤")
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results, "cancelled": True}
         memo = shared.get("tool_memo")
         if memo is None:
             memo = {}
@@ -397,7 +484,15 @@ class AgentOrchestrator:
                 state_sink["results"] = dict(results)
             return {"results": results}
         levels = _group_steps_by_level(steps)
-        for level in levels:
+        for idx, level in enumerate(levels):
+            # P0-3：每层之间检查一次取消（同层内已在跑的不打断，等它自然结束）
+            if cancel_requested(user_id):
+                remaining = [s for lv in levels[idx:] for s in lv]
+                await self._cancel_skip_steps(remaining, results, emit, "执行步骤")
+                state_sink = shared.get("state_sink")
+                if state_sink is not None:
+                    state_sink["results"] = dict(results)
+                return {"results": results, "cancelled": True}
             await asyncio.gather(
                 *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
             )
@@ -431,9 +526,26 @@ class AgentOrchestrator:
             if state_sink is not None:
                 state_sink["results"] = dict(results)
             return {"results": results}
+        user_id = state.get("user_id", "")
+        # P0-3：已被取消 → 全部图表步骤按 skipped 语义跳过（不再调 LLM）
+        if cancel_requested(user_id):
+            chart_all = [s for s in ordered if s.get("tool") == _CHART_TOOL]
+            await self._cancel_skip_steps(chart_all, results, emit, "图表步骤")
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results, "cancelled": True}
         for step in ordered:
             if step["tool"] != _CHART_TOOL:
                 continue
+            if cancel_requested(user_id):
+                # 取消发生在图表步骤之间：把还没跑的图表步骤全部标 skipped 后收尾
+                chart_left = [
+                    s for s in ordered
+                    if s.get("tool") == _CHART_TOOL and s["step_id"] not in results
+                ]
+                await self._cancel_skip_steps(chart_left, results, emit, "图表步骤")
+                break
             await self._run_step_with_timeout(step, results, state, **shared)
         state_sink = shared.get("state_sink")
         if state_sink is not None:
@@ -441,12 +553,38 @@ class AgentOrchestrator:
         return {"results": results}
  
     async def _route_execute(self, state: dict, **shared) -> str:
+        # P0-3：取消后不再进图表步骤，直接去 report 收尾（报告 + done，前端才解锁）
+        if state.get("cancelled"):
+            logger.info("[orchestrator] _route_execute cancelled=True → report")
+            return "report"
         has_chart = state.get("has_chart_steps", "MISSING")
         logger.info(f"[orchestrator] _route_execute has_chart={has_chart}")
         return "chart" if has_chart else "report"
  
     # ── Agentic 步骤执行：mini ReAct 循环（LLM 可多次调用工具，直到输出文本或达到上限）──
     _MAX_TOOL_CALLS_PER_STEP = 3  # 单步内最多工具调用次数（P1-9 从 5 降到 3，控制成本）
+
+    async def _cancel_skip_steps(self, steps: list[dict], results: dict, emit, label: str) -> None:
+        """P0-3：把取消后尚未执行的步骤按**既有 skipped 语义**标记。
+
+        不抛异常、不改事件类型：与"全局 LLM 预算超限"完全同一套收尾方式，
+        这样 report 节点照常拿到 results（含 skipped 摘要）→ 仍产出报告 + done。
+        """
+        for step in steps:
+            sid = step.get("step_id")
+            if sid in results:
+                continue
+            results[sid] = json.dumps({
+                "skipped": True,
+                "cancelled": True,
+                "skipped_reason": f"用户已取消，跳过{label} {sid}",
+            }, ensure_ascii=False)
+        logger.info(f"[orchestrator] 用户取消，跳过 {len(steps)} 个{label}，进入收尾")
+        await emit({
+            "type": "status",
+            "phase": "cancelled",
+            "message": f"已收到取消请求，停止后续{label}；正在生成已完成部分的报告…",
+        })
 
     # Task 6 (P1-8)：单步骤超时包装 —— 超时标记 skipped/timeout 并继续整体流程，不中断其他步骤。
     async def _run_step_with_timeout(self, step: dict, results: dict, state: dict, **shared) -> None:
@@ -562,6 +700,16 @@ class AgentOrchestrator:
 
         # ── mini ReAct 循环：LLM 决策 → 执行工具 → 结果回传 → 再决策 ──
         while tool_call_count < self._MAX_TOOL_CALLS_PER_STEP:
+            # P0-3：每轮 LLM 调用前检查取消（比"整步跑完再停"更快，且不多烧一次调用）
+            if cancel_requested(state.get("user_id", "")):
+                results.setdefault(sid, json.dumps({
+                    "skipped": True,
+                    "cancelled": True,
+                    "skipped_reason": f"用户已取消，步骤 {sid} 提前终止",
+                }, ensure_ascii=False))
+                await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
+                logger.info(f"[orchestrator] 步骤 {sid} 用户取消，提前终止")
+                return
             # 1. LLM 决策：调用工具或输出文本
             tool_calls: list[dict] = []
             text_parts: list[str] = []
@@ -658,9 +806,7 @@ class AgentOrchestrator:
                     tool_call_count += 1
                     messages.append({
                         "role": "user",
-                        "content": "步骤未完成：本步骤的目标是调用工具完成一件事，但本轮没有调用任何工具。"
-                                   "请立即调用合适的工具（如 query_engine / describe_table / stats_analyzer / "
-                                   "render_chart 等）完成本步骤，禁止只输出文字后结束步骤。",
+                        "content": _NO_TOOL_CORRECTION_PROMPT,
                     })
                     continue
                 if text_out.strip():

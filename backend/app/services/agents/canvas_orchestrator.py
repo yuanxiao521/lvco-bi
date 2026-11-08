@@ -29,6 +29,7 @@ from app.services.agents.agent_orchestrator import (
     _make_fail_key,
     _summarize_history_safe,
     _topo_sort,
+    cancel_requested,
 )
 from app.services.agents.graph import Graph
 from app.services.agents.planner_agent import PlannerAgent
@@ -253,11 +254,32 @@ class CanvasOrchestrator:
         ordered = state.get("ordered_steps") or []
         shared.setdefault("tool_memo", {})
         shared.setdefault("tool_memo_locks", {})
+        user_id = state.get("user_id", "")
         levels = _group_steps_by_level(ordered)
-        for level in levels:
+        # P0-3：进节点前已被取消 → 全部按既有 skipped 语义跳过（不调 LLM），直接去 finish 收尾
+        if cancel_requested(user_id):
+            await self._cancel_skip_steps(ordered, results, emit, "画布步骤")
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results, "cancelled": True}
+        cancelled = False
+        for idx, level in enumerate(levels):
+            # 每层之间检查一次（同层内已在跑的不打断）
+            if cancel_requested(user_id):
+                remaining = [s for lv in levels[idx:] for s in lv]
+                await self._cancel_skip_steps(remaining, results, emit, "画布步骤")
+                cancelled = True
+                break
             await asyncio.gather(
                 *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
             )
+        if cancelled:
+            # 取消后不再补图/重排（那会把"停止"变成"又跑了两次 LLM/落块"）
+            state_sink = shared.get("state_sink")
+            if state_sink is not None:
+                state_sink["results"] = dict(results)
+            return {"results": results, "cancelled": True}
 
         # 报告式多图引导：计划含 ≥2 个 add_chart_block 步骤，但实际只落出 <2 种图表类型时，
         # 追加一个补图步骤（补一种缺失的推荐类型），从机制上保证报告图表多样性，
@@ -279,6 +301,28 @@ class CanvasOrchestrator:
 
         shared["state_sink"]["results"] = dict(results)
         return {"results": results}
+
+    async def _cancel_skip_steps(self, steps: list[dict], results: dict, emit, label: str) -> None:
+        """P0-3：取消后把尚未执行的步骤按**既有 skipped 语义**标记（不抛异常、不改事件类型）。
+
+        与 agent_orchestrator 的同名方法同构：report/finish 照常拿到 results，
+        仍会产出"报告 + done"，前端才能解锁。
+        """
+        for step in steps:
+            sid = step.get("step_id")
+            if sid in results:
+                continue
+            results[sid] = json.dumps({
+                "skipped": True,
+                "cancelled": True,
+                "skipped_reason": f"用户已取消，跳过{label} {sid}",
+            }, ensure_ascii=False)
+        logger.info("[canvas_orchestrator] 用户取消，跳过 %s 个%s，进入收尾", len(steps), label)
+        await emit({
+            "type": "status",
+            "phase": "cancelled",
+            "message": f"已收到取消请求，停止后续{label}；正在收尾…",
+        })
 
     async def _run_step_with_timeout(self, step: dict, results: dict, state: dict, **shared) -> None:
         emit = shared["emit"]
@@ -374,6 +418,15 @@ class CanvasOrchestrator:
         no_tool_streak = 0  # goal 达成校验：连续"无工具调用直接收尾"次数
 
         while tool_call_count < _MAX_TOOL_CALLS_PER_STEP:
+            # P0-3：每轮 LLM 调用前检查取消（少烧一次调用，也更快让前端解锁）
+            if cancel_requested(state.get("user_id", "")):
+                results.setdefault(sid, json.dumps({
+                    "skipped": True, "cancelled": True,
+                    "skipped_reason": f"用户已取消，步骤 {sid} 提前终止",
+                }, ensure_ascii=False))
+                await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
+                logger.info("[canvas_orchestrator] 步骤 %s 用户取消，提前终止", sid)
+                return
             # 1. LLM 决策
             tool_calls: list[dict] = []
             text_parts: list[str] = []

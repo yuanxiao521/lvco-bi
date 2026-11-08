@@ -181,6 +181,12 @@ async def notification_stream(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNAUTHORIZED", "message": "用户不存在"},
         )
+    # SSE 是唯一"自行解析 token"的入口（EventSource 不能用 Authorization 头），
+    # 因此必须自己补 get_current_user 里那套校验：否则登出/停用/改密后，
+    # 旧 token 仍能订阅通知流，直到自然过期（最长 30 分钟），等于吊销失效。
+    from app.api.deps import assert_token_state
+
+    assert_token_state(payload, user)
     user_id = user.id
     queue = await sse_manager.subscribe(user_id)
 

@@ -664,6 +664,39 @@ async def delete_session(
     return SuccessResponse(data={"message": "已删除"})
 
 
+@router.post("/sessions/{session_id}/cancel")
+async def cancel_session_run(
+    session_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse:
+    """停止该会话正在跑的分析（P0-3）。
+
+    语义：
+    - **只能取消自己的会话**：非属主一律 404（与 GET/DELETE 会话同一口径，不泄露存在性）；
+    - **只置取消位**，不杀 asyncio 任务、不释放会话锁：让编排循环在下一轮迭代前
+      优雅收尾（剩余步骤标 skipped → 仍产报告 + done），前端才能正常解锁；
+    - 取消位写缓存层（Redis 优先，掉线降级进程内）：队列模式下任务跑在 worker
+      进程，同样读得到；单进程部署也不会失效。
+    """
+    result = await db.execute(
+        select(AISession).where(
+            AISession.id == session_id, AISession.user_id == current_user.id
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "会话不存在"},
+        )
+    # 延迟 import：避免 API 模块加载期就把编排器整条依赖链拉进来（与 worker 的
+    # "不能 import api 层"同一取向，依赖方向保持 services → core）。
+    from app.services.agents.agent_orchestrator import request_cancel
+
+    request_cancel(current_user.id)
+    return SuccessResponse(data={"message": "已请求停止", "session_id": str(session_id)})
+
+
 @router.post("/chat/stream")
 async def data_chat_stream(
     request: Request,
@@ -831,6 +864,12 @@ async def data_chat_stream(
 
             # Notify frontend about the new session
             yield f"data: {json.dumps({'type': 'session_created', 'session': AISessionResponse.model_validate(session).model_dump(mode='json', by_alias=True)}, ensure_ascii=False)}\n\n"
+
+        # P0-3：走到这里 = 新的一轮真正开始（续收/回放分支已在上面 return，忙则已拒）。
+        # 清掉上一轮遗留的取消位，否则"取消后 120 秒内的下一条消息"会被误停。
+        from app.services.agents.agent_orchestrator import clear_cancel
+
+        clear_cancel(current_user.id)
 
         # ── 构建 Agent 事件流生产闭包（执行委托给后台任务：文本处理/落库/释放锁都在任务内）──
         # 整个构建+启动段用 try/finally 收口：连接断开（CancelledError/GeneratorExit）
@@ -2333,6 +2372,12 @@ async def canvas_ai_chat(
                     yield _sse({"type": "error", "message": _SESSION_BUSY_MSG})
                     yield _sse({"type": "done"})
                     return
+
+            # P0-3：走到这里 = 新的一轮真正开始（续收分支已在上面 return，忙则已拒）：
+            # 清掉上一轮遗留的取消位，否则"取消后的下一条消息"会被误停。
+            from app.services.agents.agent_orchestrator import clear_cancel
+
+            clear_cancel(current_user.id)
 
             # ---- 2. 保存用户消息 + 占位 assistant 行（立即落库：断流/切页也不丢） ----
             current_user_msg_id = None
