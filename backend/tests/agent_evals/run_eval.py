@@ -448,6 +448,20 @@ async def build_sql_executor(
         final = sql
         for name in names:
             final = re.sub(rf"\b{re.escape(name)}\b", mapping[name], final, flags=re.IGNORECASE)
+        # 时间锚定（**不改冻结数据集**，只在判分期做）：
+        # 数据集里的 expected_sql 用 now() 写"今年/最近30天"，而演示数据是静态快照
+        # （ecommerce_orders: 2025-08 ~ 2026-08，今天是 2026-11）→ now() 相对窗口查不到行，
+        # 期望结果为空，SQL 就永远判错。把 now() 锚到"数据里最大的 order_date"更符合
+        # 真实分析口径（"最近30天"= 数据覆盖范围内最近 30 天）。
+        # 期望 SQL 与 Agent SQL 都做同样替换，保证两边口径一致、判定公平。
+        if "now()" in final.lower():
+            anchor_table = table_ref
+            final = re.sub(
+                r"now\(\s*\)",
+                f"(SELECT MAX(order_date) FROM {anchor_table})",
+                final,
+                flags=re.IGNORECASE,
+            )
         rows = duckdb_client.fetchall(final)
         return [list(r) for r in rows]
 
