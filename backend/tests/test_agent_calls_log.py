@@ -87,7 +87,7 @@ def test_tool_row_is_recorded(monkeypatch, recorder):
     events: list[dict] = []
     ex = ToolExecutor(user_id="u1", db_session=None, emit=_fake_emit(events))
     res = _run(ex.execute_tool_call(
-        {"id": "call_1", "name": "query_sql", "arguments": '{"datasource_id": "ds-1"}'}
+        {"id": "call_1", "name": "query_sql", "arguments": '{"datasource_id": "ds-1", "sql": "SELECT 1"}'}
     ))
     assert res.is_error is False
     # 同 trace 第二条（llm 行）→ seq 必须递增
