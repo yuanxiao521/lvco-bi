@@ -258,12 +258,19 @@ async def stream_unified(
         messages = assembled.messages
         # S0-3：每步落一次台账。此前只在循环结束后记一笔"整轮总账"，
         # 看不到"第几步开始超预算"；上下文是动态曲线，没有逐步台账就无法优化
-        # （见 docs/research/02-orchestration-benchmark.md §4.3 O1）。只在启用 trace 时写。
+        # （见 docs/research/02-orchestration-benchmark.md §4.3 O1）。
+        # 注意：TraceRecord **没有** update()（只有 SpanRecord 有），原先循环末尾那句
+        # trace.update(...) 一直被 except 吞掉、台账从未真正落过 trace。正确用法与
+        # LeadAgent._log_ctx_ledger 一致：开子 span 再 update。
+        # S0.5：台账必须有一行**人能读**的日志。只写 span.metadata 的话，Langfuse 未启用
+        # 时根本没有读者（见 S0.5 报告），等于记了个寂寞。
+        logger.info("[lead_unified] ledger_step %d %s", step, assembled.ledger.summary())
         if trace is not None:
             try:
-                trace.update(metadata={f"ledger_step_{step}": assembled.ledger.as_dict()})
+                span = trace.span(f"ledger_step_{step}", span_type="span")
+                span.update(metadata=assembled.ledger.as_dict())
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("[lead_unified] ledger_span_failed", exc_info=True)
         step_msgs: list[dict] = []      # 本步新增消息，步末提交给 provider
         text_parts: list[str] = []
         tool_calls: list[dict] = []
@@ -550,9 +557,11 @@ async def stream_unified(
         logger.info("[lead_unified] ledger %s", assembled.ledger.summary())
         if trace is not None:
             try:
-                trace.update(metadata={"agent_loop_ledger": assembled.ledger.as_dict()})
+                # 同上：TraceRecord 无 update()，必须经由子 span 落账。
+                span = trace.span("ledger_total", span_type="span")
+                span.update(metadata=assembled.ledger.as_dict())
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("[lead_unified] ledger_total_span_failed", exc_info=True)
 
     # emit_done=False 时把 done 交给调用方：后处理（收尾总结 / 记忆回流）
     # 必须插在 done **之前**，否则前端会在记忆事件到达前就解锁输入。

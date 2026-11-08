@@ -280,3 +280,42 @@ def test_context_assembly_moved_to_provider_outlet():
     """
     assert not hasattr(U, "build_lead_messages"), "临时装配函数不该回来"
     assert not hasattr(U, "_render_datasources"), "渲染应收敛到 context/sources"
+
+
+# ── 台账落 trace（S0-3 回归）──────────────────────────────────────────────
+
+async def test_ledger_lands_as_span_per_step():
+    """TraceRecord **没有 update()**，台账必须经由子 span 落。
+
+    历史 bug：循环末尾那句 trace.update(metadata=...) 一直被 except 吞掉，
+    台账从未真正落过 trace，而日志上看起来"记了"。这个用例把它钉死：
+    每步一个 ledger_step_<n> span、循环末尾一个 ledger_total span。
+    """
+    from app.services.observability import TraceRecord
+
+    trace = TraceRecord(name="lead_agent_turn")
+    await _run([[_tc("answer", {"text": "好"})]], trace=trace)
+
+    names = [s.name for s in trace.children]
+    assert "ledger_step_0" in names, f"台账未按步落 span：{names}"
+    assert "ledger_total" in names, f"缺少整轮总账 span：{names}"
+
+    step_span = next(s for s in trace.children if s.name == "ledger_step_0")
+    assert step_span.metadata, "span 里没有台账内容（ledger.as_dict() 空）"
+
+
+async def test_ledger_is_logged_per_step(caplog):
+    """S0.5：台账必须有一行**人能读**的日志。
+
+    只写 span.metadata 时，Langfuse 未启用 → 不打印；启用 → 直接创建的 span 也不
+    桥接 Langfuse。所以"写进 span"在当时等于写进黑洞。这个用例锁的是**可观测性**
+    （日志里真的有），不是机制（SpanRecord 非空）。
+    """
+    import logging
+
+    caplog.set_level(logging.INFO, logger="lvco.lead.unified")
+    await _run([[_tc("answer", {"text": "好"})]])
+
+    lines = [r.message for r in caplog.records if "ledger_step" in r.message]
+    assert lines, "每步台账没有落日志——观测读侧又断了"
+    assert "ledger_step 0" in lines[0]

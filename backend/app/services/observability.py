@@ -230,6 +230,11 @@ class Observer:
                         log_parts.append(f"output={out}")
                     if sp.error:
                         log_parts.append(f"error={_summarize(sp.error, 200, tail=True)}")
+                    # S0.5：metadata 也要打出来。此前 trace.span(...).update(metadata=...)
+                    # 写进去的东西**没有任何读者**（Langfuse 未启用时不打印、启用时也不上报
+                    # ——直接创建的 span 不桥接 Langfuse），台账/step_stats 等于是死数据。
+                    if sp.metadata:
+                        log_parts.append(f"metadata={_summarize(sp.metadata)}")
                     logger.info("trace_span | %s", " | ".join(log_parts))
 
     def flush(self) -> None:
