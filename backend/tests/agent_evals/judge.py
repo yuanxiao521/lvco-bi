@@ -481,13 +481,20 @@ def _normalize_chart_types(types: list[str]) -> list[str]:
 
 
 def _extract_agent_sql(events: list[dict[str, Any]]) -> str:
-    """从 agent 工具调用事件中提取最后一个有效的 query_sql SQL。
+    """从 agent 事件里提取**最后一次成功**的 query_sql SQL。
 
-    Agent 可能多次查询（探查→纠错→最终查询），取最后一个以反映最终结果。
+    为什么必须看成功与否（2026-11-08 踩到）：Agent 常见"先查 gross、再试 net"的模式，
+    第二次查询可能被 guard 拦下（schema 前缀缺失等）。此前这里取"最后一条 SQL 文本"，
+    于是判分器拿**失败的意图**去和期望比 → 把一次成功查询判成失败（Q001 就是这样）。
+
+    实现：顺序扫事件，记住最近的 query_sql 调用；只有紧跟着的 tool_result 不带 error，
+    才把它记为"最后一次成功"。
     """
-    last_sql = ""
+    pending: str = ""
+    last_ok: str = ""
     for e in events:
-        if e.get("type") == "tool_call" and e.get("name") == "query_sql":
+        etype = e.get("type")
+        if etype == "tool_call" and e.get("name") == "query_sql":
             args = e.get("args") or {}
             if isinstance(args, str):
                 try:
@@ -495,9 +502,18 @@ def _extract_agent_sql(events: list[dict[str, Any]]) -> str:
                 except json.JSONDecodeError:
                     continue
             sql = args.get("sql") or args.get("query")
-            if isinstance(sql, str) and sql.strip():
-                last_sql = sql
-    return last_sql
+            pending = sql if isinstance(sql, str) and sql.strip() else ""
+        elif etype == "tool_result" and e.get("name") == "query_sql" and pending:
+            res = e.get("result")
+            is_err = False
+            if isinstance(res, str):
+                is_err = '"error"' in res
+            elif isinstance(res, dict):
+                is_err = "error" in res
+            if not is_err:
+                last_ok = pending
+            pending = ""
+    return last_ok
 
 
 def _extract_agent_rows(events: list[dict[str, Any]]) -> list:
