@@ -22,6 +22,20 @@ name = sys.argv[1]
 const = sys.argv[2]
 create = "--create" in sys.argv
 
+if name == "lead_agent_system":
+    # 派生别名：从两段组合**重生成** yaml（方向与其余段相反）。
+    from app.services import ai_prompts as ap  # noqa: E402  sys.path 已在上面注入
+
+    composed = ap.compose_lead_system(ap.LEAD_CORE, ap.CHAT_PROFILE)
+    body = "\n".join(("  " + ln) if ln else "" for ln in composed.split("\n"))
+    content = (
+        "# P1-D 兼容别名：= lead_core + chat_profile（由 ai_prompts.compose_lead_system 组合）。\n"
+        "# 真正的内容源是 lead_core / chat_profile 两个 yaml；本文件由脚本生成，勿手改。\n"
+        f"name: {name}\nversion: v1\nsystem: |-\n{body}\n"
+    )
+    (ROOT / "prompts" / f"{name}.yaml").write_text(content, encoding="utf-8", newline="")
+    print(f"重生成派生别名 {name}.yaml：{len(composed)} 字符（来自 lead_core + chat_profile）")
+    sys.exit(0)
 text = textwrap.dedent(
     yaml.safe_load((ROOT / "prompts" / f"{name}.yaml").read_text(encoding="utf-8"))["system"]
 ).strip("\n")
