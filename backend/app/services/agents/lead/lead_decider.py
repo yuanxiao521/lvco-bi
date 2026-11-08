@@ -1,34 +1,31 @@
-"""决策：在意图已知的前提下，决定下一步动作（回答 / 调分析 / 画布操作 / 反问）。
+# -*- coding: utf-8 -*-
+"""Lead 的动作枚举与决策载荷（**只保留共享类型**）。
 
-设计要点（对齐 `lead-agent-upgrade-design.md` §4.2）：
-- 决策与执行解耦：`CALL_ANALYSIS` 只产出一个 `tool_args`，真正执行在 `lead_tools.run_analysis`。
-- 强约束 + 确定性兜底：异常 / 超时 / 空内容 / 非法枚举 → 按意图直接映射动作（`degraded=True`）。
+历史：本模块原先承载 legacy 的四工位决策（`decide_action` / `decide_action_merged`）：
+一次合并调用给意图+决策、失败再走一次独立决策、最后按意图确定性兜底。那条路径已随
+legacy 一起删除（见 docs/SUPER_OPTIMIZATION_MVP.md：single_agent 是唯一执行路径）。
+
+现在仍在用的只有两样东西，它们被 **统一循环**（lead_agent_unified）、**派发**
+（lead_dispatch）、**确认守卫**（LeadAgent._confirm_guard）共享：
+
+- `ActionType`：动作枚举（answer / call_analysis / ask_user / stop），也是 SSE `decision`
+  事件的 action 取值——前端 agentMeta 直接消费，不能改词；
+- `Decision`：派发时传给执行层的决策载荷（goal / complexity / guidance / acceptance…）。
+
+为什么还留在这里：它是"决策词汇表"的唯一定义处。工具层（lead_agent_tools.decision_action）
+与派发表（lead_worker）都按同一套词翻译，拆散会重新出现"两套命名互译"。
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
-
-from app.config import settings
-from app.services.agents.lead.lead_intent import (
-    IntentResult,
-    IntentType,
-    extract_json_object,
-    fallback_intent,
-    parse_intent_fields,
-)
-
-logger = logging.getLogger("lvco.lead.decider")
 
 
 class ActionType(str, Enum):
     """主导 Agent（Supervisor）可执行的动作枚举。
 
     注意：Supervisor 只决策"做什么任务"，不决策"用哪个执行器"——
-    执行器由 entry（入口）确定性决定，复杂度分层复用旧双路径的路由分类器。
+    执行器由 entry（入口）确定性决定（见 lead_worker.ENTRY_WORKERS）。
     """
 
     ANSWER = "answer"                # 直接文本回答
@@ -39,7 +36,7 @@ class ActionType(str, Enum):
 
 @dataclass
 class Decision:
-    """决策结果。"""
+    """决策结果（派发载荷）。"""
 
     action: ActionType
     tool_name: str | None = None
@@ -47,476 +44,15 @@ class Decision:
     direct_text: str | None = None
     reason: str = ""
     degraded: bool = False
-    # 任务复杂度（Supervisor 决策顺带输出，供执行器选择，避免额外一次分类调用）：
+    # 任务复杂度（供执行器选择内核，避免额外一次分类调用）：
     # "complex" → 对话页走 AgentOrchestrator；"simple" → 对话页走轻量 ReAct。
-    # 画布页忽略此字段（入口决定内核）。兜底按意图映射。
+    # 画布页忽略此字段（入口决定内核）。
     complexity: str = "complex"
     # Lead 指导意见（仅 call_analysis 有意义）：对上一轮子任务的评估 + 本轮要改进/补充什么。
-    # 由 run_analysis 作为注入消息带给 Worker，让 Planner 带着评判重做而不是盲目重排。
     guidance: str = ""
-    # ask_user 的反问类型：confirm = 封闭确认（前端渲染确认卡片，用户点击后零 LLM 恢复）；
-    # clarify = 开放澄清（用户文字回答，走正常决策）。缺省/非法值一律 clarify（保守）。
+    # ask_user 的反问类型：confirm = 封闭确认（前端渲染确认卡片）；
+    # clarify = 开放澄清。缺省/非法值一律 clarify（保守）。
     ask_kind: str = "clarify"
-    # P2.5：后续轮（评审后重派）的路由意图，**内含内核选择**：
-    #   patch = 轻量补缺口 → react（复用画布已有块）
-    #   redo  = 重做      → orchestrator（需要重新规划/重新取数）
-    # 第 0 轮不该输出它（那时还没有上轮评审，谈不上补/重做）。
-    repair_kind: str = ""
-    # P3：Lead **自己声明**的验收标准（结构化、可核验）。缺失 = 不声明（跳过该项检查）。
-    # 例：{"min_blocks": 2, "require_verified": true}
-    # 注意：它**不进幂等键**——改声明不该击穿 memo（与 guidance 的取舍相反）。
+    # P3：Lead **自己声明**的验收标准（结构化、可核验）。缺失 = 不声明。
+    # 注意：它**不进幂等键**——改声明不该击穿 memo。
     acceptance: dict | None = None
-
-
-def _guess_complexity(intent: IntentResult) -> str:
-    """确定性兜底：按意图推断复杂度（不额外调用 LLM）。"""
-    if intent.needs_plan or intent.intent == IntentType.ANALYSIS:
-        return "complex"
-    return "simple"
-
-
-def _fallback_decision(user_msg: str, intent: IntentResult, reason: str) -> Decision:
-    """确定性兜底：按意图直接映射动作（不做 LLM 猜测）。"""
-    if intent.needs_plan or intent.intent == IntentType.ANALYSIS:
-        return Decision(
-            action=ActionType.CALL_ANALYSIS,
-            tool_name="run_analysis",
-            tool_args={"goal": user_msg},
-            reason=reason,
-            degraded=True,
-            complexity="complex",
-        )
-    return Decision(
-        action=ActionType.ANSWER,
-        direct_text=None,
-        reason=reason,
-        degraded=True,
-        complexity="simple",
-    )
-
-
-@dataclass
-class MergedOutcome:
-    """首轮合并调用产出：意图 + 决策 一次给出。"""
-
-    intent: IntentResult
-    decision: Decision
-
-
-def _resolve_context_blocks(
-    context_blocks: tuple[str, str, str, str] | None,
-    datasources: list[dict] | None,
-    subtask_summaries: list[str] | None,
-    canvas_layout: str,
-) -> tuple[str, str, str, str]:
-    """P4 装配统一：优先用 **provider 装配好的四块**，否则退回本地渲染。
-
-    为什么能逐字节等价：两边用的是**同一批渲染函数**（context/sources/state.py）——
-    决策路径原先只在"谁来调渲染"上分叉，渲染口径从未分叉。
-
-    为什么必须留退回分支：provider 的 blocks 只在**非空**时进 parts；万一某块缺席，
-    本地渲染会给「（无）」占位而 parts 是空串——那种情况下必须退回，否则占位文案
-    会消失（这是本函数唯一的风险点，已由对拍测试覆盖）。
-    """
-    if context_blocks is not None and all(isinstance(t, str) and t for t in context_blocks):
-        return context_blocks
-    return _build_context_blocks(datasources, subtask_summaries, canvas_layout)
-
-
-def _build_context_blocks(
-    datasources: list[dict] | None,
-    subtask_summaries: list[str] | None,
-    canvas_layout: str = "",
-) -> tuple[str, str, str, str]:
-    """组装【可用数据源】【当前画布状态】【上一轮子任务评估】【已完成子任务摘要】四块（prompt 注入）。
-
-    阶段 4：渲染实现已迁至 context/sources/state.py（唯一实现，等价性由
-    test_context_assembly 锁住），此处保留签名作为兼容入口转调。
-    """
-    from app.services.context.sources.state import (
-        render_assessment,
-        render_canvas,
-        render_datasources,
-        render_subtask_summaries,
-    )
-
-    return (
-        render_datasources(datasources),
-        render_canvas(canvas_layout),
-        render_assessment(subtask_summaries),
-        render_subtask_summaries(subtask_summaries),
-    )
-
-
-def _parse_decision(
-    obj: dict,
-    user_msg: str,
-    intent: IntentResult,
-    degradation: list[str] | None,
-) -> Decision:
-    """从 LLM 输出 dict 解析决策字段；结构非法时按意图确定性兜底（degraded=True）。"""
-    raw_action = str(obj.get("action", "")).strip().lower()
-    try:
-        action = ActionType(raw_action)
-    except ValueError:
-        logger.warning(f"[lead_decider] invalid_action value={raw_action!r} fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_decision_fallback")
-        return _fallback_decision(user_msg, intent, f"invalid_action:{raw_action}")
-
-    tool_args = obj.get("tool_args")
-    if not isinstance(tool_args, dict):
-        tool_args = {}
-    tool_name = obj.get("tool_name")
-    tool_name = str(tool_name) if tool_name else None
-    direct_text = obj.get("direct_text")
-    direct_text = str(direct_text) if direct_text else None
-    reason = str(obj.get("reason") or "")
-    guidance = str(obj.get("guidance") or "").strip()
-    raw_ask_kind = str(obj.get("ask_kind") or "").strip().lower()
-    if raw_ask_kind not in ("confirm", "clarify"):
-        raw_ask_kind = "clarify"
-
-    # 澄清豁免：目标已经很明确时禁止反问。
-    # 实测「清空画布」被连续 ask_user 三次，其中一次理由是
-    # "未明确是清空整个画布还是删除所有块"——两个选项语义完全等价，属于无效澄清，
-    # 用户回"确认"后又会被判成 followup→answer 只回文本不干活，形成死循环。
-    # 命中全量操作关键词 + 编辑/分析意图 → 强制派发执行。
-    _CLEAR_MARKERS = ("清空", "清掉", "全部", "所有块", "所有内容", "都删",
-                      "删掉所有", "删除所有", "全部删除", "remove all")
-    if (
-        action == ActionType.ASK_USER
-        and intent.intent in (IntentType.CANVAS_EDIT, IntentType.ANALYSIS)
-        and any(m in user_msg for m in _CLEAR_MARKERS)
-    ):
-        logger.info(
-            "[lead_decider] ask_user_suppressed reason=目标明确（命中全量操作词） "
-            f"intent={intent.intent.value} user_msg={user_msg[:40]} → forced call_analysis"
-        )
-        # degraded=False：豁免是确定性强制，不是降级。若标 degraded=True，
-        # 主管循环 rnd>0 时会命中"降级即收尾"分支，导致该执行的被跳过。
-        return Decision(
-            action=ActionType.CALL_ANALYSIS,
-            tool_name="run_analysis",
-            tool_args={"goal": user_msg},
-            reason="目标明确（全量操作），直接执行无需澄清",
-            degraded=False,
-            complexity="simple",
-        )
-
-    if action == ActionType.CALL_ANALYSIS:
-        tool_name = tool_name or "run_analysis"
-        if not tool_args.get("goal"):
-            tool_args["goal"] = user_msg
-        # 矛盾检测（few-shot 不灵时的代码层兜底）：LLM 输出 call_analysis 但 reason 自述
-        # "需要澄清/缺少信息/先问"（尤其 canvas_edit 没给目标块）→ 强行纠正为 ask_user，
-        # 避免"reason 说该问、action 却跑全量分析"（画布上会白白加一堆块）。
-        _CLARIFY_MARKERS = ("需要澄清", "需要问", "需要补充", "需要先问", "缺少", "缺失",
-                            "信息不足", "未指定", "不清楚", "请提供", "请告知")
-        _cant_execute = any(m in reason for m in _CLARIFY_MARKERS)
-        if _cant_execute:
-            logger.warning(
-                f"[lead_decider] contradiction action=call_analysis but reason suggests ask_user: "
-                f"reason={reason[:60]} → corrected to ask_user"
-            )
-            if degradation is not None:
-                degradation.append("lead_contradiction_fixed")
-            return Decision(
-                action=ActionType.ASK_USER,
-                tool_name=None,
-                tool_args={},
-                direct_text=direct_text or "请补充必要信息后，我再帮你继续。",
-                reason=reason or "信息不足，需要澄清",
-                degraded=True,
-                complexity="simple",
-            )
-    elif action in (ActionType.ANSWER, ActionType.ASK_USER) and not direct_text:
-        # 该动作必须带文本，缺文本视为无效决策 → 兜底
-        logger.warning(f"[lead_decider] missing_direct_text action={action.value} fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_decision_fallback")
-        return _fallback_decision(user_msg, intent, "missing_direct_text")
-
-    raw_complexity = str(obj.get("complexity") or "").strip().lower()
-    if raw_complexity not in ("complex", "simple"):
-        # 未输出 / 非法：按意图确定性兜底（不额外调用）
-        raw_complexity = _guess_complexity(intent)
-        logger.warning(f"[lead_decider] missing_complexity use_intent_guess={raw_complexity}")
-
-    # P2.5：repair_kind（后续轮的路由意图）
-    # 分工：第 0 轮只给 complexity；后续轮只给 repair_kind。**同一轮只该出现一个**。
-    raw_repair_kind = str(obj.get("repair_kind") or "").strip().lower()
-    if raw_repair_kind not in ("patch", "redo"):
-        raw_repair_kind = ""
-    # P3：验收声明（结构化、可核验）。非 dict / 空 dict 一律视为"未声明"。
-    _acc = obj.get("acceptance")
-    raw_acceptance = _acc if isinstance(_acc, dict) and _acc else None
-
-    degraded_flag = False
-    if raw_repair_kind and obj.get("complexity"):
-        # 两者同时出现 = 模型输出不自洽。**以 repair_kind 为准**并记降级 + 告警：
-        # 不让 LLM 同时给两个字段并要求自洽，等于主动给它制造犯错余地。
-        degraded_flag = True
-        logger.warning(
-            "[lead_decider] both_complexity_and_repair_kind repair_kind_wins=%s",
-            raw_repair_kind,
-        )
-        if degradation is not None:
-            degradation.append("lead_decision_inconsistent_repair_kind")
-
-    decision = Decision(
-        action=action,
-        tool_name=tool_name,
-        tool_args=tool_args,
-        direct_text=direct_text,
-        reason=reason,
-        degraded=degraded_flag,
-        complexity=raw_complexity,
-        guidance=guidance,
-        ask_kind=raw_ask_kind,
-        repair_kind=raw_repair_kind,
-        acceptance=raw_acceptance,
-    )
-    logger.info(
-        f"[lead_decider] action={action.value} tool={tool_name} "
-        f"reason={reason[:60]}"
-    )
-    return decision
-
-
-async def decide_action(
-    user_msg: str,
-    intent: IntentResult,
-    *,
-    history_summary: str = "",
-    datasources: list[dict] | None = None,
-    subtask_summaries: list[str] | None = None,
-    canvas_layout: str = "",
-    llm,
-    timeout: float = 10.0,
-    degradation: list[str] | None = None,
-    prev_action: str | None = None,
-    trace=None,
-    context_blocks: tuple[str, str, str, str] | None = None,
-) -> Decision:
-    """根据意图决定动作（Supervisor 版：可在多轮间传递子任务摘要）。
-
-    Args:
-        user_msg: 用户当前消息。
-        intent: 上一步意图识别结果。
-        history_summary: 会话长期记忆摘要。
-        datasources: 可用数据源列表（供 LLM 引用真实 id，禁止编造）。
-        subtask_summaries: 已完成子任务的产出摘要（Supervisor 据此避免重复执行）。
-        canvas_layout: 画布布局快照（DB 落盘，画布入口注入，供感知已完成效果）。
-        llm: LLM 客户端。
-        timeout: LLM 调用超时（秒）。
-        degradation: 可选外部列表，降级时写入 `lead_decision_fallback`。
-        prev_action: 上一轮决策的动作名（answer/call_analysis/…），帮助收敛 stop。
-
-    Returns:
-        Decision；任何异常均不抛出，`degraded=True` 表示走了兜底。
-    """
-    from app.services.ai_prompts import LEAD_DECISION_SYSTEM
-
-    ds_block, canvas_block, assessment_block, summary_block = _resolve_context_blocks(
-        context_blocks, datasources, subtask_summaries, canvas_layout
-    )
-
-    user_content = (
-        "【意图识别结果】\n"
-        f"intent={intent.intent.value}\n"
-        f"confidence={intent.confidence:.2f}\n"
-        f"needs_plan={intent.needs_plan}\n"
-        f"slots={json.dumps(intent.slots, ensure_ascii=False)}\n\n"
-        "【上一轮动作】\n"
-        f"{prev_action or '（本轮为首轮决策）'}\n\n"
-        "【可用数据源】\n"
-        f"{ds_block}\n\n"
-        "【当前画布状态】\n"
-        f"{canvas_block}\n\n"
-        f"【上一轮子任务评估】\n{assessment_block}\n\n"
-        "输出规则：若评估为未达标且你决定重新 call_analysis，必须同时在输出中给出 guidance 字段"
-        "（1-3 句：点明上轮问题 + 本轮要如何改进/补充的指导意见），供下游 Worker 据此执行。\n\n"
-        "【历史摘要】\n"
-        f"{history_summary.strip() or '（无）'}\n\n"
-        "【已完成子任务摘要】\n"
-        f"{summary_block}\n\n"
-        "【当前用户消息】\n"
-        f"{user_msg}"
-    )
-
-    decision_messages = [
-        {"role": "system", "content": LEAD_DECISION_SYSTEM},
-        {"role": "user", "content": user_content},
-    ]
-    try:
-        if trace is not None:
-            from app.services.observability import observe_llm_call
-
-            with observe_llm_call(trace, "lead_decision", messages=decision_messages) as span:
-                result = await asyncio.wait_for(
-                    llm.complete(
-                        decision_messages,
-                        response_format={"type": "json_object"},
-                        enable_thinking=False,
-                        max_tokens=int(getattr(settings, "LEAD_DECISION_MAX_TOKENS", 1200)),
-                        return_usage=True,
-                    ),
-                    timeout=timeout,
-                )
-                content, usage_meta = result if isinstance(result, tuple) else (result, None)
-                if usage_meta:
-                    span.update(usage=usage_meta)
-        else:
-            content = await asyncio.wait_for(
-                llm.complete(
-                    decision_messages,
-                    response_format={"type": "json_object"},
-                    enable_thinking=False,
-                    max_tokens=int(getattr(settings, "LEAD_DECISION_MAX_TOKENS", 1200)),
-                ),
-                timeout=timeout,
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"[lead_decider] llm_error error={e} fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_decision_fallback")
-        return _fallback_decision(user_msg, intent, f"llm_error:{e}")
-
-    obj = extract_json_object(content or "")
-    if not obj:
-        logger.warning("[lead_decider] empty_or_unparsable fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_decision_fallback")
-        return _fallback_decision(user_msg, intent, "unparsable")
-
-    return _parse_decision(obj, user_msg, intent, degradation)
-
-
-# ── 首轮合并调用：意图 + 决策 一次 LLM 请求 ────────────────────────────────
-
-
-async def decide_action_merged(
-    user_msg: str,
-    *,
-    entry: str = "chat",
-    history_summary: str = "",
-    datasources: list[dict] | None = None,
-    subtask_summaries: list[str] | None = None,
-    canvas_layout: str = "",
-    llm,
-    timeout: float = 10.0,
-    degradation: list[str] | None = None,
-    trace=None,
-    context_blocks: tuple[str, str, str, str] | None = None,
-) -> MergedOutcome:
-    """首轮合并调用：一次 LLM 请求同时产出【意图】+【决策】。
-
-    失败降级成对处理：意图走规则兜底（fallback_intent），决策走意图映射兜底
-    （_fallback_decision），保证 call_analysis / answer 至少有一个确定性输出。
-    意图字段非法时视为整次调用降级（决策规则依赖意图，避免基于错误意图的决策）。
-
-    Returns:
-        MergedOutcome；任何异常均不抛出，`intent.degraded` / `decision.degraded` 标记兜底。
-    """
-    from app.services.ai_prompts import LEAD_MERGED_SYSTEM, LEAD_MERGED_SYSTEM_CANVAS
-
-    # 决策 prompt 按助手身份选：画布页与对话页各有一份（感知/派发/评审本就已按 entry
-    # 分化，这一份补上"决策"维度——两个场景的 Lead 至此四维齐备）。
-    system = LEAD_MERGED_SYSTEM_CANVAS if entry == "canvas" else LEAD_MERGED_SYSTEM
-    ds_block, canvas_block, assessment_block, summary_block = _resolve_context_blocks(
-        context_blocks, datasources, subtask_summaries, canvas_layout
-    )
-
-    user_content = (
-        "【本轮为合并调用】请先识别意图，再决定动作，一次输出全部字段。\n\n"
-        "【历史摘要（含最近对话）】\n"
-        f"{history_summary.strip() or '（无）'}\n\n"
-        "【可用数据源】\n"
-        f"{ds_block}\n\n"
-        "【当前画布状态】\n"
-        f"{canvas_block}\n\n"
-        f"【上一轮子任务评估】\n{assessment_block}\n\n"
-        "输出规则：若评估为未达标且你决定重新 call_analysis，必须同时在输出中给出 guidance 字段"
-        "（1-3 句：点明上轮问题 + 本轮要如何改进/补充的指导意见），供下游 Worker 据此执行。\n\n"
-        "【已完成子任务摘要】\n"
-        f"{summary_block}\n\n"
-        "【当前用户消息】\n"
-        f"{user_msg}"
-    )
-
-    merged_messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_content},
-    ]
-    try:
-        if trace is not None:
-            from app.services.observability import observe_llm_call
-
-            with observe_llm_call(trace, "lead_intent_decision", messages=merged_messages) as span:
-                result = await asyncio.wait_for(
-                    llm.complete(
-                        merged_messages,
-                        response_format={"type": "json_object"},
-                        enable_thinking=False,
-                        max_tokens=int(getattr(settings, "LEAD_MERGED_MAX_TOKENS", 1500)),
-                        return_usage=True,
-                    ),
-                    timeout=timeout,
-                )
-                content, usage_meta = result if isinstance(result, tuple) else (result, None)
-                if usage_meta:
-                    span.update(usage=usage_meta)
-        else:
-            content = await asyncio.wait_for(
-                llm.complete(
-                    merged_messages,
-                    response_format={"type": "json_object"},
-                    enable_thinking=False,
-                    max_tokens=int(getattr(settings, "LEAD_MERGED_MAX_TOKENS", 1500)),
-                ),
-                timeout=timeout,
-            )
-    except Exception as e:  # noqa: BLE001
-        # asyncio.TimeoutError 的 str() 是空字符串，必须补上异常类型名，
-        # 否则日志只会打出 "error=" 而看不出是超时还是其他错误（排查时无从下手）。
-        err = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
-        logger.warning(f"[lead_decider] merged_llm_error error={err} fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_intent_fallback")
-            degradation.append("lead_decision_fallback")
-        intent = fallback_intent(user_msg, history_summary, f"llm_error:{err}")
-        return MergedOutcome(
-            intent=intent,
-            decision=_fallback_decision(user_msg, intent, f"llm_error:{err}"),
-        )
-
-    obj = extract_json_object(content or "")
-    if not obj:
-        logger.warning("[lead_decider] merged_empty_or_unparsable fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_intent_fallback")
-            degradation.append("lead_decision_fallback")
-        intent = fallback_intent(user_msg, history_summary, "unparsable")
-        return MergedOutcome(
-            intent=intent,
-            decision=_fallback_decision(user_msg, intent, "unparsable"),
-        )
-
-    intent, reason = parse_intent_fields(obj, user_msg, history_summary)
-    if intent is None:
-        logger.warning(f"[lead_decider] merged_invalid_intent reason={reason} fallback=deterministic")
-        if degradation is not None:
-            degradation.append("lead_intent_fallback")
-        intent = fallback_intent(user_msg, history_summary, reason)
-        return MergedOutcome(
-            intent=intent,
-            decision=_fallback_decision(user_msg, intent, reason),
-        )
-
-    decision = _parse_decision(obj, user_msg, intent, degradation)
-    logger.info(
-        f"[lead_decider] merged intent={intent.intent.value} confidence={intent.confidence:.2f} "
-        f"action={decision.action.value} complexity={decision.complexity}"
-    )
-    return MergedOutcome(intent=intent, decision=decision)

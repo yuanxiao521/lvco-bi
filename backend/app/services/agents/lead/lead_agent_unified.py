@@ -7,8 +7,9 @@
   single_agent：请求 → **一个** Lead Agent，在循环里「看 → 判 → 决」多步完成，
            角色认知只有一份，终止动作由模型显式给出（answer / ask_user / stop）。
 
-**为什么单独一个模块**：不碰 LeadAgent.stream（legacy 路径），
-由 LEAD_AGENT_MODE=single_agent 显式开启，出问题一键回滚。
+**为什么单独一个模块**：把"循环本体"与"入口装配 + 后处理"分开，便于单独测试；
+legacy 四工位（merged/decision/answer）与 LEAD_AGENT_MODE 开关已整体删除，
+本模块是**唯一**执行路径（见 docs/SUPER_OPTIMIZATION_MVP.md）。
 
 三条硬约束（§2.3 / §6）：
   1. **收敛闸在代码里**：步数上限 + 每类工具次数上限 + 强制终止动作，

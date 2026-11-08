@@ -157,12 +157,14 @@ def test_decision_action_maps_to_legacy_enum():
 
 # ── 开关（可回滚）──────────────────────────────────────────────────────────
 
-def test_mode_defaults_to_single_agent_so_delivery_is_safe():
-    """默认必须是 single_agent。
+def test_no_execution_mode_switch_exists():
+    """不允许再出现「执行形态开关」。
 
-    此前默认 legacy，靠未入库的 backend/.env 才切换 → 交付包在客户机跑 legacy
-    （"works on my machine" 的产品级陷阱，见 docs/SUPER_OPTIMIZATION_MVP.md §1）。
-    legacy 只作为显式逃生口保留，值由人写死，不能靠默认值落到它上面。
+    历史：LEAD_AGENT_MODE 默认 legacy，而把它切成 single_agent 的配置只存在于
+    **未入库**的 backend/.env → 交付包在客户机静默跑 legacy（交付级事故，
+    见 docs/SUPER_OPTIMIZATION_MVP.md §1）。legacy 四工位已整体删除，
+    单 Agent 循环是唯一路径；这条守卫防止有人再引入第二个"可选执行形态"。
     """
-    assert Settings.model_fields["LEAD_AGENT_MODE"].default == "single_agent"
+    assert "LEAD_AGENT_MODE" not in Settings.model_fields, "执行形态开关不该回来"
+    assert Settings.model_fields["LEAD_AGENT_MAX_STEPS"].default == 6
     assert Settings.model_fields["LEAD_AGENT_MAX_STEPS"].default == 6

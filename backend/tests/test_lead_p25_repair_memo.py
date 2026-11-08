@@ -54,32 +54,6 @@ def _parse(obj: dict, degradation=None):
     return _parse_decision(obj, "做个分析", _intent(), degradation)
 
 
-def test_repair_kind_parsed_from_llm_output():
-    d = _parse({"action": "call_analysis", "tool_args": {"goal": "补品牌图"},
-                "repair_kind": "patch"})
-    assert d.repair_kind == "patch"
-    assert d.degraded is False
-
-
-def test_repair_kind_and_complexity_together_repair_kind_wins():
-    """两者同时出现 = 模型输出不自洽 → **以 repair_kind 为准** + 记降级 + 告警。
-
-    不让 LLM 同时给两个字段并要求自洽，等于主动给它制造犯错余地。
-    """
-    degradation: list[str] = []
-    d = _parse({"action": "call_analysis", "tool_args": {"goal": "补品牌图"},
-                "repair_kind": "redo", "complexity": "simple"}, degradation)
-    assert d.repair_kind == "redo"
-    assert d.degraded is True
-    assert "lead_decision_inconsistent_repair_kind" in degradation
-
-
-def test_invalid_repair_kind_is_dropped():
-    assert _parse({"action": "call_analysis", "tool_args": {"goal": "G"},
-                   "repair_kind": "重做"}).repair_kind == ""
-    assert _parse({"action": "call_analysis", "tool_args": {"goal": "G"}}).repair_kind == ""
-
-
 def test_repair_kind_maps_to_kernel():
     """§4 P2.5：repair_kind **内含路由意图**，不需要新表。"""
     from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL

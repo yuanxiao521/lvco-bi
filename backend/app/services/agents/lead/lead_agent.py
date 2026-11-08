@@ -359,26 +359,6 @@ class LeadContext:
         return out
 
 
-# 旧模式值 → 新值。unified 这个名字容易与 P4 的「装配统一」混淆（同词不同事），
-# 已改名 single_agent；保留别名只为避免"环境里还写着旧值 → 静默退回 legacy"这种坑。
-_MODE_ALIASES: dict[str, str] = {"unified": "single_agent"}
-
-
-def lead_agent_mode() -> str:
-    """执行形态开关：single_agent（默认，唯一目标形态）| legacy（待删除的逃生口）。
-
-    默认值与兜底值都改成 single_agent：
-      · 此前默认 legacy，靠**未入库的** backend/.env 才切成 single_agent → 交付包会静默
-        跑 legacy（docs/SUPER_OPTIMIZATION_MVP.md §1）；
-      · 配置写错（非法值）现在也走 single_agent：单 Agent 是唯一还在维护、且被评测覆盖的
-        路径，「退回已验证的路径」这句话在 legacy 上已经不成立。
-    """
-    raw = str(getattr(settings, "LEAD_AGENT_MODE", "single_agent") or "single_agent").strip().lower()
-    if raw in _MODE_ALIASES:
-        return _MODE_ALIASES[raw]
-    return raw if raw in ("legacy", "single_agent") else "single_agent"
-
-
 class LeadAgent:
     """主导 Agent：意图 → 决策 → 调度 → 汇报 → 记忆回流。"""
 

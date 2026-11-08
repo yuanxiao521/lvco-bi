@@ -81,15 +81,6 @@ async def startup():
     cache_repo = get_cache_repository()
     status = "redis" if getattr(cache_repo, "_use_redis", False) else "fallback_to_dict"
     logger.info("redis ping", status=status)
-    # P2：把**生效的** Lead 编排模式打进启动日志。
-    # 起因：该配置只存在于未入库的 backend/.env，代码默认 legacy → 交付包可能在跑
-    # legacy 而没人知道（详见 docs/SUPER_OPTIMIZATION_MVP.md §1）。
-    try:
-        from app.services.agents.lead.lead_agent import lead_agent_mode
-
-        logger.info("lead_agent_mode", mode=lead_agent_mode())
-    except Exception:  # noqa: BLE001
-        logger.warning("lead_agent_mode_unavailable")
     # 幂等写入内置指标模板（指标语义层）；失败不影响应用启动
     try:
         from app.services.metric_service import ensure_default_metrics

@@ -92,39 +92,6 @@ def test_answer_window_budget_and_lone_answer():
 
 # ── 状态四块：渲染 == lead_decider._build_context_blocks ────────────────────
 
-def test_state_renderers_match_legacy_blocks():
-    from app.services.agents.lead.lead_decider import _build_context_blocks
-
-    datasources = [{"id": "ds1", "name": "销售", "type": "csv"}, {"id": "ds2", "name": "订单", "type": "postgres"}]
-    subtasks = [
-        "[子任务完成] 华东销售额柱状图（工具链 query_engine→add_chart_block）",
-        "[子任务评估] 达标：success=True，已落块 1",
-        "[子任务完成] 未决：华南数据缺失",
-    ]
-    layout = "画布当前共有 2 个块：图表 1 个、文本 1 个。"
-
-    ds_block, canvas_block, assess_block, summary_block = _build_context_blocks(
-        datasources, subtasks, layout
-    )
-    assert render_datasources(datasources) == ds_block
-    assert render_datasources(None) == "（无）"                       # 空清单 → 占位
-    assert render_canvas(layout) == canvas_block
-    assert render_canvas("") == "（非画布入口或画布状态不可用）"        # 空 layout → 占位
-    assert render_assessment(subtasks) == assess_block
-    assert render_assessment([]) == "（本轮无子任务评估）"
-    assert render_subtask_summaries(subtasks) == summary_block
-    assert render_subtask_summaries(None) == "（本轮无已完成子任务）"
-
-
-def test_subtask_summary_truncation_matches_legacy():
-    from app.services.agents.lead.lead_decider import _build_context_blocks
-
-    long_summary = "长" * 2000
-    _, _, _, legacy = _build_context_blocks(None, [long_summary], "")
-    assert render_subtask_summaries([long_summary]) == legacy
-    assert legacy == f"- {long_summary[:1000]}"
-
-
 # ── Provider 门面：端到端等价 ───────────────────────────────────────────────
 
 def test_provider_for_decision_parts_match_digest():

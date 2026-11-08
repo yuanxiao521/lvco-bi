@@ -224,16 +224,11 @@ class Settings(BaseSettings):
     stream_idle_timeout_seconds: int = 180
     # 任务态「running」超过该时长视为陈旧（worker 挂掉/任务悬死），允许清孤儿锁。
     lead_task_stale_seconds: int = 900
-    # Lead 的执行形态开关（P1 单 Agent 化）。
-    #   single_agent = 一个 system + 工具层 + 循环闸，即「单 Agent」，**唯一目标形态**；
-    #   legacy       = 四个 prompt 工位（merged + decision + answer），**待删除的死代码**，
-    #                  仅作为「单 Agent 出问题时的临时逃生口」保留，值为 legacy 时启动会打警告。
-    # 命名说明：旧值 unified 已弃用——它与 P4 的「装配统一」同词不同事，
-    # 读代码的人无法判断 unified 指哪一层；保留为兼容别名（见 lead_agent_mode）。
-    # 默认 single_agent：交付包不能再"因为漏配一行而跑 legacy"（见
-    # docs/SUPER_OPTIMIZATION_MVP.md §1；此前默认 legacy 是交付级事故的根因）。
-    LEAD_AGENT_MODE: str = "single_agent"
-    # single_agent 模式的循环闸：单轮最多几步（观察/派发/终止动作合计，§2.3）。
+    # 【已删除】LEAD_AGENT_MODE 执行形态开关：legacy 四工位已整体删除，只剩单 Agent 循环，
+    # "切模式"不再是一个可配置项。历史上它默认 legacy + 配置只存在于未入库的 .env，
+    # 导致交付包可能静默跑 legacy（docs/SUPER_OPTIMIZATION_MVP.md §1）。
+    # 现在由测试守住：Settings 里不允许再出现形态开关（test_lead_p1_agent_tools）。
+    # 循环闸：单轮最多几步（观察/派发/终止动作合计，§2.3）。
     LEAD_AGENT_MAX_STEPS: int = 6
 
     # 任务队列（ARQ）：True = 对话任务投递到 Redis 队列、由独立 worker 进程执行

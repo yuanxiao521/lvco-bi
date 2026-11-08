@@ -42,39 +42,3 @@ def test_budgets_leave_room_for_reasoning():
     assert settings.LEAD_INTENT_MAX_TOKENS >= 600
 
 
-def test_decide_action_uses_configured_budget():
-    from app.services.agents.lead.lead_decider import decide_action
-
-    llm = _CaptureLLM(json.dumps(
-        {"action": "answer", "reason": "闲聊", "direct_text": "你好呀"}, ensure_ascii=False
-    ))
-    intent = IntentResult(intent=IntentType.CHAT, confidence=0.9)
-    _run(decide_action("你好", intent, llm=llm, timeout=5.0))
-
-    assert llm.kwargs, "应当调用 LLM"
-    assert llm.kwargs[-1]["max_tokens"] == settings.LEAD_DECISION_MAX_TOKENS
-
-
-def test_decide_action_merged_uses_configured_budget():
-    from app.services.agents.lead.lead_decider import decide_action_merged
-
-    llm = _CaptureLLM(json.dumps(
-        {"intent": "chat", "action": "answer", "reason": "闲聊", "direct_text": "你好"},
-        ensure_ascii=False,
-    ))
-    _run(decide_action_merged("你好", entry="chat", llm=llm, timeout=5.0))
-
-    assert llm.kwargs, "应当调用 LLM"
-    assert llm.kwargs[-1]["max_tokens"] == settings.LEAD_MERGED_MAX_TOKENS
-
-
-def test_truncated_json_still_degrades_to_deterministic():
-    """JSON 被截断（推理吃光预算的典型症状）→ 走确定性兜底，不抛异常。"""
-    from app.services.agents.lead.lead_decider import decide_action
-
-    llm = _CaptureLLM('{"action": "ans')      # 故意截断
-    intent = IntentResult(intent=IntentType.CHAT, confidence=0.9)
-    decision = _run(decide_action("你好", intent, llm=llm, timeout=5.0))
-
-    assert decision is not None
-    assert decision.degraded is True           # 降级标记可见（不是静默）

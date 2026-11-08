@@ -19,14 +19,6 @@ import json
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _force_legacy_mode(monkeypatch):
-    """本文件的用例针对 legacy 主循环（intent/merged/decision/answer 分支），
-    用 fake LLM 没有 tool_call_round——single_agent 默认化后必须显式钉回 legacy，
-    否则会走进 unified 分支报 no attribute tool_call_round（2026-10-17 切默认后回归发现）。"""
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "legacy")
 from app.services.agents.lead.lead_agent import LeadAgent, LeadContext
 from app.services.agents.lead.lead_review import build_execution_summary
 from app.services.agents.lead.lead_tools import (
@@ -394,28 +386,5 @@ def test_assess_subtask_detects_pass_and_failures():
     zero = RunAnalysisResult(success=True, verified=True, tool_chain=[], blocks_added=0)
     assert "未达标" in assess_subtask(zero, entry="canvas")
     assert "上轮达标" in assess_subtask(zero, entry="chat")  # 对话入口无此约束
-
-
-def test_merged_decision_parses_guidance():
-    """合并决策输出含 guidance → Decision.guidance 被保留。"""
-    from app.services.agents.lead.lead_decider import decide_action_merged
-
-    class _LLM:
-        async def complete(self, messages, **kw) -> str:
-            return json.dumps({
-                "intent": "analysis", "confidence": 0.9, "needs_plan": True, "slots": {},
-                "action": "call_analysis", "tool_name": "run_analysis",
-                "tool_args": {"goal": "重做销售额分析"}, "reason": "上轮工具失败，需要重做",
-                "complexity": "complex",
-                "guidance": "上轮 query_sql 在 bad_table 上失败；本轮改用 orders 表，先 list_fields 核字段再查。",
-            }, ensure_ascii=False)
-
-    outcome, _ = None, None
-    import asyncio
-    outcome = asyncio.run(decide_action_merged(
-        "重做", llm=_LLM(), timeout=5.0, degradation=[],
-    ))
-    assert outcome.decision.guidance
-    assert "bad_table" in outcome.decision.guidance
 
 

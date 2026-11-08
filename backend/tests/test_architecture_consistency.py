@@ -178,31 +178,3 @@ def test_explicit_worker_overrides_table():
 # ── 决策 prompt 成对分化 ─────────────────────────────────────────────
 
 
-def test_both_decision_prompts_loaded_and_distinct():
-    """两个入口的决策 prompt 都必须能加载、非空、且**内容不同**。
-
-    此前两个入口共用一份 prompt，模型无从知道自己在哪个页面（画布 vs 对话）；
-    分化后若有人只改一份、或把回落逻辑接错，这里会拦住。
-    """
-    from app.services.ai_prompts import LEAD_MERGED_SYSTEM, LEAD_MERGED_SYSTEM_CANVAS
-
-    assert LEAD_MERGED_SYSTEM.strip(), "对话版决策 prompt 为空"
-    assert LEAD_MERGED_SYSTEM_CANVAS.strip(), "画布版决策 prompt 为空"
-    assert LEAD_MERGED_SYSTEM != LEAD_MERGED_SYSTEM_CANVAS, "两份决策 prompt 内容相同（分化被回退）"
-
-
-def test_decision_prompts_declare_their_scene():
-    """两份 prompt 各自声明所处场景——这是"决策大脑知道自己在哪"的最小证据。"""
-    from app.services.ai_prompts import LEAD_MERGED_SYSTEM, LEAD_MERGED_SYSTEM_CANVAS
-
-    assert "对话页" in LEAD_MERGED_SYSTEM, "对话版 prompt 未声明场景"
-    assert "分析画布" in LEAD_MERGED_SYSTEM_CANVAS, "画布版 prompt 未声明场景"
-
-
-@pytest.mark.parametrize("prompt_name", ["lead_merged_system", "lead_merged_system_canvas"])
-def test_decision_prompt_registry_loadable(prompt_name: str):
-    """两份 prompt 都能从 PromptRegistry 取到（防止 YAML 改名/损坏导致静默回落）。"""
-    from app.services.prompt_registry import get_prompt  # noqa: PLC0415
-
-    tmpl = get_prompt(prompt_name)
-    assert tmpl and tmpl.system and tmpl.system.strip(), f"{prompt_name} 从注册表加载为空"

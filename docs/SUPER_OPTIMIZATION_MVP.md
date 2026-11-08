@@ -19,16 +19,28 @@
 | 9 | `agent_calls` 无保留策略 | **30 天删明细 + turn 行长留 + 日汇总** | red-team §5.1 | 写放大 7–100KB/轮；多用户 1 年 50–110GB |
 | 10 | "关开关即回滚" | **两级：软回滚(env) / 硬回滚(revert)** 逐批标注 | red-team §4.2 | `LEAD_PROFILE_ENABLED` 回滚不了已删代码 |
 
-## 1. 前提（0.5 小时，**任何批次之前**）
+## 1. 前提：**已用"删除"解决**（2026-11-08，不再是待办）
 
-> **把"优化的是哪个模式"钉进仓库，而不是钉在某台机器的未入库 .env 里。**
+> 原方案是"把配置钉进仓库"（P1–P4）。执行时改成了更彻底的解法：**把 legacy 整条路径删掉**，
+> 于是"跑哪个模式"这个问题从根上不存在了。P1–P4 全部作废。
 
-| # | 动作 | 落点 | 验收 |
-|---|---|---|---|
-| P1 | `.env.example` 增 `LEAD_AGENT_MODE=single_agent`（注释：legacy 仅回滚用） | `backend/.env.example` | 新机器按示例起 → single_agent |
-| P2 | 启动日志打印**生效的 mode** | `main.py` / `config.py` | 启动日志有 `lead_agent_mode=…` |
-| P3 | 打包脚本读 mode，非 single_agent 直接中断 | 打包脚本（随 S4-2） | 改成 legacy → 打包失败 |
-| P4 | 回滚开关表补 `LEAD_AGENT_MODE`（需重启，非热开关） | §4 | — |
+**删除记录（commit `5ab9192` + 本批）**
+
+| 对象 | 前 → 后 | 说明 |
+|---|---|---|
+| `lead_agent.py` | 1037 → **676** 行 | 删掉 legacy 主循环体（merged→decision→answer 四工位）、`_answer_branch`、`_guard_stop_outcome`、`_provider_context_blocks`、`_log_ctx_ledger` |
+| `lead_decider.py` | 522 → **40** 行 | 只剩 `ActionType` / `Decision` 两个共享类型 |
+| `lead_intent.py` | 226 → **32** 行 | 只剩 `IntentType` / `IntentResult`（供 lead_intent_signal 派生标签） |
+| `ai_prompts.py` | 799 → **626** 行 | 删 `LEAD_INTENT_SYSTEM` / `LEAD_DECISION_SYSTEM` / `LEAD_MERGED_SYSTEM(_CANVAS)` 及 4 个 yaml |
+| `LEAD_AGENT_MODE` | **删除** | 配置项 + `lead_agent_mode()` + 启动日志 + .env 条目全部移除；加守卫测试"不允许再出现执行形态开关" |
+| 测试 | 1138 → **1097** collected | 删除 41 个只测 legacy 的用例 / 3 个文件；唯一共享断言（显式指定内核优先）迁入架构守卫 |
+
+**代价与验证**：全量 pytest = **1095 passed / 2 failed**（两条 `test_chart_export` 是环境缺失，
+改动前就红：playwright 要 chromium-1228，本机 1134）。删完后 `hint` 之外没有任何
+`decide_action` / `classify_intent` / `LEAD_MERGED_SYSTEM` 引用残留。
+
+**仍然保留的"逃生口"**：没有。回滚方式只有 `git revert`（这比环境变量更可靠——它回滚的是代码，
+而不是让人在一台机器上改一个可能忘了改回去的开关）。
 
 ## 2. 五条决策（v2 定稿）
 

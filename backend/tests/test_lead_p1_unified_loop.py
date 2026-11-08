@@ -212,32 +212,6 @@ def test_effective_complexity_allows_simple_for_single_lookup():
 
 # ── 模式开关与包装层顺序 ───────────────────────────────────────────────────
 
-def test_lead_agent_mode_defaults_to_single_agent_and_rejects_garbage(monkeypatch):
-    """默认与兜底都必须是 single_agent——否则交付包会静默跑 legacy。
-
-    历史：默认值是 legacy，靠**未入库的** backend/.env 才切成 single_agent，
-    于是"发出去的包跑的是没人维护的那条路"（docs/SUPER_OPTIMIZATION_MVP.md §1）。
-    现在：显式写 legacy 仍然生效（临时逃生口），但默认/非法值一律 single_agent。
-    """
-    from app.config import settings
-    from app.services.agents.lead.lead_agent import lead_agent_mode
-
-    # 显式 legacy 是逃生口，必须还能用（删代码前保留）
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "legacy")
-    assert lead_agent_mode() == "legacy"
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "Single_Agent")
-    assert lead_agent_mode() == "single_agent"
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "  single_agent  ")
-    assert lead_agent_mode() == "single_agent"
-    # 旧值兼容：改名不能让人"配置写了但静默走了 legacy"
-    monkeypatch.setattr(settings, "LEAD_AGENT_MODE", "unified")
-    assert lead_agent_mode() == "single_agent"
-    # 非法值：退回 single_agent（唯一还在维护、被评测覆盖的路径）
-    for bad in ("", None, "v2", "experimental"):
-        monkeypatch.setattr(settings, "LEAD_AGENT_MODE", bad)
-        assert lead_agent_mode() == "single_agent", f"{bad!r} 应退回 single_agent"
-
-
 async def test_stream_unified_wrapper_emits_done_last(monkeypatch):
     """后处理（收尾总结 / 记忆回流）必须排在 done **之前**。
 
