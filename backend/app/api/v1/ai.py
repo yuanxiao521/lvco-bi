@@ -977,15 +977,10 @@ async def data_chat_stream(
                 _metrics = await list_metrics_for_user(db, current_user.id)
                 metrics_ctx_for_lead = format_metrics_context(_metrics)
                 if metrics_ctx_for_lead:
-                    if len(metrics_ctx_for_lead) <= 4000:
-                        agent_message += f"\n\n【系统注入：平台已定义的受治理业务指标】\n{metrics_ctx_for_lead}\n涉及这些指标的问题必须用 metric_key 引用（可用 list_metrics 查看），不要自行拼 SUM/AVG 口径"
-                    else:
-                        sample_keys = ", ".join(f'"{m.key}"' for m in _metrics[:5])
-                        agent_message += (
-                            f"\n\n【系统注入：平台已定义 {len(_metrics)} 个受治理业务指标，无法全量展示；"
-                            f"示例 key: {sample_keys}。查询涉及业务指标口径时先调 list_metrics 查看完整清单，"
-                            f"再用 metric_key 引用，不要自行拼 SUM/AVG 口径】"
-                        )
+                    # 上限与"指标过多只给示例 key + 提示 list_metrics"的降级**已在
+                    # metric_service.format_metrics_context 内部完成**（30 条 / 1200 字）。
+                    # 此前这里还有一条 len<=4000 的分支，封顶下移后恒真，属死代码，已删。
+                    agent_message += f"\n\n【系统注入：平台已定义的受治理业务指标】\n{metrics_ctx_for_lead}\n涉及这些指标的问题必须用 metric_key 引用（可用 list_metrics 查看），不要自行拼 SUM/AVG 口径"
             except Exception:
                 _log.info("metrics context injection skipped", exc_info=True)
 

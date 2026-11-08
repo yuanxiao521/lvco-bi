@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import logging
 
+from app.services.profile_schema import null_rate as _null_rate, quote_ident, type_kind
+
 logger = logging.getLogger("lvco.lead.observe")
 
 
@@ -296,25 +298,9 @@ async def list_fields(db_session, user_id: str, datasource_id) -> list[dict]:
 _PROFILE_MAX_COLUMNS = 20        # 宽表只统计前 N 列：画像是"看形态"，不是导出
 _PROFILE_CELL_CHARS = 40         # 单个 min/max 值截断（长文本列可能很长）
 
-_NUMERIC_TYPE_MARKS = (
-    "INT", "DECIMAL", "NUMERIC", "DOUBLE", "FLOAT", "REAL", "NUMBER",
-)
-_TEMPORAL_TYPE_MARKS = ("DATE", "TIME", "TIMESTAMP")
-
-
-def _type_kind(data_type: object) -> str:
-    """把 DuckDB 类型名归成 numeric / temporal / other（只用于选择聚合函数）。"""
-    t = str(data_type or "").upper()
-    if any(m in t for m in _TEMPORAL_TYPE_MARKS):
-        return "temporal"
-    if any(m in t for m in _NUMERIC_TYPE_MARKS):
-        return "numeric"
-    return "other"
-
-
-def _q(col: str) -> str:
-    """列名加双引号（内部双引号转义）——与 query_sample 的 sample_sql 同一口径。"""
-    return '"' + str(col).replace('"', '""') + '"'
+# 类型判定/空值率/标识符转义统一来自 app.services.profile_schema（唯一真源）：
+# REST 侧画像（services/datasource_profile.py）与这里的口径必须一致，否则同一张表
+# 会给出两套"空值率/基数"。共用后本模块只保留"呈现形态"差异。
 
 
 def profile_sql(table_ref: str, fields: list[dict]) -> str:
@@ -335,8 +321,8 @@ def profile_sql(table_ref: str, fields: list[dict]) -> str:
         return ""
     items: list[str] = ['COUNT(*) AS "total_rows"']
     for i, f in enumerate(cols):
-        kind = _type_kind(f.get("data_type"))
-        quoted = _q(f["name"])
+        kind = type_kind(f.get("data_type"))
+        quoted = quote_ident(f["name"])
         items.append(f'COUNT(DISTINCT {quoted}) AS "c{i}__nd"')
         items.append(
             f'SUM(CASE WHEN {quoted} IS NULL THEN 1 ELSE 0 END) AS "c{i}__nulls"'
@@ -391,14 +377,14 @@ def build_profile_payload(
     highlights: list[str] = []
     for i, f in enumerate(cols):
         name = str(f["name"])
-        kind = _type_kind(f.get("data_type"))
+        kind = type_kind(f.get("data_type"))
         nulls = _num(values.get(f"c{i}__nulls")) or 0
         item = {
             "name": name,
             "data_type": str(f.get("data_type") or "?"),
             "category": str(f.get("category") or ""),
             "distinct": int(_num(values.get(f"c{i}__nd")) or 0),
-            "null_rate": round(nulls / total, 4) if total else None,
+            "null_rate": _null_rate(total, total - nulls, digits=4),
         }
         if kind in ("numeric", "temporal"):
             item["min"] = _cell(values.get(f"c{i}__min"))

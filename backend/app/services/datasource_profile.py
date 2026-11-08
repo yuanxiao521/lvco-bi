@@ -51,6 +51,12 @@ from app.connectors.attach_sql import is_external_source, sql_ident
 from app.core.duckdb_client import duckdb_client
 from app.models.datasource import DataSource
 from app.services.datasource_connection import ensure_attached, table_ref_for
+from app.services.profile_schema import (
+    null_rate as _null_rate,
+    norm_type,
+    quote_ident,
+    supports_range,
+)
 from app.services.sensitive_columns import detect_sensitive
 
 log = logging.getLogger("lvco.datasource_profile")
@@ -65,10 +71,8 @@ MAX_PROFILE_FIELDS = 60
 #: 敏感列/普通列的样例值条数上限（避免 sample_limit 被放大成全表扫描）
 MAX_SAMPLE_LIMIT = 20
 
-_NUMERIC_TYPES = ("TINYINT", "SMALLINT", "INTEGER", "INT", "BIGINT", "HUGEINT",
-                  "FLOAT", "DOUBLE", "REAL", "DECIMAL", "NUMERIC")
-_TEMPORAL_TYPES = ("DATE", "TIMESTAMP", "DATETIME", "TIME")
-_STRING_TYPES = ("VARCHAR", "TEXT", "STRING", "CHAR", "BLOB")
+# 类型判定/空值率/标识符转义统一来自 app.services.profile_schema（唯一真源）。
+# 这里曾经各写一份（4 位/6 位四舍五入、16/20 个类型标记），两处画像的口径会漂移。
 
 
 class DatasourceProfileError(Exception):
@@ -95,27 +99,6 @@ class InvalidFieldError(DatasourceProfileError):
 
 # ── 类型判定 / 值序列化 ──────────────────────────────────────────────
 
-def _norm_type(dtype: Any) -> str:
-    return str(dtype or "").upper()
-
-
-def _is_numeric(dtype: str) -> bool:
-    return any(t in dtype for t in _NUMERIC_TYPES)
-
-
-def _is_temporal(dtype: str) -> bool:
-    return any(t in dtype for t in _TEMPORAL_TYPES)
-
-
-def _supports_range(dtype: str) -> bool:
-    """MIN/MAX 是否对"业务有意义"。
-
-    数值列给范围；时间列给时间范围（Agent 最需要的"数据覆盖到哪天"）；
-    字符串列不给 —— 字典序的最小/最大值对分析没有意义，给了反而误导。
-    """
-    return _is_numeric(dtype) or _is_temporal(dtype)
-
-
 def _json_safe(value: Any) -> Any:
     """把 DuckDB 返回的 Python 值转成可 JSON 序列化的形式。"""
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -125,11 +108,6 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     return str(value)
-
-
-def _quote(name: str) -> str:
-    """列名转义（与 data_quality._quote_ident 同语义）。"""
-    return '"' + str(name).replace('"', '""') + '"'
 
 
 # ── 数据源解析 ────────────────────────────────────────────────────────
@@ -199,7 +177,7 @@ def _field_meta(ds: DataSource, meta: dict[str, Any], schema_name: str) -> list[
     out: list[dict[str, Any]] = []
     for field in raw:
         name = str(field["name"])
-        dtype = _norm_type(field.get("data_type") or field.get("type"))
+        dtype = norm_type(field.get("data_type") or field.get("type"))
         # 手工标记优先（前端字段编辑器里勾过的 sensitive），否则按列名启发式识别
         if "sensitive" in field:
             sensitive = bool(field.get("sensitive"))
@@ -280,7 +258,7 @@ def _profile_field(field: dict[str, Any], src: str, sample_limit: int) -> dict[s
     name = field["name"]
     dtype = field.get("type") or ""
     sensitive = bool(field.get("sensitive"))
-    ident = _quote(name)
+    ident = quote_ident(name)
 
     item: dict[str, Any] = {
         "name": name,
@@ -307,9 +285,10 @@ def _profile_field(field: dict[str, Any], src: str, sample_limit: int) -> dict[s
             return item
         total = int(rows[0][0] or 0)
         non_null = int(rows[0][1] or 0)
-        item["null_rate"] = round((total - non_null) / total, 6) if total > 0 else 0.0
+        # 口径来自共享模块（分母=总行数）；空表沿用 0.0（REST 契约里 null 表示"没算"）
+        item["null_rate"] = _null_rate(total, non_null, digits=6) if total > 0 else 0.0
         item["distinct_count"] = int(rows[0][2] or 0)
-        if _supports_range(dtype):
+        if supports_range(dtype):
             item["min"] = _json_safe(rows[0][3])
             item["max"] = _json_safe(rows[0][4])
     except Exception as exc:  # noqa: BLE001

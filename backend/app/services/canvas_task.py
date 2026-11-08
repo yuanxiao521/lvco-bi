@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
@@ -24,6 +25,8 @@ from app.config import settings
 from app.core.cache import get_cache_repository
 from app.core.database import async_session_factory
 from app.models.ai_message import AIMessage
+from app.models.ai_session import AISession
+from app.services import agent_trace
 from app.services.chat_stream_registry import chat_registry
 from app.services.chat_task import _idle_guard
 from app.services.event_stream import event_stream
@@ -53,8 +56,26 @@ async def run_canvas_task(
     canvas_actions_count = 0
     stream_degraded = False  # 事件流里出现过的降级标记，随流尾唯一的 done 下发
     completed = False        # 正常收尾（走到 emit done）才置 True；否则视为中断
+    _turn_started = time.monotonic()
 
     async with async_session_factory() as db:
+        # P1-C 补齐：画布任务也要绑 trace 上下文（此前只有 chat_task 绑）。
+        # 队列模式下任务跑在 worker 进程，contextvars 传不过来 —— 按 session_id 兜底。
+        try:
+            _sess_row = await db.get(AISession, session_id) if session_id else None
+        except Exception:  # noqa: BLE001
+            _sess_row = None
+        _bind_kwargs: dict[str, Any] = {"entry": "canvas"}
+        if _sess_row is not None:
+            _bind_kwargs["user_id"] = getattr(_sess_row, "user_id", None)
+        if session_id is not None:
+            _bind_kwargs["session_id"] = session_id
+        if assistant_msg_id is not None:
+            _bind_kwargs["message_id"] = assistant_msg_id
+        try:
+            agent_trace.bind(**_bind_kwargs)
+        except Exception:  # noqa: BLE001
+            _log.debug("canvas agent_trace bind failed", exc_info=True)
         # ── 事件日志（Redis Stream）：直接顺序 await（画布事件粒度大，无需缓冲器）──
         async def _publish(ev: dict) -> None:
             if session_id:
@@ -226,5 +247,21 @@ async def run_canvas_task(
                             )
                     except Exception:  # noqa: BLE001
                         pass
+            # P1-C 补齐：turn 汇总行 + 冲刷明细（与 chat_task 同一契约）。
+            # 画布入口此前完全没有 turn 行 → 队列模式下"这一轮跑了几个块、多久、降级没"
+            # 无处可查。tool 明细行由 ToolExecutor/llm_client 钩子入队，这里只汇总。
+            try:
+                agent_trace.record({
+                    "kind": "turn",
+                    "ok": completed,
+                    "degraded": bool(stream_degraded),
+                    "rounds": None,
+                    "tool_calls": canvas_actions_count or None,
+                    "tool_failures": None,
+                    "duration_ms": int((time.monotonic() - _turn_started) * 1000),
+                })
+                await agent_trace.flush(db=db)
+            except Exception:  # noqa: BLE001
+                _log.debug("canvas agent_calls turn flush failed", exc_info=True)
             # 会话锁：正常结束/异常都走这里释放（TTL 仅作进程崩溃的兜底）
             release_session_lock(session_id, lock_token)
