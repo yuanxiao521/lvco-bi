@@ -588,11 +588,21 @@ async def main_async(args: argparse.Namespace) -> int:
     results_path = Path(args.results)
 
     dataset = load_dataset(dataset_path)
+    limit = int(getattr(args, "limit", 0) or 0)
+    if limit > 0:
+        dataset = dataset[:limit]
+    per_q_timeout = float(getattr(args, "per_question_timeout", 0) or 0)
 
-    log.info("starting eval mode=%s", args.mode)
+    log.info("starting eval mode=%s questions=%d timeout=%ss", args.mode, len(dataset), per_q_timeout or "-")
     start = time.time()
     results: list[EvalResult] = []
     attempts_log: list[dict[str, Any]] = []  # 事件存档（离线重放/复盘用）
+
+    # 逐题落盘：eval 单题可能很慢（实测 141s/题），全部跑完才写文件会让"中途失败 = 什么都没留下"。
+    # 用覆盖写第一行 + 追加后续，保证进程被杀时已完成的题仍在。
+    events_path = Path(str(results_path).replace(".jsonl", "_events.jsonl"))
+    results_fh = open(results_path, "w", encoding="utf-8")
+    events_fh = open(events_path, "w", encoding="utf-8")
 
     for i, q in enumerate(dataset, 1):
         log.info("[%d/%d] running q=%s", i, len(dataset), q["id"])
@@ -605,20 +615,40 @@ async def main_async(args: argparse.Namespace) -> int:
             else:
                 entry = args.entry
             pinned_ds = await _resolve_datasource_id(args.user_id, q.get("expected_datasource"))
-            attempt = await run_agent(
-                q, user_id=args.user_id, mode=args.mode, entry=entry,
-                selected_datasource_id=pinned_ds,
-            )
+            try:
+                coro = run_agent(
+                    q, user_id=args.user_id, mode=args.mode, entry=entry,
+                    selected_datasource_id=pinned_ds,
+                )
+                attempt = (
+                    await asyncio.wait_for(coro, timeout=per_q_timeout)
+                    if per_q_timeout > 0
+                    else await coro
+                )
+            except asyncio.TimeoutError:
+                # 单题超时不拖垮整轮评测：记一条明确的失败样本继续下一题。
+                log.warning("q=%s per_question_timeout=%.0fs（跳过该题继续）", q["id"], per_q_timeout)
+                attempt = AttemptTrace(
+                    question_id=q["id"],
+                    user_msg=q.get("query", ""),
+                    error=f"per_question_timeout={per_q_timeout:.0f}s",
+                )
         executor = build_sql_executor(attempt) if args.mode in ("real", "orchestrator") else None
         result = judge_attempt(q, attempt, sql_executor=executor)
         results.append(result)
-        attempts_log.append({
+        rec = {
             "question_id": q["id"],
             "query": q.get("query", ""),
             "error": attempt.error,
             "iteration_count": attempt.iteration_count,
             "events": attempt.events,
-        })
+        }
+        attempts_log.append(rec)
+        # 逐题落盘（flush 到磁盘：进程被 kill 时已完成的结果不丢）
+        results_fh.write(json.dumps(result.to_dict(), ensure_ascii=False) + "\n")
+        results_fh.flush()
+        events_fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        events_fh.flush()
         log.info(
             "[%d/%d] q=%s sql=%s tool=%s resp=%s chart_cfg=%s iter=%d",
             i, len(dataset), q["id"],
@@ -640,17 +670,10 @@ async def main_async(args: argparse.Namespace) -> int:
     output_path.write_text(md, encoding="utf-8")
     log.info("report written to %s", output_path)
 
-    # 写原始结果
-    with open(results_path, "w", encoding="utf-8") as f:
-        for r in results:
-            f.write(json.dumps(r.to_dict(), ensure_ascii=False) + "\n")
+    # 原始结果与事件存档在循环里已逐题 flush，这里只关句柄。
+    results_fh.close()
+    events_fh.close()
     log.info("raw results written to %s", results_path)
-
-    # 写事件存档（供离线重放 judge / 复盘失败案例）
-    events_path = Path(str(results_path).replace(".jsonl", "_events.jsonl"))
-    with open(events_path, "w", encoding="utf-8") as f:
-        for a in attempts_log:
-            f.write(json.dumps(a, ensure_ascii=False) + "\n")
     log.info("attempt events written to %s", events_path)
 
     return 0
@@ -689,6 +712,21 @@ def main() -> int:
         choices=["chat", "canvas", "auto"],
         default="auto",
         help="agent 入口：chat=对话编排、canvas=画布编排、auto=画布题自动走 canvas",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="只跑前 N 题（0=全跑）；调 prompt/参数时用 3-5 题快速回归",
+    )
+    parser.add_argument(
+        "--per-question-timeout",
+        type=float,
+        default=240.0,
+        help=(
+            "单题硬超时（秒，0=不限）。实测正常单题约 141s；某题卡住时不应该拖垮整轮"
+            "评测——超时记一条 error 样本继续下一题。"
+        ),
     )
     args = parser.parse_args()
     return asyncio.run(main_async(args))
