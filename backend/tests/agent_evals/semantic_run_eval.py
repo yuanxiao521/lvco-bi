@@ -22,6 +22,14 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
 
+# Windows 控制台默认 GBK：进度行里的 ✓/✗ 会直接抛 UnicodeEncodeError 打断整轮评测。
+# 显式把 stdout 切到 UTF-8（errors=replace 保证极端环境下也不会再崩）。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:  # noqa: BLE001
+    pass
+
 from tests.agent_evals.semantic_judge import (  # noqa: E402
     SemanticResult,
     extract_canvas_metrics,
@@ -167,27 +175,55 @@ def judge(q: dict, attempt: dict):
     )
 
 
-def render_report(results: list, questions: list[dict], duration: float) -> str:
-    n = len(results)
-    avg = sum(r.score for r in results) / n if n else 0.0
-    full = sum(1 for r in results if r.overall)
-    by_sub = {
-        k: sum(1 for r in results if getattr(r, k))
-        for k in ("matched_metrics", "matched_dims", "matched_filters",
-                  "matched_top_n", "matched_chart", "matched_answer")
-    }
-    sub_tot = {
-        "matched_metrics": sum(1 for r in results if "metrics" in " ".join(r.details) or True),
-        "matched_dims": sum(1 for r in results if any("维度" in d or "dims" in d for d in r.details)),
-        "matched_filters": sum(1 for r in results if any("过滤" in d or "filters" in d for d in r.details)),
-        "matched_top_n": sum(1 for r in results if any("top_n" in d or "top" in d.lower() or "block_count" in d for d in r.details)),
-        "matched_chart": sum(1 for r in results if any("chart" in d or "图表" in d for d in r.details)),
-        "matched_answer": sum(1 for r in results if any("回答" in d or "answer" in d for d in r.details)),
-    }
+def _dim_reachable_and_matched(results: list, markers: list[str]) -> tuple[int, int]:
+    """统计某个子项的（达成, 可判）。
+
+    为什么重写：原实现的分母是"details 里出现过这个词"，导致出现过 13/10 = 130% 这种
+    荒谬数字（详情里同时含"过滤缺失"和"期望无过滤约束"）。这里按行判断：
+    · 该行含「期望无…」→ 不要求，**不计入分母**；
+    · 该行含 ✓ → 达成 + 可判；
+    · 该行含 ✗ / 缺失 / 缺要点 → 可判但不达成。
+    """
+    reach = got = 0
+    for r in results:
+        line = None
+        for d in r.details or []:
+            low = str(d).lower()
+            if any(m.lower() in low for m in markers):
+                line = d
+                break
+        if line is None or "期望无" in line:
+            continue
+        reach += 1
+        if "✓" in line or ("✗" not in line and "缺失" not in line and "缺要点" not in line):
+            got += 1
+    return reach, got
+
+
+def render_report(results: list, questions: list[dict], duration: float,
+                  run_errors: set[str] | None = None) -> str:
+    run_errors = run_errors or set()
+    effective = [r for r in results if r.question_id not in run_errors]
+    n = len(effective)
+    avg = sum(r.score for r in effective) / n if n else 0.0
+    full = sum(1 for r in effective if r.overall)
+    dim_defs = [
+        ("指标口径", ["metrics"]),
+        ("维度/粒度", ["dims", "维度"]),
+        ("过滤/时间口径", ["filters", "过滤"]),
+        ("排序限量/块数", ["top_n"]),
+        ("图表类型", ["chart", "图表"]),
+        ("回答要点/叙事", ["answer", "回答"]),
+    ]
+    dim_stats = {label: _dim_reachable_and_matched(effective, markers) for label, markers in dim_defs}
     lines = [
         "# LvcoBI 语义评测报告（v2 结构化语义期待）",
         "",
-        f"**生成时间**：{time.strftime('%Y-%m-%d %H:%M:%S')} ｜ 数据集：`dataset_v2.jsonl`（{n} 道）｜ 总耗时 {duration:.1f}s",
+        f"**生成时间**：{time.strftime('%Y-%m-%d %H:%M:%S')} ｜ 数据集：`dataset_v2.jsonl`（{len(results)} 道，"
+        f"**有效 {n} 道**）｜ 总耗时 {duration:.1f}s",
+        "",
+        (f"> 运行失败（未计入分母）：{', '.join(sorted(run_errors))}"
+         if run_errors else "> 运行失败：无"),
         "",
         "## 总分",
         "",
@@ -201,11 +237,10 @@ def render_report(results: list, questions: list[dict], duration: float) -> str:
         "| 子项 | 达成/可判 | 达成率 |",
         "|---|---|---|",
     ]
-    names = [("matched_metrics", "指标口径"), ("matched_dims", "维度/粒度"), ("matched_filters", "过滤/时间口径"),
-             ("matched_top_n", "排序限量/块数"), ("matched_chart", "图表类型"), ("matched_answer", "回答要点/叙事")]
-    for key, label in names:
-        t = sub_tot.get(key, 0) or 1
-        lines.append(f"| {label} | {by_sub[key]}/{t} | {by_sub[key]/t*100:.0f}% |")
+    for label, _markers in dim_defs:
+        reach, got = dim_stats[label]
+        pct = (got / reach * 100) if reach else 0
+        lines.append(f"| {label} | {got}/{reach} | {pct:.0f}% |")
     lines.append("")
 
     # 按路径分组
@@ -216,6 +251,8 @@ def render_report(results: list, questions: list[dict], duration: float) -> str:
     from collections import OrderedDict
     groups = OrderedDict()
     for q, r in zip(questions, results):
+        if r.question_id in run_errors:
+            continue      # 运行失败题不计入路径统计（否则会把某条路径的平均分拖垮）
         groups.setdefault(q.get("path", "?"), []).append(r)
     for path, rs in groups.items():
         grp_avg = sum(x.score for x in rs) / len(rs)
@@ -290,6 +327,7 @@ async def main_async(args) -> int:
 
     out_md, out_results, out_events = out_paths(getattr(args, "out_prefix", "") or "")
     results: list[SemanticResult] = []
+    run_errors: set[str] = set()
     start = time.time()
 
     # 每题独立超时：画布任务多步编排较慢，给足时间；对话题收紧避免挂死拖垮全流程
@@ -305,10 +343,16 @@ async def main_async(args) -> int:
             attempt = await prepare_attempt(q, args.user_id, entry, args.dry,
                                             timeout=0.0 if args.dry else timeout_of(q["id"]))
             r = judge(q, attempt)
+            # run_error：**根本没跑起来**（无事件 + 有 error，典型是单题超时/上游掉线）。
+            # 这类题不能算"语义没达成"，否则会像 33 题跑那样把基线从 95% 拖到 86%。
+            run_err = (not (attempt.get("events") or [])) and bool(attempt.get("error"))
+            if run_err:
+                run_errors.add(r.question_id)
             results.append(r)
             fres.write(json.dumps({
                 "question_id": r.question_id, "score": r.score, "overall": r.overall,
                 "passed": r.passed, "reachable": r.reachable, "details": r.details,
+                "run_error": run_err,
             }, ensure_ascii=False) + "\n")
             fres.flush()
             fev.write(json.dumps({
@@ -326,7 +370,7 @@ async def main_async(args) -> int:
             print(f"      {r.details[:5]}", flush=True)
 
     duration = time.time() - start
-    md = render_report(results, ds, duration)
+    md = render_report(results, ds, duration, run_errors=run_errors)
     out_md.write_text(md, encoding="utf-8")
     print(f"\n报告: {out_md}")
     print(f"总耗时 {duration:.1f}s | 平均达成 {sum(r.score for r in results)/len(results)*100:.1f}% | 全过 {sum(1 for r in results if r.overall)}/{len(results)}")
