@@ -4,6 +4,32 @@
 > 评审依据：[04-adversarial-review.md](research/04-adversarial-review.md)（517 行：9 条分歧裁决 + 8 条盲点 + 23 条"核过但文档没说错"的诚实清单）
 > 纪律不变：**不换跑道，只补短板**；每批可独立合并；**稳定优先于炫技**。v1 全文见 commit `e77e8f7`。
 
+## 0.5 执行记录（2026-11-08，v2 之后实际落地的）
+
+**P0 止血（commit `1f0e579`）**
+- 权限：`/audit/logs`、`/audit/logs/export`、`/audit/logs/summary`、`/permissions/users` → admin only；分享链接可过期/可撤销/软删失效（迁移 0023）。
+- 取消：`POST /ai/sessions/{id}/cancel` + 三个内核 + **Lead 循环**每步检查。
+- 令牌：`token_version` + `is_active`（迁移 0024），登出/改密真生效；SSE 通知流补同款校验。
+- 修复：提示词诱导 `describe_table`（fatal）、幂等集 4 个幽灵工具。
+
+**P1 五线并行（commit `a2d7e9d`）**
+
+| 线 | 落地 | 关键文件 |
+|---|---|---|
+| A 上下文防炸 | 超窗守卫（窗口×0.75，按 TOOL_RESULT→WINDOW→SUBTASK 顺序裁并留痕）；metrics 封顶 30 条/1200 字；块顺序改"恒定在前、canvas 最后" | `context/assembler.py`、`provider.py`、`metric_service.py` |
+| B 编排收敛 | `step_helpers.py`（LLM 步/工具累积/结果回写）；**修 reasoning 漂移**（canvas 原 0 处）；canvas schema 与白名单对齐；层内并发**默认关** | `agents/step_helpers.py`、三个内核 |
+| C 可观测 | `agent_calls` 表（迁移 0025，4 索引）+ 三个钩子（ToolExecutor / llm usage / turn）+ CLI + 30 天保留 + 脱敏 | `services/agent_trace.py`、`models/agent_call.py` |
+| D 能力画像 | `capability.py`（含 review_policy）+ 三段 prompt（core/chat/canvas）+ chat 去死工具 + **回执改 exec_summary** + 棘轮测试 | `lead/capability.py`、`ai_prompts.py`、`prompts/` |
+| E 数据画像 | `profile_datasource` 服务 + `GET /datasources/{id}/profile`（行数/基数/空值率/极值；大表采样并如实标注） | `services/datasource_profile.py` |
+
+**验证**：全量 pytest **1251 passed / 2 skipped / 0 failed**（浏览器类用例在缺 chromium 时显式 skip，不再让门禁变红）；迁移 0023→0024→0025 已对 dev 库实跑。
+
+**已知待收敛（不藏）**
+1. **两份数据画像实现**：`lead_observe.profile_datasource`（走 QueryDatasourceTool + guard）与 `services/datasource_profile.py`（直接 DuckDB + 采样）统计口径可能漂移 → 应让前者转调后者（约 0.5 天，需保留 guard 语义）。
+2. **队列模式画布入口无 turn 行**：`canvas_task.run_canvas_task` 未 bind trace 上下文（`chat_task` 有）→ TASK_QUEUE_ENABLED=true 时画布轮次缺 turn 汇总。
+3. `ai.py:937` 的 `len(metrics_ctx)<=4000` 分支因 metrics 已在服务内封顶而恒真，属死代码待清。
+4. `enforced` 仍为 False：本轮的窗口有界化来自守卫而非预算裁剪；是否翻 True 需配评测。
+
 ## 0. v1 → v2 改了什么（10 处，先看这张表）
 
 | # | v1 | v2 | 谁提的 | 为什么（证据） |
