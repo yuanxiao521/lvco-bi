@@ -175,6 +175,14 @@ tmp_*.py
 # ── 文档/交付物（不提交到仓库） ──────────────────────────────────
 docs/
 
+# ── 评测运行产物（每次跑都变，不提交） ───────────────────────────
+backend/tests/agent_evals/eval_results*.jsonl
+backend/tests/agent_evals/eval_report*.md
+backend/tests/agent_evals/eval_run*.log
+backend/tests/agent_evals/tmp_*.jsonl
+backend/tests/agent_evals/baseline_report*.md
+backend/tests/agent_evals/results*.jsonl
+
 # ── 大文件/可执行文件 ────────────────────────────────────────────
 *.exe
 *.zip

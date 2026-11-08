@@ -24,6 +24,7 @@ import logging
 from typing import AsyncIterator
 
 from app.config import settings
+from app.services import agent_trace
 from app.services.agent_tools import ToolRegistry
 from app.services.agents.agent_orchestrator import (
     _group_steps_by_level,
@@ -340,19 +341,21 @@ class CanvasOrchestrator:
         emit = shared["emit"]
         sid = step["step_id"]
         goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
-        try:
-            await asyncio.wait_for(
-                self._agentic_run_step(step, results, state, **shared),
-                timeout=_STEP_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            results[sid] = json.dumps({
-                "skipped": True, "timeout": True, "goal": goal[:30],
-            }, ensure_ascii=False)
-            await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
-            logger.warning("[canvas_orchestrator] 步骤 %s 执行超时", sid)
-        except asyncio.CancelledError:
-            raise
+        # P4-B：本步内的 tool/llm 记录归属 canvas_orch；退出即还原
+        with agent_trace.parent_scope("canvas_orch"):
+            try:
+                await asyncio.wait_for(
+                    self._agentic_run_step(step, results, state, **shared),
+                    timeout=_STEP_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                results[sid] = json.dumps({
+                    "skipped": True, "timeout": True, "goal": goal[:30],
+                }, ensure_ascii=False)
+                await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
+                logger.warning("[canvas_orchestrator] 步骤 %s 执行超时", sid)
+            except asyncio.CancelledError:
+                raise
 
     # 报告式补图引导：推荐类型覆盖（缺失类型自动补一张图）
     _REPORT_RECOMMEND = ("kpi_card", "line", "bar", "grouped_bar")

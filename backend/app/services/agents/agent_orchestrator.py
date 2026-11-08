@@ -26,6 +26,7 @@ import re
 from typing import Any, AsyncIterator
  
 from app.config import settings
+from app.services import agent_trace
 from app.core.cache import get_cache_repository
 from app.services.agents.base_agent import AgentResult
 from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
@@ -602,24 +603,26 @@ class AgentOrchestrator:
         sid = step["step_id"]
         goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
         timeout = getattr(settings, "AGENT_STEP_TIMEOUT", 30)
-        try:
-            await asyncio.wait_for(
-                self._agentic_run_step(step, results, state, **shared),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            timeout_result = json.dumps({
-                "skipped": True,
-                "timeout": True,
-                "goal": goal,
-                "skipped_reason": f"步骤 {sid} 执行超时（>{timeout}s），已跳过",
-            }, ensure_ascii=False)
-            results[sid] = timeout_result
-            await emit({"type": "tool_result", "name": goal[:20], "result": timeout_result})
-            logger.warning(f"[orchestrator] 步骤 {sid} 执行超时，标记 skipped/timeout")
-        except asyncio.CancelledError:
-            # 整体超时取消传播至此：不在此吞掉，让取消继续向上冒泡到 wait_for(整体)。
-            raise
+        # P4-B：本步内的 tool/llm 记录归属 agent_orch；退出即还原，不泄漏到下一步
+        with agent_trace.parent_scope("agent_orch"):
+            try:
+                await asyncio.wait_for(
+                    self._agentic_run_step(step, results, state, **shared),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                timeout_result = json.dumps({
+                    "skipped": True,
+                    "timeout": True,
+                    "goal": goal,
+                    "skipped_reason": f"步骤 {sid} 执行超时（>{timeout}s），已跳过",
+                }, ensure_ascii=False)
+                results[sid] = timeout_result
+                await emit({"type": "tool_result", "name": goal[:20], "result": timeout_result})
+                logger.warning(f"[orchestrator] 步骤 {sid} 执行超时，标记 skipped/timeout")
+            except asyncio.CancelledError:
+                # 整体超时取消传播至此：不在此吞掉，让取消继续向上冒泡到 wait_for(整体)。
+                raise
 
     async def _agentic_run_step(self, step: dict, results: dict, state: dict, **shared) -> None:
         from app.services.ai_prompts import EXECUTOR_SYSTEM

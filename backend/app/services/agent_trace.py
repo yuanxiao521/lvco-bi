@@ -19,6 +19,12 @@ AGENT_CALL_LOG=off  → 不投递（测试④）；默认 full = 全量。
 trace_id / turn_id / entry / session_id / message_id / user_id 放在 contextvars：
 入口（api/v1/ai.py）绑定一次，asyncio 子任务自动继承；队列模式（worker 进程）
 由 chat_task 在任务开头重新绑定（跨进程 contextvars 传不过去）。
+
+parent（P4-B）
+-------------
+parent 表示"这条记录属于哪一层的调用"（lead / dispatch / agent_orch / canvas_orch /
+react / recon）。用 parent_scope() 的**进入/退出还原**语义实现：编排器在自己的
+执行入口 set，退出时 reset，绝不泄漏到下一步或下一次调用。
 """
 from __future__ import annotations
 
@@ -28,6 +34,7 @@ import logging
 import re
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -61,6 +68,8 @@ _entry_var: ContextVar[str | None] = ContextVar("agent_trace_entry", default=Non
 _session_var: ContextVar[Any] = ContextVar("agent_trace_session", default=None)
 _message_var: ContextVar[Any] = ContextVar("agent_trace_message", default=None)
 _user_var: ContextVar[Any] = ContextVar("agent_trace_user", default=None)
+# P4-B：调用归属（lead / dispatch / agent_orch / canvas_orch / recon）
+_parent_var: ContextVar[str | None] = ContextVar("agent_trace_parent", default=None)
 
 
 def log_mode() -> str:
@@ -130,6 +139,41 @@ def current_turn_id() -> str | None:
     return _turn_var.get()
 
 
+def current_parent() -> str | None:
+    """当前调用归属（供测试/排障；记录时由 record() 自动带上）。"""
+    return _parent_var.get()
+
+
+def set_parent(parent: str | None) -> None:
+    """设置当前调用的 parent（**不还原**：用于"本任务内默认 parent"的粗粒度场景）。
+
+    精细场景请用 parent_scope()，它会进入/退出还原，不会泄漏到下一步。
+    """
+    try:
+        _parent_var.set(str(parent) if parent else None)
+    except Exception:  # noqa: BLE001
+        logger.debug("[agent_trace] set_parent_failed", exc_info=True)
+
+
+@contextmanager
+def parent_scope(parent: str):
+    """parent 的父子作用域：进入 set、退出**还原**到外层值（异常也还原）。
+
+    用法：
+        with agent_trace.parent_scope("agent_orch"):
+            await graph.invoke(...)      # 其间所有 tool/llm 记录 parent=agent_orch
+    """
+    token = _parent_var.set(str(parent))
+    try:
+        yield
+    finally:
+        try:
+            _parent_var.reset(token)
+        except Exception:  # noqa: BLE001
+            # 跨 context 误用（理论上不会）时兜底，绝不让可观测把主链路搞挂
+            _parent_var.set(None)
+
+
 def _next_seq() -> int:
     counter = _seq_var.get()
     if counter is None:
@@ -160,6 +204,7 @@ def record(ev: dict) -> None:
         item.setdefault("session_id", _session_var.get())
         item.setdefault("message_id", _message_var.get())
         item.setdefault("user_id", _user_var.get())
+        item.setdefault("parent", _parent_var.get())
         item["seq"] = _next_seq()
         _queue.append(item)
         _stats["enqueued"] += 1
@@ -205,6 +250,8 @@ _ALLOWED_ARG_KEYS = frozenset({
     "ask_kind", "complexity", "intent", "reason", "acceptance", "constraints",
     "keywords", "limit", "chart_type", "block_type", "block_id", "title",
     "dimensions", "measures", "filters", "fields", "sort", "purpose",
+    # P4-B：dispatch 行的结构化摘要（success/elapsed_ms 走 ok/duration_ms 列）
+    "blocks_added", "mode",
 })
 _MASKED = "<masked>"
 _ARGS_MAX_CHARS = 2048
@@ -456,6 +503,7 @@ def reset() -> None:
     _session_var.set(None)
     _message_var.set(None)
     _user_var.set(None)
+    _parent_var.set(None)
     if _flusher_task is not None and not _flusher_task.done():
         try:
             _flusher_task.cancel()

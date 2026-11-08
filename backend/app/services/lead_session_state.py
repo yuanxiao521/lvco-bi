@@ -18,6 +18,23 @@ logger = logging.getLogger("lvco.lead.state")
 
 KEY_PREFIX = "lvco:sess_pend:"
 
+# P4-B：pop 时把整条挂起记录暂存到这里，供续跑分支取回 turn_id。
+# 为什么用进程内小表而不是改返回值：pop_pending 的调用方（lead_agent._confirm_guard）
+# 只认"目标字符串"，改返回类型会波及既有调用点；而 pop 与续跑在**同一进程**
+# （in-process 在 API 进程、队列模式都在 worker 进程），进程内传递足够。
+# 有界（64 条）：极端情况下宁可丢，也不无限增长。
+_LAST_RESUMED_MAX = 64
+_last_resumed: dict[str, dict] = {}
+
+
+def _remember_resumed(session_id: object, payload: dict) -> None:
+    try:
+        if len(_last_resumed) >= _LAST_RESUMED_MAX:
+            _last_resumed.clear()
+        _last_resumed[str(session_id)] = dict(payload or {})
+    except Exception:  # noqa: BLE001
+        pass
+
 
 class LeadPhase(str, Enum):
     """主管会话状态（粗粒度，只管会话级；任务内细阶段走 SSE progress + 观测层）。
@@ -79,14 +96,21 @@ class LeadSessionState:
     def _ttl(self) -> int:
         return int(getattr(settings, "ai_session_lock_ttl", 600))
 
-    def set_pending(self, session_id: object, goal: str) -> None:
-        """ask_user 时写入挂起目标（用户原话）。"""
+    def set_pending(self, session_id: object, goal: str, *, turn_id: str | None = None) -> None:
+        """ask_user 时写入挂起目标（用户原话）。
+
+        P4-B：turn_id 一并挂起 —— HITL 确认续跑是新请求（新 trace/turn），
+        续跑分支用 take_resumed_turn_id 取回它，让同一轮的记录串在原 turn_id 下。
+        """
         if not session_id or not (goal or "").strip():
             return
+        payload: dict[str, str] = {"goal": goal}
+        if turn_id:
+            payload["turn_id"] = str(turn_id)
         try:
             _repo().set(
                 self._key(session_id),
-                json.dumps({"goal": goal}, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False),
                 ttl=self._ttl(),
             )
         except Exception:  # noqa: BLE001
@@ -100,10 +124,32 @@ class LeadSessionState:
             raw = _repo().get(self._key(session_id))
             if raw:
                 _repo().delete(self._key(session_id))
-                return str(json.loads(raw).get("goal") or "") or None
+                try:
+                    payload = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                # P4-B：暂存整条记录（含 turn_id），供续跑分支取回
+                _remember_resumed(session_id, payload)
+                return str(payload.get("goal") or "") or None
         except Exception:  # noqa: BLE001
             logger.warning("lead_state_pop_failed session=%s", session_id, exc_info=True)
         return None
+
+    def take_resumed_turn_id(self, session_id: object) -> str | None:
+        """取回上一次 pop 的挂起记录里的 turn_id（一次性；没有则 None）。
+
+        只在 HITL 续跑分支调用：走到那里说明这次请求就是"确认后继续上轮"。
+        """
+        if not session_id:
+            return None
+        try:
+            payload = _last_resumed.pop(str(session_id), None) or {}
+            value = payload.get("turn_id")
+            return str(value) if value else None
+        except Exception:  # noqa: BLE001
+            return None
 
 
 lead_session_state = LeadSessionState()

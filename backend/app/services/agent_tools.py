@@ -587,7 +587,10 @@ class QueryDatasourceTool(BaseTool):
                 "[QueryDatasourceTool] GUARD BLOCKED layer=%s rule=%s reason=%s sql=%s",
                 guard.layer, failed_rule or "-", guard.reason, sql[:500],
             )
-            return json.dumps({"error": guard.reason}, ensure_ascii=False)
+            # P4-B：把守卫层号透出给 agent_calls.error_layer（不改 guard 实现）。
+            # guard.layer 只有 1/2/3；AST 校验被折进 L3 的 reason 前缀里，按 L4 记。
+            layer = 4 if "AST 校验" in str(guard.reason or "") else guard.layer
+            return json.dumps({"error": guard.reason, "layer": layer}, ensure_ascii=False)
 
         final_sql = guard.sanitized_sql or sql
 
@@ -1356,7 +1359,11 @@ class QueryEngineTool(BaseTool):
                 },
             }, ensure_ascii=False, default=str)
         except Exception as e:
-            return json.dumps({"error": f"结构化查询失败: {str(e)[:200]}"}, ensure_ascii=False)
+            payload = {"error": f"结构化查询失败: {str(e)[:200]}"}
+            # P4-B：引擎侧只有 AST 只读校验有"层"的概念（L4）；其它错误不带 layer。
+            if getattr(e, "code", None) == "ENGINE_AST_BLOCKED":
+                payload["layer"] = 4
+            return json.dumps(payload, ensure_ascii=False)
 
 
 # ==================== 指标语义层工具 ====================

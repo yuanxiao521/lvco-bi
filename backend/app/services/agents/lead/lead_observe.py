@@ -219,8 +219,17 @@ async def recon_tool(
     返回观察结果（str 或 list）；未接的工具返回 None（调用方据此记降级）。
     收敛在这里的意义：观察的 trace / 降级 / 工具名分派只有一份实现，
     循环里不再散落 if-elif 与 try/except。
+
+    P4-B：观察调用绕过 ToolExecutor，所以这里**自己写一条 agent_calls tool 行**，
+    并套 parent="recon" 作用域——否则排查时永远看不到"Lead 到底看了什么才这么答"。
     """
+    import time
+
+    from app.services import agent_trace
+
     args = args or {}
+    started = time.perf_counter()
+    value = None
     span_cm = None
     if trace is not None:
         try:
@@ -230,49 +239,85 @@ async def recon_tool(
             span_cm.__enter__()
         except Exception:  # noqa: BLE001
             span_cm = None
-    try:
-        if name == "get_canvas_layout":
-            return await get_canvas_layout(ctx)
-        if name == "list_datasources":
-            return await list_datasources(
-                db_session, str(ctx.user_id), datasource_id=ctx.datasource_id
+    # P4-B：进入 recon 作用域（内部记录自然带 parent=recon；退出即还原，不泄漏）
+    with agent_trace.parent_scope("recon"):
+        try:
+            value = await _recon_dispatch(
+                name=name, ctx=ctx, args=args,
+                db_session=db_session, degradation=degradation,
             )
-        if name == "list_fields":
-            return await list_fields(db_session, str(ctx.user_id), args.get("datasource_id"))
-        if name == "list_metrics":
-            return list_metrics(ctx)
-        if name == "query_sample":
-            # 真实取 5 行样本：内部复用 query_sql 的执行链（guard + 归属校验 + 超时），
-            # 不另起一条取数实现。取不到时返回 None 并记降级。
-            return await query_sample(
-                db_session,
-                str(getattr(ctx, "user_id", "") or ""),
-                args.get("datasource_id") or getattr(ctx, "datasource_id", None),
-                degradation=degradation,
-            )
-        if name == "profile_datasource":
-            # 全表画像：与 query_sample 同一条执行链，但产出的是"能分析什么"而不是"长什么样"
-            return await profile_datasource(
-                db_session,
-                str(getattr(ctx, "user_id", "") or ""),
-                args.get("datasource_id") or getattr(ctx, "datasource_id", None),
-                degradation=degradation,
-            )
-        # 未知/未接的观察工具：记降级，绝不假装成功
-        if degradation is not None:
-            degradation.append("lead_agent_observe_unimplemented_" + name)
-        return None
-    except Exception:  # noqa: BLE001
-        logger.warning("[lead_observe] recon_failed name=%s", name, exc_info=True)
-        if degradation is not None:
-            degradation.append("lead_agent_observe_failed_" + name)
-        return None
-    finally:
-        if span_cm is not None:
+            return value
+        except Exception:  # noqa: BLE001
+            logger.warning("[lead_observe] recon_failed name=%s", name, exc_info=True)
+            if degradation is not None:
+                degradation.append("lead_agent_observe_failed_" + name)
+            return None
+        finally:
+            if span_cm is not None:
+                try:
+                    span_cm.__exit__(None, None, None)
+                except Exception:  # noqa: BLE001
+                    pass
             try:
-                span_cm.__exit__(None, None, None)
+                preview = (
+                    value if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False, default=str) if value is not None else ""
+                )
+                agent_trace.record({
+                    "kind": "tool",
+                    "tool_name": "recon:" + name,
+                    "args": args,
+                    "ok": value is not None,
+                    "error_kind": None if value is not None else "tool_error",
+                    "result_preview": preview[:500],
+                    "result_chars": len(preview),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    "parent": "recon",
+                })
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug("[lead_observe] recon record failed", exc_info=True)
+
+
+async def _recon_dispatch(
+    *,
+    name: str,
+    ctx,
+    args: dict,
+    db_session,
+    degradation: list[str] | None,
+):
+    """观察工具的实际分派（纯查询，不含记录/作用域；见 recon_tool 的说明）。"""
+    if name == "get_canvas_layout":
+        return await get_canvas_layout(ctx)
+    if name == "list_datasources":
+        return await list_datasources(
+            db_session, str(ctx.user_id), datasource_id=ctx.datasource_id
+        )
+    if name == "list_fields":
+        return await list_fields(db_session, str(ctx.user_id), args.get("datasource_id"))
+    if name == "list_metrics":
+        return list_metrics(ctx)
+    if name == "query_sample":
+        # 真实取 5 行样本：内部复用 query_sql 的执行链（guard + 归属校验 + 超时），
+        # 不另起一条取数实现。取不到时返回 None 并记降级。
+        return await query_sample(
+            db_session,
+            str(getattr(ctx, "user_id", "") or ""),
+            args.get("datasource_id") or getattr(ctx, "datasource_id", None),
+            degradation=degradation,
+        )
+    if name == "profile_datasource":
+        # 全表画像：与 query_sample 同一条执行链，但产出的是"能分析什么"而不是"长什么样"
+        return await profile_datasource(
+            db_session,
+            str(getattr(ctx, "user_id", "") or ""),
+            args.get("datasource_id") or getattr(ctx, "datasource_id", None),
+            degradation=degradation,
+        )
+    # 未知/未接的观察工具：记降级，绝不假装成功
+    if degradation is not None:
+        degradation.append("lead_agent_observe_unimplemented_" + name)
+    return None
 
 
 async def list_fields(db_session, user_id: str, datasource_id) -> list[dict]:

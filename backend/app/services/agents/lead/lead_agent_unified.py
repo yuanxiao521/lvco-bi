@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import AsyncIterator, Awaitable, Callable
 
 from app.config import settings
+from app.services import agent_trace
 from app.services.agents.lead.capability import get_profile
 from app.services.agents.lead.lead_agent_tools import (
     decision_action,
@@ -227,6 +229,40 @@ def _parse_args(raw) -> dict:
     return {}
 
 
+def _record_dispatch_row(goal, entry, mode, result, started, *, error: str | None = None) -> None:
+    """P4-B：每次派发写一条 kind=dispatch 的 agent_calls 行。
+
+    为什么放在**调用方**（on_result 回调）而不是 run_analysis 收尾：
+    run_analysis 有"直接清空画布"的**早返回**路径；只要回调在 run_analysis 返回后
+    无条件触发，早返回也不会丢行（lead_dispatch.run_worker 保证 on_result 必调）。
+    """
+    try:
+        if not agent_trace.enabled():
+            return
+        report = str(getattr(result, "report", "") or "")
+        elapsed = getattr(result, "elapsed_ms", None)
+        # 早返回（直接清空画布）的 RunAnalysisResult 没测 elapsed_ms（默认 0），
+        # 此时退回调用方墙钟，避免 dispatch 行永远显示 0ms。
+        duration_ms = int(elapsed) if elapsed else int((time.perf_counter() - started) * 1000)
+        agent_trace.record({
+            "kind": "dispatch",
+            "ok": bool(getattr(result, "success", False)),
+            "parent": "lead",
+            "mode": str(mode or ""),
+            "args": {
+                "goal": str(goal or ""),
+                # 早返回（清空画布）的 blocks_added=0 —— 正是最需要能看见的一种派发
+                "blocks_added": int(getattr(result, "blocks_added", 0) or 0),
+            },
+            "error_msg": error or getattr(result, "error", None),
+            "result_chars": len(report),
+            "result_preview": report[:500],
+            "duration_ms": duration_ms,
+        })
+    except Exception:  # noqa: BLE001
+        logger.debug("[lead_unified] dispatch_row_failed", exc_info=True)
+
+
 async def stream_unified(
     *,
     user_msg: str,
@@ -245,6 +281,8 @@ async def stream_unified(
     emit_done: bool = True,
 ) -> AsyncIterator[dict]:
     """single_agent 模式的一轮：单 system + 工具循环 + 代码层收敛闸。"""
+    # P4-B：本轮的默认调用归属是 lead（编排器会用自己的 parent_scope 覆盖再还原）
+    agent_trace.set_parent("lead")
     degradation = degradation if degradation is not None else []
     limit = max_steps or int(getattr(settings, "LEAD_AGENT_MAX_STEPS", 6))
     # 能力画像：入口差异的**唯一**映射点（工具子集 / 配额 / 提示词 / 派发内核 / 验收口径）。
@@ -331,15 +369,40 @@ async def stream_unified(
                 from app.services.agents.lead.lead_dispatch import run_worker
 
                 decision = guard[1]
+                # P4-B：HITL 续跑是**新请求**（新 trace/turn）；挂起时把 turn_id 存进了
+                # 挂起槽，这里取回来重新绑定，让同一轮的 dispatch/tool/llm 行串在
+                # 原 turn_id 下（turn 汇总行仍由 chat_task 写，是请求级 turn_id）。
+                try:
+                    from app.services.lead_session_state import lead_session_state
+
+                    _resumed_turn = lead_session_state.take_resumed_turn_id(ctx.session_id)
+                    if _resumed_turn:
+                        agent_trace.bind(turn_id=_resumed_turn)
+                except Exception:  # noqa: BLE001
+                    logger.debug("[lead_unified] resume_turn_bind_failed", exc_info=True)
                 worker = profile.resolve_worker(getattr(decision, "complexity", "complex"))
+                _resume_captured: dict = {}
+                _resume_started = time.perf_counter()
+                _resume_goal = str((getattr(decision, "tool_args", {}) or {}).get("goal") or user_msg)
+
+                def _on_resume_result(r, _goal=_resume_goal, _mode=worker.mode):
+                    _resume_captured.setdefault("result", r)
+                    _record_dispatch_row(_goal, getattr(ctx, "entry", "chat"), _mode, r, _resume_started)
+
                 async for ev in run_worker(
                     user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                     db_session=db_session, available_datasources=available_datasources or [],
                     llm=counted_llm, memo=memo, memo_lock=memo_lock,
                     extra_plannable_tools=extra_plannable_tools,
                     round_idx=0, degradation=degradation, trace=trace,
+                    on_result=_on_resume_result,
                 ):
                     yield ev
+                if "result" not in _resume_captured:
+                    _record_dispatch_row(
+                        _resume_goal, getattr(ctx, "entry", "chat"), worker.mode, None,
+                        _resume_started, error="run_analysis 未返回结果",
+                    )
                 if emit_done:
                     yield _finish()
                 return
@@ -582,7 +645,12 @@ async def stream_unified(
                         )
                     try:
                         from app.services.lead_session_state import lead_session_state
-                        lead_session_state.set_pending(ctx.session_id, str(user_msg or ""))
+                        lead_session_state.set_pending(
+                            ctx.session_id,
+                            str(user_msg or ""),
+                            # P4-B：把本轮 turn_id 一起挂起，确认续跑时复用它
+                            turn_id=agent_trace.current_turn_id(),
+                        )
                     except Exception:  # noqa: BLE001
                         logger.warning("[lead_unified] set_pending_failed", exc_info=True)
                     async for ev in _answer(question):
@@ -686,6 +754,14 @@ async def stream_unified(
                 break
 
             captured: dict = {}   # 接住 RunAnalysisResult，供随后的评审阶段使用
+            dispatch_started = time.perf_counter()
+
+            def _on_dispatch_result(r, _goal=goal, _mode=worker.mode, _started=dispatch_started):
+                captured.setdefault("result", r)
+                # P4-B：派发行在 on_result 里落 —— run_analysis 早返回（清空画布）
+                # 同样会经过这里，保证"提前 return 也有一条 dispatch 记录"。
+                _record_dispatch_row(_goal, ctx.entry, _mode, r, _started)
+
             async for ev in run_worker(
                 user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                 db_session=db_session, available_datasources=available_datasources or [],
@@ -696,13 +772,20 @@ async def stream_unified(
                 # 评审交给下面的"评审阶段"统一做（do_review=False），
                 # 否则同一次派发会写两条 [子任务评估]
                 do_review=False,
-                on_result=lambda r: captured.setdefault("result", r),
+                on_result=_on_dispatch_result,
                 # 重做（同 goal 再派）或 repair：显式跳过 memo。
                 # 与"guidance 进幂等键"互补——那条治"带指导的重派"，
                 # 这条治"goal 一字不改的重做"。
                 bypass_memo=(already_dispatched or name == "repair"),
             ):
                 yield ev
+            if "result" not in captured:
+                # run_worker 在 run_analysis 异常时只 yield error（不回调 on_result）：
+                # 补一条失败派发行，避免"派发了但日志里没有"。
+                _record_dispatch_row(
+                    goal, ctx.entry, worker.mode, None, dispatch_started,
+                    error="run_analysis 未返回结果",
+                )
             # 派发后刷新画布快照：后续步骤的上下文与评审输入都要用最新布局。
             # 与 legacy 第 2 轮起的做法完全一致（layout(force=True) → refresh_canvas）：
             # 画布块是**独立的一等上下文**，不能只靠工具结果里的执行摘要转述。

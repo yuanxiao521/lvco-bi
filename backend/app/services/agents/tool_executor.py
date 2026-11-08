@@ -322,7 +322,15 @@ class ToolExecutor:
             except (json.JSONDecodeError, TypeError):
                 parsed = None
             err_msg = None
+            err_layer = None
             blocked: list[str] = []
+            if isinstance(parsed, dict):
+                # P4-B：guard 的分层（L1-L3；AST 折进 L3 时工具会标 4）
+                try:
+                    raw_layer = parsed.get("layer")
+                    err_layer = int(raw_layer) if raw_layer is not None else None
+                except (TypeError, ValueError):
+                    err_layer = None
             if isinstance(parsed, dict) and parsed.get("error"):
                 err_msg = str(parsed.get("error"))
                 if not error_kind:
@@ -340,6 +348,7 @@ class ToolExecutor:
                 "args_hash": _args_hash(targs),
                 "ok": bool(ok),
                 "error_kind": error_kind,
+                "error_layer": err_layer,
                 "error_msg": err_msg,
                 "result_chars": len(result) if isinstance(result, str) else None,
                 "result_preview": result[:500] if isinstance(result, str) else None,
