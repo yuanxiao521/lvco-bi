@@ -268,7 +268,7 @@ FROM <table_ref>
 | 步 | system token | 与上一步的**首个差异字符位** | 可缓存前缀 token | 可缓存占比 |
 |---|---|---|---|---|
 | step0→1 | 9470 | **4728**（在画布块内） | **2923** | 9470 的 31% / 整轮 17643 的 16.6% |
-| step1→2+ | 9470 | 17789（子任务块尾） | 9470 | 本例第 3 步起摘要恰好等长所以整段稳定；**真实场景每次派发摘要都不同 → 差异点固定在画布块** |
+| step1→2+ | 9470 | 17789（上一 system 末尾） | 9470 | **合成用例的偏差**：我每步追加的摘要是同一段文本，keep=2 后渲染结果恰好等长，于是整段 system 变成前缀。真实场景每次派发摘要都不同 → **差异点会固定在画布块（约 4728 字符位）**，即可缓存前缀仍是 ~2.9k |
 
 轻载场景同样成立：step1 可缓存前缀 2220 / 总 4189（53%）。
 
@@ -278,7 +278,7 @@ FROM <table_ref>
 - 这条**零行为变化**（prompt 语义不变，只是块顺序与承载方式变了），但它是"商品毛利"级别的差异。
 
 **改法**
-- **S**：`provider.py:73-80` 的 source 插入顺序改为"恒定块在前、易变块在后"（DATASOURCES → METRICS → CANVAS → SUBTASK → ASSESSMENT → ARTIFACT）。**一行 dict 顺序改动**，实测可把可缓存前缀从 2.9k 提到约 8.5k。
+- **S**：`provider.py:73-80` 的 source 插入顺序改为"恒定块在前、易变块在后"（DATASOURCES → METRICS → CANVAS → SUBTASK → ASSESSMENT → ARTIFACT）。**一行 dict 顺序改动**，按实测块大小推算可把可缓存前缀从 2.9k 提到 ≈8.5–8.9k（system prompt 1899 + 记忆 + 数据源 + 指标 6348）。
 - **M**：派发后的画布快照不再 `refresh_canvas`，改为把"新布局"作为**一条 tool 结果**追加（`add_tool_result`，`provider.py:90-93`）。system 在整轮内逐字节不变 → 前缀 + append-only 完全成立。
 - **S**：在 `ledger` 里加一个 `prefix_stable: bool`（对比上一步 system 的哈希），把"这轮前缀失效了几次"变成可观测指标（落点 `assembler.py:349` 返回值）。
 

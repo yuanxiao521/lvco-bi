@@ -40,7 +40,7 @@
 | **注册靠 import 副作用** | 画布 7 个工具**不是在** `agent_tools` 里注册，而是在 `canvas_tools` 底部注册，且**必须**先有人 import `canvas_tools`（注释写明由 `ai_service` 导入保证启动即注册）。若某入口没走 `ai_service`，`ToolRegistry.get("add_chart_block")` 会是 `None` → 被判"未知工具" → `fatal` 终止整步 | `agent_tools.py:1925-1926`、`canvas_tools.py:965-976` | **全局单例的真实代价** |
 | **工具总数** | 注册 20 个 = 13 核心 + 7 画布；其中 6 个被 `AGENT_HIDDEN_TOOLS` 从 LLM 面隐藏（insight / clean_suggest / polish_text / recommend_charts / validate_chart / data_quality） | `agent_tools.py:53-56` | 可接受 |
 | **各入口可见数** | Lead 10 个；react 路径 7 个（20−7 画布−6 隐藏）；画布执行器 7 个（含 `list_fields`） | `lead_agent_tools.py:136-142`、`lead_tools.py:415-437`、`canvas_orchestrator.py:47-51` | 可接受 |
-| **写工具边界** | Lead **物理上不注册**写工具（不是"注册后拦截"），并有测试锁死 `注册表 ∩ WRITE_TOOL_NAMES = ∅` | `lead_agent_tools.py:25-31`、`tests/test_lead_p1_agent_tools.py:35-37,41-52` | **优秀**，全仓最硬的一条边界 |
+| **写工具边界** | Lead **物理上不注册**写工具（不是"注册后拦截"），并有测试锁死 `注册表 ∩ WRITE_TOOL_NAMES = ∅` | `lead_agent_tools.py:25-31`、`tests/test_lead_p1_agent_tools.py:35-37,41-52` | **优秀**，全仓最硬的一条边界（本地实跑该文件：12 passed / 0.44s） |
 | **schema 校验** | **没有**。`json.loads` 失败就退化成 `{}`，然后 `**targs` 直塞 `execute()`；无 pydantic 模型、不校验 `required`、不拒绝多余字段 | `tool_executor.py:39-44,239` | **不合格** |
 | **非法参数后果** | 缺必填 → `TypeError` → 被 `except Exception` 吞成 `{"error": "missing 1 required positional argument ..."}`；各工具只能**手写**缺参守卫来兜（不一致） | `tool_executor.py:242-243`、手写示例 `canvas_tools.py:449-463` | **不合格** |
 | **错误契约** | 工具层统一 `{"error": "<中文句子>"}`，**无 code / 无 retryable / 无字段级位置**；而 HTTP 层有 `{code,message}`、查询引擎有 `code="SENSITIVE_COLUMN"` | `agent_tools.py:580,613,651-657`、`tool_executor.py:176-178,243` vs `permissions.py:125-128`、`query_engine.py:749-752,766` | **不合格**（三层不一致）|
