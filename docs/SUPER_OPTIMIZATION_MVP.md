@@ -24,11 +24,21 @@
 
 **验证**：全量 pytest **1251 passed / 2 skipped / 0 failed**（浏览器类用例在缺 chromium 时显式 skip，不再让门禁变红）；迁移 0023→0024→0025 已对 dev 库实跑。
 
-**已知待收敛（不藏）**
-1. **两份数据画像实现**：`lead_observe.profile_datasource`（走 QueryDatasourceTool + guard）与 `services/datasource_profile.py`（直接 DuckDB + 采样）统计口径可能漂移 → 应让前者转调后者（约 0.5 天，需保留 guard 语义）。
-2. **队列模式画布入口无 turn 行**：`canvas_task.run_canvas_task` 未 bind trace 上下文（`chat_task` 有）→ TASK_QUEUE_ENABLED=true 时画布轮次缺 turn 汇总。
-3. `ai.py:937` 的 `len(metrics_ctx)<=4000` 分支因 metrics 已在服务内封顶而恒真，属死代码待清。
-4. `enforced` 仍为 False：本轮的窗口有界化来自守卫而非预算裁剪；是否翻 True 需配评测。
+**P2 收敛（commit `2fa0493`）**——上表的 1/2/3 已修：
+1. ✅ **画像口径收敛到唯一真源**：新增 `services/profile_schema.py`（类型分类/空值率分母/标识符转义），两个消费方都改为引用；`tests/test_profile_schema_consistency.py` 22 条含**棘轮**（任一消费方再本地定义口径就红）与**真 DuckDB 跑通**的数值一致性断言。
+2. ✅ **画布任务补 trace/turn 行**：`canvas_task` 现在 bind `entry=canvas` 上下文、收尾写 turn 行并 flush —— 队列模式下画布轮次终于可查。
+3. ✅ **删除 `ai.py` 的 metrics 死分支**（封顶已下移到 metric_service）。
+
+**P3 交付（commit `4fb51d5`）**
+- **工具契约**：`TOOL_TIMEOUT_SECONDS` 外层超时；统一错误体 `{error, code, retryable, hint}`（**保留 error 键**，向后兼容）；6 个高频工具 pydantic 入参校验（错到字段路径，例如 `limit: 需要整数，收到 "top10"`）；瞬时错误不写 memo。
+- **权限补强**：`require_editor` 挂到 **35 个写端点**（数据源/画布/仪表盘/报表/连接/AI 额度入口）；`ALLOW_PUBLIC_REGISTER=False` 关自助注册；管理员可停用账号（不能停自己、不能停最后一名 admin），停用后**登录即 403**（此前是"登录成功处处 403"）。
+- **Lead 预算与降级**：`LEAD_AGENT_MAX_LLM_CALLS` 硬上限（派发/评审内部的调用经代理计入同一计数器）；done 事件新增 `degradation_counts`（区分"打满 3 次"与"偶发 1 次"）；首步流式开关（`LEAD_STREAM_FIRST_STEP`，默认关）。
+- **评测基座修正**：`run_eval` 按题目的 `expected_datasource` **钉数据源**——此前不钉，用 A 表去跑 B 表 SQL，SQL 准确率恒为 0（实测 0/3 全是这个原因，不是模型错）。
+
+**仍待收敛（不藏）**
+4. `enforced` 仍为 False：窗口有界化来自守卫而非预算裁剪；翻 True 要配评测（属行为变更）。
+5. `parent` / `error_layer` / `kind=dispatch` 三列在 `agent_calls` 里已建但未填充（要编排器写 contextvar + 错误契约贯通）。
+6. `turn_id` 目前是请求级：HITL 确认续跑是新请求 → 会断成两个 turn。要真正跨请求需把 turn_id 落到 `lead_session_state`。
 
 ## 0. v1 → v2 改了什么（10 处，先看这张表）
 
