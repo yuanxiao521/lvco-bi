@@ -26,6 +26,7 @@ legacy 四工位（merged/decision/answer）与 LEAD_AGENT_MODE 开关已整体�
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -515,23 +516,47 @@ async def stream_unified(
         step_msgs: list[dict] = []      # 本步新增消息，步末提交给 provider
         text_parts: list[str] = []
         tool_calls: list[dict] = []
-        try:
-            async for ev in llm.tool_call_round(
-                # 默认 False → 与改造前完全一致；True 时仅首步流式
-                messages, tools, temperature=0.3, streaming=stream_first_step,
-            ):
-                et = ev.get("type")
-                if et == "text":
-                    chunk = ev.get("content") or ""
-                    text_parts.append(chunk)
-                    if stream_first_step and chunk:
-                        # 即时转发：首步的过渡文字不必等工具调用解析完才出现
-                        yield {"type": "text", "content": chunk}
-                elif et == "tool_call":
-                    tool_calls.append(ev)
-        except Exception as e:  # noqa: BLE001
-            # §6 不变量 4：LLM 不可用 → 确定性收尾（不空转、不重复派发）
-            logger.warning("[lead_unified] llm_failed: %s", e)
+        # ── LLM 瞬时失败重试（S0-4）────────────────────────────────────────
+        # 实测依据：2026-11-08 的 33 题评测在 21:02 撞上本机代理抖动，**连续 16 题**
+        # 直接产出「服务暂时不可用」并收尾 —— 一次上游抖动废掉 16/33 题。
+        # 只在"还没收到任何事件"时重试：
+        #   · 已经流出去的文本不能重发（会重复吐字）；
+        #   · 已经解析出工具调用的不能重放（副作用风险）。
+        _llm_error: Exception | None = None
+        _max_attempts = 3
+        for _attempt in range(1, _max_attempts + 1):
+            try:
+                async for ev in llm.tool_call_round(
+                    # 默认 False → 与改造前完全一致；True 时仅首步流式
+                    messages, tools, temperature=0.3, streaming=stream_first_step,
+                ):
+                    et = ev.get("type")
+                    if et == "text":
+                        chunk = ev.get("content") or ""
+                        text_parts.append(chunk)
+                        if stream_first_step and chunk:
+                            # 即时转发：首步的过渡文字不必等工具调用解析完才出现
+                            yield {"type": "text", "content": chunk}
+                    elif et == "tool_call":
+                        tool_calls.append(ev)
+                _llm_error = None
+                break
+            except Exception as e:  # noqa: BLE001
+                _llm_error = e
+                if _attempt < _max_attempts and not (text_parts or tool_calls):
+                    backoff = 0.5 * (3 ** (_attempt - 1))     # 0.5s → 1.5s
+                    logger.warning(
+                        "[lead_unified] llm_retry attempt=%d/%d backoff=%.1fs err=%s",
+                        _attempt, _max_attempts, backoff, e,
+                    )
+                    degradation.append("lead_llm_retried")
+                    await asyncio.sleep(backoff)
+                    continue
+                break
+
+        if _llm_error is not None:
+            # §6 不变量 4：重试用尽仍失败 → 确定性收尾（不空转、不重复派发）
+            logger.warning("[lead_unified] llm_failed: %s", _llm_error)
             degradation.append("lead_agent_llm_failed")
             if "".join(text_parts).strip():
                 # 已流式转发过就只补 report，避免同一段字吐两遍

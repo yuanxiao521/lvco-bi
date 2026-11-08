@@ -158,8 +158,13 @@ async def test_text_without_tool_call_becomes_answer():
     assert events[-1]["type"] == "done"
 
 
-async def test_llm_failure_degrades_deterministically():
-    """LLM 抛错 → 确定性收尾（§6 不变量 4），不空转。"""
+async def test_llm_failure_retries_bounded_then_degrades(monkeypatch):
+    """LLM 抛错 → **有界**重试 3 次 → 确定性收尾（§6 不变量 4），不空转。
+
+    行为变化（2026-11-08）：此前一次上游抖动就整轮报废——33 题评测里本机代理抖了一下，
+    连续 16 题直接"服务暂时不可用"。现在允许有界重试（0.5s / 1.5s 退避），
+    但**不无限重试**：3 次都失败仍走确定性收尾，且降级码可观测。
+    """
     class BoomLLM:
         calls = 0
 
@@ -168,6 +173,11 @@ async def test_llm_failure_degrades_deterministically():
             raise RuntimeError("upstream 502")
             yield  # pragma: no cover
 
+    async def _no_sleep(_seconds):  # 测试里不真等
+        return None
+
+    monkeypatch.setattr(U.asyncio, "sleep", _no_sleep)
+
     events = []
     async for ev in U.stream_unified(
         user_msg="你好", ctx=FakeCtx(), db_session=None, llm=BoomLLM(),
@@ -175,9 +185,11 @@ async def test_llm_failure_degrades_deterministically():
     ):
         events.append(ev)
 
-    assert BoomLLM.calls == 1, "LLM 失败后不得重试空转"
+    assert BoomLLM.calls == 3, f"应重试到上限（3 次）后收尾，实际 {BoomLLM.calls} 次"
     assert any(e.get("type") == "error" for e in events)
-    assert "lead_agent_llm_failed" in events[-1]["degradations"]
+    degradations = events[-1]["degradations"]
+    assert "lead_llm_retried" in degradations, "重试要可观测"
+    assert "lead_agent_llm_failed" in degradations
 
 
 # ── complexity 确定性兜底 ──────────────────────────────────────────────────
