@@ -42,6 +42,10 @@ class EvalResult:
 
     question_id: str
     sql_accuracy: bool = False       # SQL 准确率（与期望一致）
+    # 该题的 SQL 是否**可评分**：期望模板本身返回 0 行时无法判定对错
+    # （典型原因：模板用 now() 相对窗口，而演示数据是历史快照），这类题应从
+    # SQL 分母里剔除，否则会把"数据集过期"算成"模型算错"。
+    sql_scorable: bool = True
     tool_success: bool = False       # 工具调用成功（调用了正确工具且无 error）
     final_response_valid: bool = False  # 输出有效率
     chart_type_correct: bool = False  # 图表类型正确
@@ -120,11 +124,16 @@ def judge_attempt(
         try:
             expected_rows = sql_executor(question["expected_sql_template"])
             actual_rows = sql_executor(agent_sql)
-            result.sql_accuracy = _rows_match(expected_rows, actual_rows)
-            if not result.sql_accuracy:
-                result.notes.append(
-                    f"result_set_mismatch: expected_rows={len(expected_rows)} actual_rows={len(actual_rows)}"
-                )
+            if not expected_rows:
+                # 期望模板自己都查不到数据 → 这道题的 SQL 对错无从判定（数据集/数据快照过期）
+                result.sql_scorable = False
+                result.notes.append("expected_empty(unscorable)")
+            else:
+                result.sql_accuracy = _rows_match(expected_rows, actual_rows)
+                if not result.sql_accuracy:
+                    result.notes.append(
+                        f"result_set_mismatch: expected_rows={len(expected_rows)} actual_rows={len(actual_rows)}"
+                    )
         except Exception as e:
             result.notes.append(f"sql_executor_error={e}")
             result.sql_accuracy = _sql_keyword_overlap(
@@ -156,8 +165,9 @@ def judge_attempt(
     chart_events = [e for e in attempt.events if e.get("type") == "chart"]
     if chart_events:
         result.actual_chart_type = chart_events[-1].get("chart_type", "")
-        result.chart_type_correct = (
-            result.actual_chart_type == result.expected_chart_type
+        # 等价类比较（donut≈pie、horizontal_bar≈bar；grouped_bar 与 stacked_bar 仍不等价）
+        result.chart_type_correct = chart_type_equivalent(
+            result.expected_chart_type, result.actual_chart_type
         )
         if not result.chart_type_correct:
             result.notes.append(
@@ -224,6 +234,7 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
         return {
             "total": 0,
             "sql_accuracy_rate": 0.0,
+            "sql_scorable": 0,
             "tool_success_rate": 0.0,
             "final_response_valid_rate": 0.0,
             "chart_type_correct_rate": 0.0,
@@ -240,6 +251,7 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
 
     total = len(results)
     sql_ok = sum(1 for r in results if r.sql_accuracy)
+    sql_scorable = sum(1 for r in results if r.sql_scorable) or 1
     tool_ok = sum(1 for r in results if r.tool_success)
     resp_ok = sum(1 for r in results if r.final_response_valid)
     chart_ok = sum(1 for r in results if r.chart_type_correct)
@@ -248,13 +260,17 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
 
     summary: dict[str, Any] = {
         "total": total,
-        "sql_accuracy_rate": round(sql_ok / total, 4),
+        # SQL 分母用**可评分题**（期望模板返回非空的题）。按总题数算会把
+        # "数据集过期" 误记成 "模型算错"——2026-11-08 基线里 3/12 题属于此类。
+        "sql_accuracy_rate": round(sql_ok / sql_scorable, 4),
+        "sql_scorable": sql_scorable,
         "tool_success_rate": round(tool_ok / total, 4),
         "final_response_valid_rate": round(resp_ok / total, 4),
         "chart_type_correct_rate": round(chart_ok / total, 4),
         "chart_config_valid_rate": round(chart_cfg_ok / total, 4),
         "avg_iterations": round(avg_iter, 2),
         "sql_accuracy_count": sql_ok,
+        "sql_scorable_count": sql_scorable,
         "tool_success_count": tool_ok,
         "final_response_valid_count": resp_ok,
         "chart_type_correct_count": chart_ok,
@@ -610,6 +626,46 @@ _KW_ALIASES = {
     "7天": ["七日", "一周"],
     "6个月": ["半年", "六个月", "近半年"],
 }
+
+
+# ── 图表类型等价类 ──────────────────────────────────────────────────
+# 为什么需要：判分器此前用**字符串全等**比较图表类型，把语义相同的变体判成错，
+# 导致"图表类型正确率"严重失真（2026-11-08 基线实测：6/12，其中 3 题是
+# donut vs pie、horizontal_bar vs bar 这种**同一张图的朝向/变体**）。
+# 注意：grouped_bar 与 stacked_bar **不等价**（叠加 vs 分组是不同信息结构），
+# line 与 bar 也不等价——只归并"同一语义、不同呈现"的变体。
+_CHART_FAMILIES: dict[str, set[str]] = {
+    "pie": {"pie", "donut", "ring", "doughnut", "pie_chart"},
+    "bar": {"bar", "hbar", "horizontal_bar", "column", "bar_chart", "column_chart"},
+    "line": {"line", "spline", "line_chart", "smooth_line"},
+    "grouped_bar": {"grouped_bar", "bar_grouped", "grouped_column", "cluster_bar"},
+    "stacked_bar": {"stacked_bar", "bar_stacked", "stacked_column"},
+    "area": {"area", "stacked_area", "area_chart"},
+    "kpi_card": {"kpi_card", "kpi", "metric_card", "stat_card"},
+    "scatter": {"scatter", "scatter_plot", "bubble"},
+    "table": {"table", "data_table"},
+    "funnel": {"funnel"},
+    "heatmap": {"heatmap", "heat_map"},
+}
+
+
+def _chart_family(chart_type: str) -> str | None:
+    """把图表类型归一到 family；未知类型返回 None（此时退化为字符串比较）。"""
+    key = (chart_type or "").strip().lower()
+    if not key:
+        return None
+    for family, members in _CHART_FAMILIES.items():
+        if key in members or key == family:
+            return family
+    return None
+
+
+def chart_type_equivalent(expected: str, actual: str) -> bool:
+    """图表类型是否等价（同语义的不同变体算对，不同语义算错）。"""
+    if (expected or "").strip().lower() == (actual or "").strip().lower():
+        return True
+    fe, fa = _chart_family(expected), _chart_family(actual)
+    return fe is not None and fe == fa
 
 
 def _keyword_present(keyword: str, text: str) -> bool:

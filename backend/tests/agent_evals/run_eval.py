@@ -366,7 +366,11 @@ def question_expected_types(q: dict[str, Any]) -> list[str]:
     return []
 
 
-def build_sql_executor(attempt: AttemptTrace, expected_datasource: str | None = None):
+async def build_sql_executor(
+    attempt: AttemptTrace,
+    expected_datasource: str | None = None,
+    user_id: str | None = None,
+):
     """从 attempt 的 list_datasources 结果解析真实 table_ref，构造 SQL 执行器。
 
     评测数据集的 expected_sql_template 使用**裸表名**（如 ecommerce_orders），
@@ -391,10 +395,38 @@ def build_sql_executor(attempt: AttemptTrace, expected_datasource: str | None = 
                 if isinstance(it, dict) and it.get("table_ref") and it.get("name"):
                     mapping[str(it["name"]).strip().lower()] = it["table_ref"]
             break
-    if not mapping:
-        return None
 
     wanted = (expected_datasource or "").strip().lower()
+
+    # 兜底：Agent 这一轮可能**没调 list_datasources**（实测 12 题里只调了 3 次），
+    # 那样映射为空 → 判分器退化成"关键字重叠"，SQL 准确率就不是真执行比对。
+    # 这里直接用 DB 里该用户的数据源补出 table_ref（本地 CSV/Excel = "<schema>"."data"）。
+    if wanted and wanted not in mapping and user_id:
+        try:
+            from sqlalchemy import func, select
+
+            from app.core.database import async_session_factory
+            from app.core.duckdb_client import duckdb_client
+            from app.models.datasource import DataSource
+
+            async with async_session_factory() as db:
+                row = (
+                    await db.execute(
+                        select(DataSource.id, DataSource.name).where(
+                            DataSource.user_id == user_id,
+                            func.lower(DataSource.name) == wanted,
+                        )
+                    )
+                ).first()
+            if row is not None:
+                ds_id, ds_name = row
+                schema = duckdb_client.get_schema_name(str(user_id), str(ds_id), str(ds_name))
+                mapping[wanted] = f'"{schema}"."data"'
+        except Exception as exc:  # noqa: BLE001
+            log.warning("judge_table_ref_fallback_failed name=%s err=%s", wanted, str(exc)[:120])
+
+    if not mapping:
+        return None
     if wanted and wanted in mapping:
         table_ref = mapping[wanted]
     else:
@@ -654,7 +686,9 @@ async def main_async(args: argparse.Namespace) -> int:
                     error=f"per_question_timeout={per_q_timeout:.0f}s",
                 )
         executor = (
-            build_sql_executor(attempt, q.get("expected_datasource"))
+            await build_sql_executor(
+                attempt, q.get("expected_datasource"), user_id=args.user_id
+            )
             if args.mode in ("real", "orchestrator")
             else None
         )
