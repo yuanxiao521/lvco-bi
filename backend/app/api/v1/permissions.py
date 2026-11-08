@@ -18,6 +18,12 @@ class RoleUpdateRequest(CamelModel):
     role: UserRole
 
 
+class UserStatusUpdateRequest(CamelModel):
+    """停用/启用账号。isActive=false 即"离职/封禁"，既有 token 会被 deps 立刻判 403。"""
+
+    is_active: bool
+
+
 class UserListItem(CamelModel):
     id: UUID
     email: str
@@ -155,3 +161,68 @@ async def update_user_role(
     await db.commit()
     await db.refresh(target)
     return SuccessResponse(data=UserResponse.model_validate(target).model_dump(mode="json", by_alias=True))
+
+
+@router.patch("/users/{user_id}/status")
+async def update_user_status(
+    user_id: UUID,
+    body: UserStatusUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """启用 / 停用账号（仅 admin）。
+
+    P3-B：这是"停用账号"的**唯一入口**。P0 已经在 deps.assert_token_state 里让
+    is_active=False 的账号连同既发 token 一起 403，但没有地方能把它置 false——
+    相当于止血阀装好了却没有把手，这里补上。
+
+    防呆两条（与改角色的护栏同源）：
+      - **不能停用自己**：否则管理员一键把自己锁在门外，而且没有第二个人能救；
+      - **不能停用最后一名启用中的 admin**：避免系统彻底失去管理面。
+
+    注意：响应体只回 id/email/isActive —— UserResponse 目前不含 is_active（schemas 不在本次
+    改动范围），所以不硬塞进去，返回一个明确的窄结构。
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "仅管理员可调整账号状态"},
+        )
+    # 只为"停用自己"返回 400；自助"启用"自己（正常情况下不可能处于停用态）不拦
+    if user_id == current_user.id and body.is_active is False:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "CANNOT_DISABLE_SELF", "message": "不能停用自己的账号"},
+        )
+
+    target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "用户不存在"},
+        )
+
+    if body.is_active is False and target.role == UserRole.admin:
+        other_active_admin = (await db.execute(
+            select(func.count()).select_from(User).where(
+                User.role == UserRole.admin,
+                User.id != target.id,
+                User.is_active.is_(True),
+            )
+        )).scalar() or 0
+        if other_active_admin == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "LAST_ADMIN", "message": "系统中需要至少保留一名启用中的管理员"},
+            )
+
+    target.is_active = body.is_active
+    await db.commit()
+    await db.refresh(target)
+    return SuccessResponse(
+        data={
+            "id": str(target.id),
+            "email": target.email,
+            "isActive": bool(target.is_active),
+        }
+    )

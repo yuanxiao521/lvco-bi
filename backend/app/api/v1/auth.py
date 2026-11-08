@@ -83,6 +83,14 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNAUTHORIZED", "message": "邮箱或密码错误"},
         )
+    # P3-B：停用账号不允许登录。deps 已让"既有 token"立刻 403，但若登录仍放行，
+    # 用户会先"登录成功"再被所有请求拒掉，体验与语义都错；且等于继续给停用账号发 token。
+    # 这里与 deps.assert_token_state 用同一文案，避免前端出现两套说法。
+    if getattr(user, "is_active", True) is False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "账号已停用，请联系管理员"},
+        )
     tokens = _issue_tokens(user)
     return SuccessResponse(
         data={
@@ -94,6 +102,21 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)) -> SuccessResponse:
+    """自助注册。
+
+    P3-B：受 settings.ALLOW_PUBLIC_REGISTER 开关控制。默认 True（本地开发/既有测试不变）；
+    私有化部署时置 False —— 否则任何人都能自助注册，注册完就是一个合法登录用户，
+    可读公共数据面（历史上的审计/用户列表越权就是被这条放大的）。
+    关闭时返回 403 + REGISTER_DISABLED，前端可据此隐藏"注册"入口。
+    """
+    if not settings.ALLOW_PUBLIC_REGISTER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "REGISTER_DISABLED",
+                "message": "自助注册已关闭，请联系管理员开通账号",
+            },
+        )
     user_repo = SQLAlchemyUserRepository(db)
     service = AuthService(user_repo)
     try:

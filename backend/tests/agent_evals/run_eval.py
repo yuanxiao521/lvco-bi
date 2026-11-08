@@ -545,6 +545,43 @@ def render_markdown_report(
 # ----------------------------------------------------------------------
 
 
+async def _resolve_datasource_id(user_id: str, name: str | None) -> str | None:
+    """按题目声明的 `expected_datasource` 找到该用户下的数据源 id。
+
+    为什么必须钉：runner 默认让 Agent 自己挑数据源，而数据集里的
+    `expected_sql_template` 是按**某一张表**写的。不钉 = 用 A 表的数据源去跑 B 表的
+    SQL → 全部报 Binder Error、SQL 准确率恒为 0（2026-11-08 实测踩到，0/3 全是
+    这个原因，不是模型错）。
+    """
+    if not name:
+        return None
+    try:
+        from sqlalchemy import select
+
+        from app.core.database import async_session_factory
+        from app.models.datasource import DataSource
+
+        async with async_session_factory() as db:
+            rows = (
+                await db.execute(
+                    select(DataSource.id, DataSource.name).where(
+                        DataSource.user_id == user_id
+                    )
+                )
+            ).all()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("resolve_datasource_failed name=%s err=%s", name, str(exc)[:120])
+        return None
+    for ds_id, ds_name in rows:
+        if str(ds_name).strip().lower() == str(name).strip().lower():
+            return str(ds_id)
+    log.warning(
+        "expected_datasource_not_found name=%s available=%s",
+        name, [str(r[1]) for r in rows],
+    )
+    return None
+
+
 async def main_async(args: argparse.Namespace) -> int:
     dataset_path = Path(args.dataset)
     output_path = Path(args.output)
@@ -562,8 +599,16 @@ async def main_async(args: argparse.Namespace) -> int:
         if args.mode == "mock":
             attempt = await run_agent_mock(q)
         else:
-            entry = "canvas" if q.get("category") == "canvas" and args.entry == "auto" else args.entry
-            attempt = await run_agent(q, user_id=args.user_id, mode=args.mode, entry=entry)
+            # 入口：canvas 题走画布；auto 下其余一律 chat（不要把 "auto" 当真入口传下去）
+            if args.entry == "auto":
+                entry = "canvas" if q.get("category") == "canvas" else "chat"
+            else:
+                entry = args.entry
+            pinned_ds = await _resolve_datasource_id(args.user_id, q.get("expected_datasource"))
+            attempt = await run_agent(
+                q, user_id=args.user_id, mode=args.mode, entry=entry,
+                selected_datasource_id=pinned_ds,
+            )
         executor = build_sql_executor(attempt) if args.mode in ("real", "orchestrator") else None
         result = judge_attempt(q, attempt, sql_executor=executor)
         results.append(result)

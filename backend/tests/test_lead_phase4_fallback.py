@@ -115,7 +115,11 @@ async def test_no_tool_call_text_forced_retry(monkeypatch):
     })
     mock_llm = MockLLM()
     mock_llm.push_text("我先说说思路，暂不查数")           # 第一轮逃逸
-    mock_llm.push_tool_call("query_engine", {"sql": "select 1"})  # 第二轮正确调用
+    # P3-A 起高频工具做入参校验（query_engine 必填 datasource_id）：本用例只测
+    # "文本逃逸后强制重试"的编排行为，参数给全即可（假工具不读它）
+    mock_llm.push_tool_call(
+        "query_engine", {"sql": "select 1", "datasource_id": "ds-1"}
+    )  # 第二轮正确调用
     orch = _make_orch(extra={"query_engine"})
     orch.llm = mock_llm
 

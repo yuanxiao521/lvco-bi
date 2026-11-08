@@ -12,7 +12,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, require_editor
 from app.core.limiter import limiter
 from app.models.user import User
 from app.schemas import ConnectionResponse, SuccessResponse
@@ -72,7 +72,7 @@ async def get_connection(
     return SuccessResponse(data=payload.model_dump(mode="json", by_alias=True))
 
 
-@router.patch("/{connection_id}")
+@router.patch("/{connection_id}", dependencies=[Depends(require_editor)])
 async def update_connection(
     connection_id: UUID,
     body: dict,
@@ -110,7 +110,7 @@ async def update_connection(
     return SuccessResponse(data=payload.model_dump(mode="json", by_alias=True))
 
 
-@router.post("/{connection_id}/rotate-secret")
+@router.post("/{connection_id}/rotate-secret", dependencies=[Depends(require_editor)])
 @limiter.limit("10/minute")
 async def rotate_secret(
     request: Request,

@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_report_service
+from app.api.deps import get_current_user, get_report_service, require_editor
 from app.core.database import get_db
 from app.models.report import ReportStatus
 from app.models.user import User
@@ -110,7 +110,7 @@ async def list_reports(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_report(
     body: ReportCreateBody,
     service: ReportService = Depends(get_report_service),
@@ -150,7 +150,7 @@ async def get_report(
     return SuccessResponse(data=data)
 
 
-@router.patch("/{report_id}")
+@router.patch("/{report_id}", dependencies=[Depends(require_editor)])
 async def update_report(
     report_id: UUID,
     body: ReportUpdateBody,
@@ -166,7 +166,7 @@ async def update_report(
     return SuccessResponse(data=_summary(report))
 
 
-@router.patch("/{report_id}/status")
+@router.patch("/{report_id}/status", dependencies=[Depends(require_editor)])
 async def update_report_status(
     report_id: UUID,
     body: ReportStatusBody,
@@ -188,7 +188,7 @@ async def update_report_status(
     return SuccessResponse(data=_summary(report))
 
 
-@router.post("/{report_id}/share")
+@router.post("/{report_id}/share", dependencies=[Depends(require_editor)])
 async def share_report(
     report_id: UUID,
     body: ShareLinkBody | None = None,
@@ -229,7 +229,7 @@ async def share_report(
     )
 
 
-@router.delete("/{report_id}/share")
+@router.delete("/{report_id}/share", dependencies=[Depends(require_editor)])
 async def revoke_report_share(
     report_id: UUID,
     service: ReportService = Depends(get_report_service),
@@ -426,7 +426,7 @@ async def export_report_pdf(
     )
 
 
-@router.delete("/{report_id}")
+@router.delete("/{report_id}", dependencies=[Depends(require_editor)])
 async def delete_report(
     report_id: UUID,
     service: ReportService = Depends(get_report_service),

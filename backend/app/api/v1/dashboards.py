@@ -7,7 +7,7 @@ from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_dashboard_service
+from app.api.deps import get_current_user, get_dashboard_service, require_editor
 from app.core.database import get_db
 from app.models.chart_config import ChartConfig
 from app.models.dashboard import Dashboard
@@ -118,7 +118,7 @@ async def list_dashboards(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_dashboard(
     body: DashboardCreateBody,
     service: DashboardService = Depends(get_dashboard_service),
@@ -172,7 +172,7 @@ async def get_dashboard(
     )
 
 
-@router.put("/{dashboard_id}/layout")
+@router.put("/{dashboard_id}/layout", dependencies=[Depends(require_editor)])
 async def update_layout(
     dashboard_id: UUID,
     body: DashboardLayoutBody,
@@ -188,7 +188,7 @@ async def update_layout(
     return SuccessResponse(data=_summary(dashboard))
 
 
-@router.post("/{dashboard_id}/charts", status_code=status.HTTP_201_CREATED)
+@router.post("/{dashboard_id}/charts", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def add_chart(
     dashboard_id: UUID,
     body: DashboardAddChartBody,
@@ -228,7 +228,7 @@ async def add_chart(
     )
 
 
-@router.delete("/{dashboard_id}/charts/{chart_id}")
+@router.delete("/{dashboard_id}/charts/{chart_id}", dependencies=[Depends(require_editor)])
 async def remove_chart(
     dashboard_id: UUID,
     chart_id: UUID,
@@ -259,7 +259,7 @@ async def get_dashboard_data(
     return SuccessResponse(data=payload)
 
 
-@router.post("/{dashboard_id}/schedule")
+@router.post("/{dashboard_id}/schedule", dependencies=[Depends(require_editor)])
 async def set_dashboard_schedule(
     dashboard_id: UUID,
     body: ScheduleRefreshBody,
@@ -287,7 +287,7 @@ async def set_dashboard_schedule(
     return SuccessResponse(data=result)
 
 
-@router.delete("/{dashboard_id}/schedule")
+@router.delete("/{dashboard_id}/schedule", dependencies=[Depends(require_editor)])
 async def disable_dashboard_schedule(
     dashboard_id: UUID,
     service: DashboardService = Depends(get_dashboard_service),
@@ -330,7 +330,7 @@ async def refresh_dashboard(
     return SuccessResponse(data=result)
 
 
-@router.post("/{dashboard_id}/share")
+@router.post("/{dashboard_id}/share", dependencies=[Depends(require_editor)])
 async def share_dashboard(
     dashboard_id: UUID,
     body: ShareLinkBody | None = None,
@@ -372,7 +372,7 @@ async def share_dashboard(
     )
 
 
-@router.delete("/{dashboard_id}/share")
+@router.delete("/{dashboard_id}/share", dependencies=[Depends(require_editor)])
 async def revoke_dashboard_share(
     dashboard_id: UUID,
     service: DashboardService = Depends(get_dashboard_service),
@@ -406,7 +406,7 @@ async def revoke_dashboard_share(
     )
 
 
-@router.delete("/{dashboard_id}")
+@router.delete("/{dashboard_id}", dependencies=[Depends(require_editor)])
 async def delete_dashboard(
     dashboard_id: UUID,
     service: DashboardService = Depends(get_dashboard_service),

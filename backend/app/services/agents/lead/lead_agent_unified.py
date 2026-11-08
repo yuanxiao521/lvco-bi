@@ -154,6 +154,67 @@ def build_dispatch_receipt(
     return f"{note}\n\n{summary}" if note else summary
 
 
+# ── P3-C：总预算闸 / 首步流式（两个都是"默认不改变行为"的开关）──────────────
+# 预算降级码：与步数闸（lead_agent_step_limit）分开记，运维能区分"步数走满"与"调用超支"。
+LEAD_BUDGET_DEGRADATION = "lead_agent_llm_budget"
+LEAD_BUDGET_MESSAGE = "本轮已达到调用预算上限，已收尾"
+
+
+class _CountingLLM:
+    """LLM 调用计数代理：让**派发内部**（worker / 评审裁量 / 数值后验）的调用
+    也计入本轮总预算。
+
+    为什么需要代理而不是各处手写 +1：真正烧钱的是子执行器（react 每步一次、
+    orchestrator 每步一次 + 报告 + 重写），这些调用发生在 `lead_tools/lead_dispatch`
+    里、本模块看不见。把 llm 包一层交给它们，计数就覆盖了整轮的真实调用面。
+
+    安全性：
+    - 只代理**公开调用面**（5 个方法），其余属性一律透传——worker 会读
+      `llm._settings.openai_model`（react_agent / canvas_orchestrator），透传后照常；
+    - 流式方法直接返回内层的异步生成器（本方法不是生成器），语义与被包装前完全一致；
+    - 计数失败（counter 被换成怪东西）只吞掉，绝不影响主链路。
+    """
+
+    def __init__(self, inner, counter: dict) -> None:
+        self._inner = inner
+        self._counter = counter
+
+    def _bump(self) -> None:
+        try:
+            self._counter["count"] = int(self._counter.get("count", 0)) + 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── 5 个调用面（前 3 个返回 async iterator，后 2 个是 coroutine）──
+    def tool_call_round(self, *args, **kwargs):
+        self._bump()
+        return self._inner.tool_call_round(*args, **kwargs)
+
+    def stream_chat(self, *args, **kwargs):
+        self._bump()
+        return self._inner.stream_chat(*args, **kwargs)
+
+    def stream_chat_with_tools(self, *args, **kwargs):
+        self._bump()
+        return self._inner.stream_chat_with_tools(*args, **kwargs)
+
+    async def complete(self, *args, **kwargs):
+        self._bump()
+        return await self._inner.complete(*args, **kwargs)
+
+    async def complete_with_tools(self, *args, **kwargs):
+        self._bump()
+        return await self._inner.complete_with_tools(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        # _inner 尚未赋值（构造中途/反序列化）时不要递归：直接报缺属性
+        try:
+            inner = object.__getattribute__(self, "_inner")
+        except AttributeError:
+            raise AttributeError(name) from None
+        return getattr(inner, name)
+
+
 def _parse_args(raw) -> dict:
     if isinstance(raw, dict):
         return raw
@@ -192,6 +253,19 @@ async def stream_unified(
     tools = lead_tool_specs(profile)          # 例：chat 画像不含 get_canvas_layout（死工具）
     remaining = dict(profile.quota)           # 每类工具剩余次数（观察 ≤2 / 派发 ≤3）
 
+    # ── P3-C 总预算闸（0=不限）：与步数闸是**两道独立闸**──
+    #   · 步数闸（limit=6）管"最多几步"——每步一次 LLM，但一步可能派发多次；
+    #   · 预算闸管"整轮最多几次 LLM 调用"——派发/评审/后验内部的调用都算。
+    # 只靠步数闸兜不住"一步里派发 3 次、每次 worker 又跑 6 轮"这种情况（账单翻倍）。
+    max_llm_calls = int(getattr(settings, "LEAD_AGENT_MAX_LLM_CALLS", 20) or 0)
+    llm_calls: dict[str, int] = {"count": 0}
+    # 派发/评审拿到的是**计数代理**：它们的内部调用也进同一个计数器。
+    # 循环自身那一次调用在本模块显式 +1（见步首），两条加起来才是整轮真实次数。
+    counted_llm = _CountingLLM(llm, llm_calls)
+
+    def _budget_exhausted() -> bool:
+        return max_llm_calls > 0 and int(llm_calls.get("count", 0)) >= max_llm_calls
+
     async def _answer(text: str) -> AsyncIterator[dict]:
         if emit_answer is not None:
             async for ev in emit_answer(text):
@@ -199,8 +273,42 @@ async def stream_unified(
         elif text:
             yield {"type": "report", "content": text, "source": "lead"}
 
+    async def _deliver_answer(text: str, *, streamed: bool) -> AsyncIterator[dict]:
+        """把一段模型文本交付给用户。
+
+        streamed=True 表示这段文字**本步已经流式转发过**（首步流式开关打开时）——
+        此时只补一条 report（下游/记忆依赖它），不再重复吐一遍同样的字。
+        开关默认关 → 永远走 _answer 原路径，行为逐字节不变。
+        """
+        if streamed:
+            if text:
+                yield {"type": "report", "content": text, "source": "lead"}
+            return
+        # 未流式（默认路径）→ 原样交给 _answer，空文本也照旧（保持逐字节兼容）
+        async for ev in _answer(text):
+            yield ev
+
+    def _degradation_counts() -> dict[str, int]:
+        """降级码 → 次数。区分"偶发 1 次"与"反复触发"（如配额被打满 3 次）。
+
+        注意：`degradations` 列表**原样保留**（事件契约不变，旧的消费方都在读它）；
+        这个是**额外**字段，前端只看 `degraded: bool`，加字段安全。
+        """
+        counts: dict[str, int] = {}
+        for code in degradation:
+            key = str(code)
+            counts[key] = counts.get(key, 0) + 1
+        return counts
+
     def _finish() -> dict:
-        return {"type": "done", "degraded": bool(degradation), "degradations": degradation}
+        return {
+            "type": "done",
+            "degraded": bool(degradation),
+            "degradations": degradation,
+            # P3-C：计数（向下兼容的附加字段）。运维据此区分"偶发"与"反复"，
+            # 例如 lead_agent_quota_observe=3 表示观察配额三次被打满（而不是偶尔一次）。
+            "degradation_counts": _degradation_counts(),
+        }
 
     # 画布快照：与 legacy 同一来源（请求级 CanvasStateProvider）
     canvas_layout = ""
@@ -227,7 +335,7 @@ async def stream_unified(
                 async for ev in run_worker(
                     user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                     db_session=db_session, available_datasources=available_datasources or [],
-                    llm=llm, memo=memo, memo_lock=memo_lock,
+                    llm=counted_llm, memo=memo, memo_lock=memo_lock,
                     extra_plannable_tools=extra_plannable_tools,
                     round_idx=0, degradation=degradation, trace=trace,
                 ):
@@ -302,6 +410,27 @@ async def stream_unified(
             # 取消位读不到（缓存降级等）时不能阻断主链路：宁可不取消，也不让本轮崩
             logger.debug("[lead_unified] cancel_check_failed", exc_info=True)
 
+        # ── 总预算闸（P3-C）：超了就地确定性收尾，**不抛异常** ──
+        # 检查在自增**之前**：max=2 时前两次放行、第三次被挡（与测试口径一致）。
+        if _budget_exhausted():
+            logger.warning(
+                "[lead_unified] llm_budget_exhausted calls=%d max=%d step=%d",
+                llm_calls.get("count", 0), max_llm_calls, step,
+            )
+            degradation.append(LEAD_BUDGET_DEGRADATION)
+            yield {"type": "status", "message": LEAD_BUDGET_MESSAGE}
+            finished = True
+            break
+        # 本步这一次 LLM 调用（调用前计数：被上游拒绝的调用同样消耗预算）
+        llm_calls["count"] = int(llm_calls.get("count", 0)) + 1
+
+        # ── 首步流式开关（P3-C）：默认 False —— 行为与改造前**逐字节一致** ──
+        # True 时仅第 0 步走流式（首包延迟是体验最痛的一段），后续步骤维持非流式：
+        # 中间步骤的文字不展示给用户，流式零收益还要多付分片拼接的成本。
+        stream_first_step = (
+            bool(getattr(settings, "LEAD_STREAM_FIRST_STEP", False)) and step == 0
+        )
+
         # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
         assembled = provider.for_agent_loop(user_msg, system_text=profile.system_prompt())
         messages = assembled.messages
@@ -325,11 +454,16 @@ async def stream_unified(
         tool_calls: list[dict] = []
         try:
             async for ev in llm.tool_call_round(
-                messages, tools, temperature=0.3, streaming=False,
+                # 默认 False → 与改造前完全一致；True 时仅首步流式
+                messages, tools, temperature=0.3, streaming=stream_first_step,
             ):
                 et = ev.get("type")
                 if et == "text":
-                    text_parts.append(ev.get("content") or "")
+                    chunk = ev.get("content") or ""
+                    text_parts.append(chunk)
+                    if stream_first_step and chunk:
+                        # 即时转发：首步的过渡文字不必等工具调用解析完才出现
+                        yield {"type": "text", "content": chunk}
                 elif et == "tool_call":
                     tool_calls.append(ev)
         except Exception as e:  # noqa: BLE001
@@ -337,7 +471,10 @@ async def stream_unified(
             logger.warning("[lead_unified] llm_failed: %s", e)
             degradation.append("lead_agent_llm_failed")
             if "".join(text_parts).strip():
-                async for ev in _answer("".join(text_parts)):
+                # 已流式转发过就只补 report，避免同一段字吐两遍
+                async for ev in _deliver_answer(
+                    "".join(text_parts), streamed=stream_first_step
+                ):
                     yield ev
             else:
                 yield {"type": "error", "message": "服务暂时不可用，请稍后重试。"}
@@ -348,7 +485,8 @@ async def stream_unified(
         # 模型没调任何工具：有文本就当作回答（确定性降级），否则强制收尾
         if not tool_calls:
             if model_text:
-                async for ev in _answer(model_text):
+                # 首步流式已把这段字转发过 → 只补 report（不重复吐字）
+                async for ev in _deliver_answer(model_text, streamed=stream_first_step):
                     yield ev
             else:
                 degradation.append("lead_agent_no_output")
@@ -423,7 +561,12 @@ async def stream_unified(
             # ── 终止动作：answer / ask_user / stop ──
             if cls == "terminal":
                 if name == "answer":
-                    async for ev in _answer(str(args.get("text") or model_text or "")):
+                    # 显式 text 未流式过；回落到 model_text 时那段已流式转发过 → 只补 report
+                    explicit_text = str(args.get("text") or "")
+                    async for ev in _deliver_answer(
+                        explicit_text or model_text,
+                        streamed=stream_first_step and not explicit_text,
+                    ):
                         yield ev
                 elif name == "ask_user":
                     question = str(args.get("question") or "请补充更多信息，我好帮你继续。")
@@ -529,11 +672,25 @@ async def stream_unified(
                 guidance=guidance,
             )
             worker = profile.resolve_worker(complexity, explicit_kernel(name))
+
+            # ── 预算闸（派发前）：一次派发内部会连做多轮 LLM 调用（规划/执行/报告/重写），
+            # 进派发前先看额度——超了就地收尾，避免"最后一次性烧掉剩下一半预算"。
+            if _budget_exhausted():
+                logger.warning(
+                    "[lead_unified] llm_budget_exhausted_before_dispatch calls=%d max=%d tool=%s",
+                    llm_calls.get("count", 0), max_llm_calls, name,
+                )
+                degradation.append(LEAD_BUDGET_DEGRADATION)
+                yield {"type": "status", "message": LEAD_BUDGET_MESSAGE}
+                finished = True
+                break
+
             captured: dict = {}   # 接住 RunAnalysisResult，供随后的评审阶段使用
             async for ev in run_worker(
                 user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                 db_session=db_session, available_datasources=available_datasources or [],
-                llm=llm, memo=memo, memo_lock=memo_lock,
+                # 计数代理：worker 内部的每次 LLM 调用都计入本轮总预算
+                llm=counted_llm, memo=memo, memo_lock=memo_lock,
                 extra_plannable_tools=extra_plannable_tools,
                 round_idx=step, degradation=degradation, trace=trace,
                 # 评审交给下面的"评审阶段"统一做（do_review=False），
@@ -572,7 +729,8 @@ async def stream_unified(
                 # P3：把 Lead **自己声明**的验收标准交给评审阶段核验（声明缺失则跳过）
                 _accept = args.get("acceptance")
                 outcome = await run_review_stage(
-                    result, entry=ctx.entry, user_goal=goal, llm=llm,
+                    # 评审裁量也是一次 LLM 调用 → 同样计入预算
+                    result, entry=ctx.entry, user_goal=goal, llm=counted_llm,
                     execution_summary=exec_summary, trace=trace, degradation=degradation,
                     acceptance=_accept if isinstance(_accept, dict) else None,
                 )

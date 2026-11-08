@@ -18,7 +18,12 @@ from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_canvas_service, get_current_user, get_dashboard_service
+from app.api.deps import (
+    get_canvas_service,
+    get_current_user,
+    get_dashboard_service,
+    require_editor,
+)
 from app.config import settings
 from app.core.database import get_db
 from app.models.chart_config import ChartType
@@ -232,7 +237,7 @@ async def list_canvases(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_canvas(
     body: CanvasCreateBody,
     service: CanvasService = Depends(get_canvas_service),
@@ -262,7 +267,7 @@ async def get_canvas(
     return SuccessResponse(data=CanvasResponse.model_validate(canvas).model_dump(mode="json", by_alias=True))
 
 
-@router.patch("/{canvas_id}")
+@router.patch("/{canvas_id}", dependencies=[Depends(require_editor)])
 async def update_canvas(
     canvas_id: UUID,
     body: CanvasUpdateBody,
@@ -309,7 +314,7 @@ async def update_canvas(
     return SuccessResponse(data=CanvasResponse.model_validate(canvas).model_dump(mode="json", by_alias=True))
 
 
-@router.put("/{canvas_id}/blocks")
+@router.put("/{canvas_id}/blocks", dependencies=[Depends(require_editor)])
 async def update_blocks(
     canvas_id: UUID,
     body: CanvasBlocksBody,
@@ -465,7 +470,7 @@ async def query_canvas(
     return SuccessResponse(data=result.model_dump(mode="json", by_alias=True))
 
 
-@router.post("/{canvas_id}/chart-configs", status_code=status.HTTP_201_CREATED)
+@router.post("/{canvas_id}/chart-configs", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def create_canvas_chart_config(
     canvas_id: UUID,
     body: CanvasChartConfigBody,
@@ -507,7 +512,7 @@ async def create_canvas_chart_config(
     )
 
 
-@router.delete("/{canvas_id}")
+@router.delete("/{canvas_id}", dependencies=[Depends(require_editor)])
 async def delete_canvas(
     canvas_id: UUID,
     service: CanvasService = Depends(get_canvas_service),
@@ -522,7 +527,7 @@ async def delete_canvas(
     return SuccessResponse(data={"message": "已删除"})
 
 
-@router.post("/{canvas_id}/save-as-report", status_code=status.HTTP_201_CREATED)
+@router.post("/{canvas_id}/save-as-report", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def save_canvas_as_report(
     canvas_id: UUID,
     body: SaveAsReportBody,
@@ -563,7 +568,7 @@ async def save_canvas_as_report(
     return SuccessResponse(data={"report_id": str(report.id)})
 
 
-@router.post("/{canvas_id}/pin-to-dashboard", status_code=status.HTTP_201_CREATED)
+@router.post("/{canvas_id}/pin-to-dashboard", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 async def pin_canvas_to_dashboard(
     canvas_id: UUID,
     body: PinToDashboardBody,
@@ -822,7 +827,7 @@ async def export_canvas_pdf(
     )
 
 
-@router.post("/ai-recommend")
+@router.post("/ai-recommend", dependencies=[Depends(require_editor)])
 async def ai_recommend_by_datasource(
     body: AIRecommendCanvasRequest,
     db: AsyncSession = Depends(get_db),
@@ -872,7 +877,7 @@ async def ai_recommend_by_datasource(
     return SuccessResponse(data={"suggestions": suggestions})
 
 
-@router.post("/{canvas_id}/ai-recommend")
+@router.post("/{canvas_id}/ai-recommend", dependencies=[Depends(require_editor)])
 async def canvas_ai_recommend(
     canvas_id: UUID,
     body: AIRecommendCanvasRequest,
@@ -930,7 +935,7 @@ async def canvas_ai_recommend(
     return SuccessResponse(data={"suggestions": suggestions})
 
 
-@router.post("/{canvas_id}/ai-image")
+@router.post("/{canvas_id}/ai-image", dependencies=[Depends(require_editor)])
 async def canvas_ai_image(
     canvas_id: UUID,
     body: AIImageBody,

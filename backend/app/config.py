@@ -261,6 +261,23 @@ class Settings(BaseSettings):
     # 想开就显式置 true，并确认每步有独立 session（见 docs/research/07）。
     AGENT_CONCURRENT_STEPS: bool = False
 
+    # ── 工具契约（P3：超时/错误码/参数校验） ─────────────────────────
+    # 单个工具执行的硬超时。此前只有 SQL 有超时，其余工具可能挂住整步；
+    # 超时返回结构化的 TOOL_TIMEOUT（模型可自修复），而不是让整轮卡死。
+    TOOL_TIMEOUT_SECONDS: float = 60.0
+
+    # ── Lead 循环的总预算（P3） ──────────────────────────────────────
+    # 单轮最多调用多少次 LLM（Lead 步 + 派发 + 评审合计的**硬上限**）。
+    # 0 = 不限制。子内核已有 24 次预算，Lead 层此前完全没有上限（最坏 6×(1+24)）。
+    LEAD_AGENT_MAX_LLM_CALLS: int = 20
+    # 首步是否走流式（用户先看到字，TTFT 明显下降）。默认关：中间步骤的文本只给程序消费，
+    # 开了会多一层 UI 事件；要开就显式置 true 并配评测。
+    LEAD_STREAM_FIRST_STEP: bool = False
+
+    # ── 注册开关（P3：交付时关闭自助注册） ───────────────────────────
+    # 默认 true 保持既有行为/测试；面向客户交付时置 false（改由管理员建号）。
+    ALLOW_PUBLIC_REGISTER: bool = True
+
     # ── 工具调用记录（B1） ────────────────────────────────────────────
     # off = 不记录；full = 全量记录（每轮 5-20 行，量很小，建议 full）。
     # 失败行无条件记录（不受采样影响）。

@@ -4,10 +4,14 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.core.duckdb_client import duckdb_client
 from app.services.sql_guard import sql_guard, GuardResult
+
+if TYPE_CHECKING:  # 仅类型标注，避免 agent_tools -> agents 包的循环导入
+    from pydantic import BaseModel
 
 log = logging.getLogger("lvco.agent_tools")
 
@@ -290,6 +294,12 @@ class BaseTool(ABC):
 
     # 是否允许 Planner/编排器使用（默认 False；安全工具标记为 True）
     orchestrator_safe: bool = False
+
+    # P3-A：可选入参模型（None = 不做 pydantic 校验）。
+    # 具体模型集中在 services/agents/tool_contract.py：这里不直接 import 它——
+    # app.models/agent_tools 与 agents 包存在导入环（agents/__init__ 会 import 本模块），
+    # 因此由 ToolExecutor 按工具名查 ARGS_MODELS 兜底；工具也可在此显式覆盖。
+    args_model: "type[BaseModel] | None" = None
 
     @property
     @abstractmethod

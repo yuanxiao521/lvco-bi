@@ -19,7 +19,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from app.config import settings
 from app.services.agent_tools import ToolRegistry
+from app.services.agents.tool_contract import (
+    ErrorCode,
+    error_kind_for,
+    resolve_args_model,
+    tool_error,
+    validate_tool_args,
+)
 from app.services.observability import observe_tool_call
 
 logger = logging.getLogger(__name__)
@@ -120,6 +128,20 @@ def _extract_blocked_columns(msg: str) -> list[str]:
         return []
 
 
+# P3-A：瞬时错误不该进 memo（否则一次超时会被缓存成"永远超时"）
+_TRANSIENT_CODES = frozenset({"TOOL_TIMEOUT", "TOOL_EXCEPTION", "UPSTREAM"})
+
+
+def _is_transient_result(result_str: str) -> bool:
+    try:
+        parsed = json.loads(result_str)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return str(parsed.get("code") or "") in _TRANSIENT_CODES
+
+
 async def _noop_emit(_ev: dict) -> None:
     pass
 
@@ -203,23 +225,46 @@ class ToolExecutor:
         # 防止 LLM 越权调用当前入口无接收方的工具（如画布下调 render_chart）。
         # 返回 error 结果让 LLM 自纠错（非 fatal，不中断整个步骤）。
         if self.allowed_tools is not None and tname not in self.allowed_tools:
-            result = json.dumps(
-                {"error": f"工具 '{tname}' 不在当前入口允许范围内，请改用允许的工具"},
-                ensure_ascii=False,
+            # P3-A：结构化错误（仍保留 "error" 键，向后兼容）
+            result = tool_error(
+                ErrorCode.WHITELIST,
+                f"工具 '{tname}' 不在当前入口允许范围内，请改用允许的工具",
+                retryable=False,
             )
             await self.emit({"type": "tool_result", "name": tname, "result": result})
             self._record_agent_call(
-                tc, targs, tname, result, ok=False, error_kind="whitelist", started=started
+                tc, targs, tname, result, ok=False,
+                error_kind=error_kind_for(ErrorCode.WHITELIST), started=started,
             )
             return ToolCallResult(name=tname, args=targs, result=result, is_error=True, fatal=False, tc=tc)
 
         tool = ToolRegistry.get(tname)
         if tool is None:
-            result = json.dumps({"error": f"未知工具: {tname}"}, ensure_ascii=False)
+            result = tool_error(
+                ErrorCode.UNKNOWN_TOOL, f"未知工具: {tname}", retryable=False
+            )
             self._record_agent_call(
-                tc, targs, tname, result, ok=False, error_kind="unknown_tool", started=started
+                tc, targs, tname, result, ok=False,
+                error_kind=error_kind_for(ErrorCode.UNKNOWN_TOOL), started=started,
             )
             return ToolCallResult(name=tname, args=targs, result=result, is_error=True, fatal=True, tc=tc)
+
+        # P3-A：入参校验（高频工具）。失败**不执行工具**，直接回 INVALID_ARGS +
+        # 字段路径，让模型按 hint 修正后重试；避免"跑了一半才炸"或静默 TypeError。
+        args_model = resolve_args_model(tool, tname)
+        if args_model is not None:
+            invalid_args = validate_tool_args(args_model, targs)
+            if invalid_args is not None:
+                await self.emit({"type": "tool_result", "name": tname, "result": invalid_args})
+                self._record_agent_call(
+                    tc, targs, tname, invalid_args, ok=False,
+                    error_kind=error_kind_for(ErrorCode.INVALID_ARGS), started=started,
+                )
+                logger.info("[tool_executor] invalid_args tool=%s", tname)
+                return ToolCallResult(
+                    name=tname, args=targs, result=invalid_args,
+                    is_error=True, fatal=False, tc=tc,
+                )
 
         if tname in self.idempotent_tools and self.memo is not None:
             result, memo_hit = await self._exec_with_memo(tname, targs, tool, cache_errors=True)
@@ -281,6 +326,9 @@ class ToolExecutor:
             if isinstance(parsed, dict) and parsed.get("error"):
                 err_msg = str(parsed.get("error"))
                 if not error_kind:
+                    # P3-A：结构化错误的 code 优先（与 tool_contract 的映射对齐）
+                    error_kind = error_kind_for(parsed.get("code"))
+                if not error_kind:
                     error_kind = _classify_error(err_msg)
                 if error_kind == "sensitive_column":
                     blocked = _extract_blocked_columns(err_msg)
@@ -320,7 +368,7 @@ class ToolExecutor:
             if mkey in self.memo:
                 return self.memo[mkey], True
             result = await self._execute_once(tool, tname, targs)
-            if cache_errors or not is_error_result(result):
+            if (cache_errors or not is_error_result(result)) and not _is_transient_result(result):
                 self.memo[mkey] = result
             return result, False
 
@@ -330,18 +378,43 @@ class ToolExecutor:
         return await _run()
 
     async def _execute_once(self, tool, tname: str, targs: dict) -> str:
-        """执行单次工具调用（观测 span + 异常兜底），返回结果字符串。"""
+        """执行单次工具调用（观测 span + 统一超时 + 异常兜底），返回结果字符串。
+
+        P3-A：最外层统一超时（settings.TOOL_TIMEOUT_SECONDS）。工具内部可能还有
+        自己的超时（如 SQL 查询超时），双层并存时**外层兜底**：内层先触发会返回
+        它自己的错误；内层没触发（挂死/慢工具）由外层 wait_for 取消并返回 TOOL_TIMEOUT。
+        """
         targs = self._inject_context(tool, targs)
         span_obj = None
+        timeout = float(getattr(settings, "TOOL_TIMEOUT_SECONDS", 60.0) or 0)
+
+        async def _call() -> str:
+            return await tool.execute(
+                user_id=self.user_id, db_session=self.db_session, **targs
+            )
+
+        async def _run() -> str:
+            if timeout > 0:
+                return await asyncio.wait_for(_call(), timeout=timeout)
+            return await _call()
+
         try:
             if self.trace is not None:
                 with observe_tool_call(self.trace, tname, args=targs) as span:
                     span_obj = span
-                    result_str = await tool.execute(user_id=self.user_id, db_session=self.db_session, **targs)
+                    result_str = await _run()
             else:
-                result_str = await tool.execute(user_id=self.user_id, db_session=self.db_session, **targs)
+                result_str = await _run()
+        except asyncio.TimeoutError:
+            logger.warning("[tool_executor] tool_timeout tool=%s timeout=%ss", tname, timeout)
+            result_str = tool_error(
+                ErrorCode.TIMEOUT,
+                "工具执行超时",
+                retryable=True,
+                hint="缩小查询范围或加筛选条件后重试",
+            )
         except Exception as e:
-            result_str = json.dumps({"error": str(e)}, ensure_ascii=False)
+            result_str = tool_error(ErrorCode.TOOL_EXCEPTION, str(e))
         if span_obj is not None:
             try:
                 parsed = json.loads(result_str)

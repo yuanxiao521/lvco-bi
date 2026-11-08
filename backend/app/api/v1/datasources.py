@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_datasource_service
+from app.api.deps import get_current_user, get_datasource_service, require_editor
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.datasource import DatasourceStatus, SourceType
@@ -173,7 +173,7 @@ async def profile_datasource_endpoint(
     return SuccessResponse(data=payload)
 
 
-@router.post("/upload", status_code=status.HTTP_201_CREATED)
+@router.post("/upload", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 @limiter.limit("10/minute")
 async def upload_datasource(
     request: Request,
@@ -192,7 +192,7 @@ async def upload_datasource(
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
 
 
-@router.post("/connect", status_code=status.HTTP_201_CREATED)
+@router.post("/connect", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_editor)])
 @limiter.limit("20/minute")
 async def connect_datasource(
     request: Request,
@@ -241,7 +241,7 @@ async def connect_datasource(
     return SuccessResponse(data=payload.model_dump(mode="json", by_alias=True))
 
 
-@router.post("/{datasource_id}/disconnect")
+@router.post("/{datasource_id}/disconnect", dependencies=[Depends(require_editor)])
 async def disconnect_datasource(
     datasource_id: UUID,
     service: DataSourceService = Depends(get_datasource_service),
@@ -256,7 +256,7 @@ async def disconnect_datasource(
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
 
 
-@router.post("/{datasource_id}/sync")
+@router.post("/{datasource_id}/sync", dependencies=[Depends(require_editor)])
 async def sync_datasource(
     datasource_id: UUID,
     service: DataSourceService = Depends(get_datasource_service),
@@ -271,7 +271,7 @@ async def sync_datasource(
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
 
 
-@router.patch("/{datasource_id}/schema")
+@router.patch("/{datasource_id}/schema", dependencies=[Depends(require_editor)])
 async def update_schema(
     datasource_id: UUID,
     body: DataSourceUpdate,
@@ -287,7 +287,7 @@ async def update_schema(
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
 
 
-@router.delete("/{datasource_id}")
+@router.delete("/{datasource_id}", dependencies=[Depends(require_editor)])
 async def delete_datasource(
     datasource_id: UUID,
     service: DataSourceService = Depends(get_datasource_service),
@@ -394,7 +394,7 @@ async def datasource_health(
     )
 
 
-@router.post("/{datasource_id}/ai-clean")
+@router.post("/{datasource_id}/ai-clean", dependencies=[Depends(require_editor)])
 async def ai_clean_datasource(
     datasource_id: UUID,
     check_types: str | None = Query(default=None, description="逗号分隔的检测类别，如 missing,outlier,duplicate。为空则检测全部"),
@@ -549,7 +549,7 @@ async def _do_ai_clean(
     return SuccessResponse(data={"summary": summary, "issues": issues})
 
 
-@router.post("/test-connection")
+@router.post("/test-connection", dependencies=[Depends(require_editor)])
 @limiter.limit("20/minute")
 async def test_connection(
     request: Request,

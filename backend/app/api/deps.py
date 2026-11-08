@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token, token_version_of
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.repositories.ai_session_repository import (
     SQLAlchemyAIMessageRepository,
     SQLAlchemyAISessionRepository,
@@ -112,6 +112,32 @@ async def get_current_user(
     # P0 止血：仅"令牌有效 + 用户存在"不够——还要看账号是否被停用、令牌是否已被吊销。
     assert_token_state(payload, user)
     return user
+
+
+def require_editor(current_user: User = Depends(get_current_user)) -> User:
+    """写操作闸门：**viewer 只读**（P3-B）。
+
+    背景：改之前 role 几乎是装饰品——它只在 permissions.py / trash.py 两处生效，
+    viewer 依然能建数据源、跑 AI、发分享链接。这里把"能不能写"抽成一个依赖，
+    挂到写端点（POST/PUT/PATCH/DELETE）。**刻意不挂 GET**：只读账号仍要能看
+    数据源、画布、仪表盘、报表，否则"只读"会退化成"不可用"。
+
+    判定：
+      - admin / editor → 放行（返回 current_user，端点需要时可复用）
+      - viewer         → 403 {"code": "FORBIDDEN", "message": "只读账号不能执行该操作"}
+      - role 缺失/未知 → 放行（模型侧 role 是 NOT NULL + 枚举，正常不会出现；
+        这里不 fail-close，避免历史脏数据把所有人都挡在门外）
+
+    注意 role 可能是枚举也可能是字符串（测试/旧数据），统一取 .value 比较。
+    """
+    role = getattr(current_user, "role", None)
+    role_value = getattr(role, "value", role)
+    if role_value == UserRole.viewer.value:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "只读账号不能执行该操作"},
+        )
+    return current_user
 
 
 # ── Repository 依赖注入 ──────────────────────────────────────────────────────
