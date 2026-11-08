@@ -21,6 +21,12 @@ from app.models.metric_lineage import MetricLineage
 from app.models.metric_usage import MetricUsage
 from app.models.metric_version import MetricVersion
 from app.repositories.unit_of_work import UnitOfWork
+from app.services.formula_guard import (
+    ALLOWED_AGG_SQL_NAMES,
+    FormulaRejected,
+    is_formula_allowed,
+    validate_formula,
+)
 from app.schemas.query import ChartQueryConfig, FilterConfig, MeasureConfig
 
 logger = logging.getLogger("lvco.metric_service")
@@ -99,121 +105,49 @@ def extract_metric_fields(formula: str) -> list[str]:
     return list(seen.keys())
 
 
-_ALLOWED_AGGS = {"SUM", "AVG", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT"}
+# 允许的聚合函数名（**兼容别名**）：旧实现用它做正则白名单；现在真正的白名单在
+# formula_guard（AST 节点级），这里保留同名集合供文档/外部引用，避免两份判定逻辑。
+_ALLOWED_AGGS = set(ALLOWED_AGG_SQL_NAMES)
+
+# 结构不支持时对外的统一文案；具体原因（哪个函数/哪种结构）只写日志，
+# 既方便排查，又不把解析细节与内部类名泄露给前端。
+_FORMULA_UNSUPPORTED_MESSAGE = (
+    "指标 formula 结构不支持：只允许聚合、四则运算、CASE WHEN、COALESCE/NULLIF、"
+    '类型转换与 metric("key") 引用；不支持子查询、窗口函数、多条语句。'
+)
 
 
 def _validate_derived_expression(expr: str) -> bool:
-    """校验派生指标表达式是否结构合法。
+    """兼容包装（旧私有名）：公式是否是结构合法的表达式。
 
-    只允许：白名单聚合调用、metric("key") 引用、带引号字段、数字，以及四则运算。
-    裸标识符/SQL 关键字（如 SELECT、FROM）不得作为独立操作数出现，
-    因此子查询类公式（如 ``(SELECT 1)``）会被拒绝。
+    旧实现是手写字符扫描（只支持"聚合 + 四则"），CASE WHEN / COALESCE / CAST 会被误拒；
+    P2 起改为 sqlglot AST 白名单（见 formula_guard），本函数只做转发——
+    **判定逻辑不允许有两份**，否则两处迟早对不上。
     """
-    _AGG_ARG = (
-        r'(?:"[^"]*")'                       # "字段名"
-        r'|(?:\*)'                            # COUNT(*)
-        r"|(?:[A-Za-z_][A-Za-z0-9_.]*)"        # 裸字段名/限定名
-        r"|(?:[0-9]+(?:\.[0-9]+)?)"            # 数字
-    )
-
-    i, n = 0, len(expr or "")
-    depth = 0
-    prev_operand = False
-
-    def skip_ws() -> None:
-        nonlocal i
-        while i < n and expr[i].isspace():
-            i += 1
-
-    skip_ws()
-    while i < n:
-        ch = expr[i]
-        if ch.isspace():
-            i += 1
-            continue
-        if ch == "(":
-            depth += 1
-            i += 1
-            prev_operand = False
-            skip_ws()
-            continue
-        if ch == ")":
-            depth -= 1
-            if depth < 0:
-                return False
-            i += 1
-            prev_operand = True
-            skip_ws()
-            continue
-        if ch in "+-*/":
-            if not prev_operand:  # 二元运算符前必须已有运算数
-                return False
-            i += 1
-            prev_operand = False
-            skip_ws()
-            continue
-        m = re.match(r"[0-9]+(?:\.[0-9]+)?", expr[i:])  # 数字
-        if m:
-            i += m.end()
-            prev_operand = True
-            skip_ws()
-            continue
-        m = re.match(r'metric\s*\(\s*[\'"][^\'"]+[\'"]\s*\)', expr[i:], re.IGNORECASE)
-        if m:
-            i += m.end()
-            prev_operand = True
-            skip_ws()
-            continue
-        m = re.match(r'([A-Za-z_][A-Za-z0-9_]*)\s*\(', expr[i:])  # 白名单聚合调用
-        if m and m.group(1).upper() in _ALLOWED_AGGS:
-            i = expr.find(")", m.end())
-            if i == -1:
-                return False
-            arg = expr[m.end():i].strip()
-            if arg.upper().startswith("DISTINCT"):
-                bits = arg.split(None, 1)
-                arg = bits[1].strip() if len(bits) == 2 else ""
-            # 聚合参数须为单个标量 token（或 DISTINCT + 该 token）
-            if not re.fullmatch(_AGG_ARG, arg):
-                return False
-            i += 1  # 跳过 ')'
-            prev_operand = True
-            skip_ws()
-            continue
-        m = re.match(r'"[^"]*"', expr[i:])  # 带引号字段
-        if m:
-            i += m.end()
-            prev_operand = True
-            skip_ws()
-            continue
-        return False  # 独立裸标识符 / 未知符号 → 拒绝（防 SELECT/FROM/子查询）
-    return depth == 0 and prev_operand
+    return is_formula_allowed(expr)
 
 
 def assert_formula_allowed(formula: str) -> None:
-    """校验 formula 只含白名单聚合或派生表达式，防注入/任意子查询。"""
-    upper = (formula or "").upper().strip()
-    if not upper:
+    """校验指标 formula 的结构与白名单；不合法抛 MetricServiceError。
+
+    - 允许：聚合、四则、CASE WHEN / IF、COALESCE / NULLIF、CAST / TRY_CAST、
+      标量函数、metric("key") 引用、{{field}} 模板占位符；
+    - 拒绝（fail-closed）：子查询/任何查询结构、窗口函数、DDL/DML、多语句、注释、未知函数。
+    """
+    if not (formula or "").strip():
         raise MetricServiceError("指标 formula 不能为空")
-    if ";" in upper or "--" in upper or "/*" in upper or "*/" in upper:
-        raise MetricServiceError("指标 formula 含不允许的片段")
-    # 允许的单一聚合形状：SUM(x) / COUNT(x) / COUNT(DISTINCT x)，
-    # 其中 x 可以是 {{模板占位}}、"内联字段"、裸标识符或 *。
-    pattern = (
-        r"^(SUM|AVG|MAX|MIN|STDDEV|MEDIAN|COUNT)"
-        r"\s*\(\s*(?:DISTINCT\s+)?("
-        r"\{\{[^{}]+\}\}"          # {{占位}}
-        r'|"[^"]*"'                # "内联字段"
-        r"|[A-Za-z_][A-Za-z0-9_]*"  # 裸标识符
-        r"|\*"                      # COUNT(*)
-        r")\s*\)\s*$"
-    )
-    # 单一聚合直接放行；否则要求是合法的派生表达式（含 metric("key") 引用）
-    if not re.match(pattern, upper, re.IGNORECASE) and not _validate_derived_expression(formula):
-        raise MetricServiceError(
-            "指标 formula 结构不支持：仅允许单一聚合（如 SUM(\"amount\")）"
-            "或派生表达式（如 metric(\"base_key\") * 1.2）"
+    try:
+        validate_formula(formula)
+    except FormulaRejected as exc:
+        logger.info(
+            "[metric_service] formula_rejected reason=%s formula=%r",
+            exc.reason,
+            (formula or "")[:200],
         )
+        err = MetricServiceError(_FORMULA_UNSUPPORTED_MESSAGE)
+        # 具体原因挂成属性，供调用方/日志使用，但不进入面向用户的文案
+        err.reason = exc.reason  # type: ignore[attr-defined]
+        raise err from exc
 
 
 async def get_metric_by_key(db: AsyncSession, key: str, user_id: UUID | None) -> MetricDefinition | None:
@@ -793,6 +727,12 @@ class MetricService:
                             target_field=field_name,
                             dataset_id=metric.datasource_id,
                         ))
+                continue
+
+            # P2：formula 白名单放开 CASE WHEN / COALESCE / CAST 之后，公式里的函数调用变多。
+            # 血缘只记录"字段被什么**聚合**"这一层：ROUND/COALESCE/CAST 这类表达式节点
+            # 不是血缘节点，记进来只会产生 transform=ROUND/COALESCE 的噪音行。
+            if transform not in _ALLOWED_AGGS:
                 continue
 
             if field_expr.upper().startswith("DISTINCT "):
