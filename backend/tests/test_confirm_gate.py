@@ -164,9 +164,12 @@ def test_confirm_request_event_shape_is_rendered_by_frontend():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
-    backend_src = (root / "app" / "services" / "agents" / "lead" / "lead_agent.py").read_text(encoding="utf-8")
+    # 事件发射点在 lead 包里（legacy 四工位删除后从 lead_agent.py 迁到 lead_agent_unified.py），
+    # 所以整包扫描：谁发的事件不重要，**事件形状**才与前端契约绑定。
+    lead_dir = root / "app" / "services" / "agents" / "lead"
+    backend_src = "\n".join(p.read_text(encoding="utf-8") for p in sorted(lead_dir.glob("*.py")))
     assert '"type": "confirm_request"' in backend_src, "后端不再发 confirm_request 事件"
-    assert re.search(r'"type": "confirm_request",\s*\n\s*"goal"', backend_src), \
+    assert re.search(r'"type": "confirm_request",\s*"goal"', backend_src), \
         "confirm_request 缺 goal 字段（前端 pendingConfirm 依赖它）"
     assert '"question"' in backend_src, "confirm_request 缺 question 字段"
 

@@ -225,12 +225,14 @@ class Settings(BaseSettings):
     # 任务态「running」超过该时长视为陈旧（worker 挂掉/任务悬死），允许清孤儿锁。
     lead_task_stale_seconds: int = 900
     # Lead 的执行形态开关（P1 单 Agent 化）。
-    #   legacy       = 四个 prompt 工位（merged + decision + answer），当前生产形态；
-    #   single_agent = 一个 system + 工具层 + 循环闸，即「单 Agent」。
+    #   single_agent = 一个 system + 工具层 + 循环闸，即「单 Agent」，**唯一目标形态**；
+    #   legacy       = 四个 prompt 工位（merged + decision + answer），**待删除的死代码**，
+    #                  仅作为「单 Agent 出问题时的临时逃生口」保留，值为 legacy 时启动会打警告。
     # 命名说明：旧值 unified 已弃用——它与 P4 的「装配统一」同词不同事，
     # 读代码的人无法判断 unified 指哪一层；保留为兼容别名（见 lead_agent_mode）。
-    # 默认 legacy：必须可回滚——双跑对拍通过后才切换默认值。
-    LEAD_AGENT_MODE: str = "legacy"
+    # 默认 single_agent：交付包不能再"因为漏配一行而跑 legacy"（见
+    # docs/SUPER_OPTIMIZATION_MVP.md §1；此前默认 legacy 是交付级事故的根因）。
+    LEAD_AGENT_MODE: str = "single_agent"
     # single_agent 模式的循环闸：单轮最多几步（观察/派发/终止动作合计，§2.3）。
     LEAD_AGENT_MAX_STEPS: int = 6
 

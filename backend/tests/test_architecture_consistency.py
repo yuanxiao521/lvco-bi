@@ -165,6 +165,16 @@ def test_unknown_entry_falls_back_without_raising():
     assert resolve_worker("nonexistent_entry", "complex").mode == WORKERS[FALLBACK_WORKER].mode
 
 
+def test_explicit_worker_overrides_table():
+    """显式指定的内核优先于「入口×复杂度」表（调用方可强制走某一内核）。
+
+    迁自已删除的 test_lead_phase5.py::test_resolve_worker_table_driven —— 那个文件
+    整体测的是 legacy 四工位，随死代码一起删除，这条断言属于共享层，搬到这里保留。
+    """
+    assert resolve_worker("chat", "complex", "react").mode == "react"
+    assert resolve_worker("canvas", "simple", "orchestrator").mode == "orchestrator"
+
+
 # ── 决策 prompt 成对分化 ─────────────────────────────────────────────
 
 

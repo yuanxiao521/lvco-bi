@@ -157,7 +157,12 @@ def test_decision_action_maps_to_legacy_enum():
 
 # ── 开关（可回滚）──────────────────────────────────────────────────────────
 
-def test_mode_defaults_to_legacy_so_p1_is_opt_in():
-    """默认必须是 legacy：P1 要能一键回滚，双跑对拍通过后才切默认。"""
-    assert Settings.model_fields["LEAD_AGENT_MODE"].default == "legacy"
+def test_mode_defaults_to_single_agent_so_delivery_is_safe():
+    """默认必须是 single_agent。
+
+    此前默认 legacy，靠未入库的 backend/.env 才切换 → 交付包在客户机跑 legacy
+    （"works on my machine" 的产品级陷阱，见 docs/SUPER_OPTIMIZATION_MVP.md §1）。
+    legacy 只作为显式逃生口保留，值由人写死，不能靠默认值落到它上面。
+    """
+    assert Settings.model_fields["LEAD_AGENT_MODE"].default == "single_agent"
     assert Settings.model_fields["LEAD_AGENT_MAX_STEPS"].default == 6

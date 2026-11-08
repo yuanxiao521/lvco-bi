@@ -153,52 +153,6 @@ def test_provider_for_decision_parts_match_digest():
     assert "history_summary" in assembled.ledger.entries
 
 
-def test_provider_for_answer_messages_match_legacy_answer_branch():
-    from app.services.agents.lead.lead_agent import LeadContext, _ANSWER_SYSTEM
-
-    summary = "【口径与规则】含税"
-    turns = _turns(4)
-    ctx = LeadContext(user_id="u1", session_id="s1", entry="canvas",
-                      history_summary=summary, metrics_ctx="sales_amount｜销售额")
-    for t in turns:
-        ctx.add_turn(t["role"], t["content"])
-    layout = "画布当前共有 2 个块：图表 1 个、文本 1 个。"
-
-    # legacy：_answer_branch 的拼装顺序（system → 记忆 → 指标 → 画布 → recent_turns → user）
-    legacy = [{"role": "system", "content": _ANSWER_SYSTEM}]
-    mem = summary.strip()
-    if mem:
-        legacy.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
-    if ctx.metrics_ctx.strip():
-        legacy.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
-    if layout.strip():
-        legacy.append({"role": "assistant", "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{layout}"})
-    for t in ctx.recent_turns(max_turns=12):
-        legacy.append({"role": t["role"], "content": t["content"]})
-    legacy.append({"role": "user", "content": "画布上有什么"})
-
-    provider = TurnContextProvider.for_turn(TurnInputs(
-        user_id="u1", session_id="s1", entry="canvas",
-        turns=list(ctx.turns), history_summary=summary,
-        metrics_ctx=ctx.metrics_ctx, canvas_layout=layout,
-    ))
-    assembled = provider.for_answer("画布上有什么", system_text=_ANSWER_SYSTEM)
-    assert assembled.messages == legacy
-
-
-def test_provider_answer_empty_blocks_produce_minimal_messages():
-    from app.services.agents.lead.lead_agent import _ANSWER_SYSTEM
-
-    provider = TurnContextProvider.for_turn(TurnInputs(user_id="u1", entry="chat"))
-    assembled = provider.for_answer("你好", system_text=_ANSWER_SYSTEM)
-    assert assembled.messages == [
-        {"role": "system", "content": _ANSWER_SYSTEM},
-        {"role": "user", "content": "你好"},
-    ]
-    # 空画布在回答分支不注入占位（legacy _answer_branch 语义：layout 为空直接跳过）
-    assert all("画布布局" not in str(m.get("content")) for m in assembled.messages)
-
-
 def test_assembled_history_summary_reads_correct_key():
     """回归：Assembled.history_summary() 此前读错 key（window），永远返回空串。"""
     provider = TurnContextProvider.for_turn(TurnInputs(
@@ -208,30 +162,6 @@ def test_assembled_history_summary_reads_correct_key():
     assembled = provider.for_decision("看一眼")
     assert assembled.history_summary() != ""
     assert assembled.history_summary() == assembled.parts["history_summary"]
-
-
-def test_for_answer_caps_long_memory_like_legacy():
-    """等价性：for_answer 必须复刻 legacy 的记忆上限（LEAD_CTX_MAX_CHARS//3）。
-
-    legacy（lead_agent._answer_branch）对超长摘要截到 4000//3=1333 字 + "…"，
-    缺了这一步，长摘要场景新路径会比 legacy 多注入上千字。
-    """
-    from app.services.agents.lead.lead_agent import LeadContext, _ANSWER_SYSTEM
-
-    long_mem = "记" * 3000
-    ctx = LeadContext(user_id="u1", session_id="s1", history_summary=long_mem)
-    provider = TurnContextProvider.for_turn(TurnInputs(
-        user_id="u1", session_id="s1", entry="chat",
-        turns=list(ctx.turns), history_summary=long_mem,
-    ))
-    assembled = provider.for_answer("你好", system_text=_ANSWER_SYSTEM)
-
-    mem_cap = max(200, 4000 // 3)
-    mem_msg = [m for m in assembled.messages if m.get("content", "").startswith("【历史记忆】")]
-    assert len(mem_msg) == 1
-    content = mem_msg[0]["content"]
-    assert content == f"【历史记忆】{'记' * mem_cap}…"      # 与 legacy 截断逐字节一致
-    assert "memory_capped_for_answer" in assembled.ledger.degraded
 
 
 def test_for_answer_window_tokens_are_counted():

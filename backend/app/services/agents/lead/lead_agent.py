@@ -19,30 +19,10 @@ from typing import AsyncIterator
 
 from app.config import settings
 from app.services.context_utils import estimate_tokens
-from app.services.agents.lead.lead_decider import (
-    ActionType,
-    Decision,
-    MergedOutcome,
-    decide_action,
-    decide_action_merged,
-)
-from app.services.agents.lead.lead_dispatch import run_worker
-from app.services.agents.lead.lead_intent import IntentResult, IntentType
-from app.services.agents.lead.lead_worker import resolve_worker
-from app.services.lead_session_state import lead_session_state, read_phase
-from app.services.agents.lead.lead_tools import _load_available_datasources
-from app.services.context.sources.state import CanvasSource, DatasourceSource
-from app.services.context.types import BlockKind
+from app.services.agents.lead.lead_decider import ActionType, Decision
+from app.services.lead_session_state import lead_session_state
 
 logger = logging.getLogger("lvco.lead.agent")
-
-_ANSWER_SYSTEM = (
-    "你是 LvcoBI 的数据智能助手。用简洁、专业的中文回答用户问题。"
-    "如果问题与数据/分析相关但缺少必要信息（数据源、指标、时间范围），"
-    "请礼貌地说明需要哪些信息，并给出下一步建议。不要编造数据。"
-    "回答中涉及业务指标（销售额/订单量/客单价等，见上下文中的受治理指标清单）"
-    "时必须引用清单里的指标 key 与名称，不要把数据源裸字段（如 total_amount）当作指标名。"
-)
 
 _MEMORY_MERGE_TEMPLATE = (
     "把【已有长期记忆】与【新增对话】合并成一份**结构化长期记忆**，分四节输出，"
@@ -305,18 +285,6 @@ def _is_affirmative(msg: str) -> bool:
     return any(a in s for a in ("确认", "确定", "是的", "对的", "好", "可以", "嗯", "ok", "yes"))
 
 
-def _guard_stop_outcome(guard_text: str) -> MergedOutcome:
-    """确认取消 / 过期的确定性收尾：合成 STOP，主管循环第一轮即收敛（answer 文本由 STOP 分支吐出）。"""
-    return MergedOutcome(
-        intent=IntentResult(
-            intent=IntentType.CHAT, confidence=1.0, needs_plan=False, degraded=False,
-        ),
-        decision=Decision(
-            action=ActionType.STOP, direct_text=guard_text, reason="confirm_guard",
-        ),
-    )
-
-
 @dataclass
 class LeadContext:
     """主导 Agent 的会话上下文（短期活记忆 + 长期摘要 + 汇报累积）。"""
@@ -397,31 +365,18 @@ _MODE_ALIASES: dict[str, str] = {"unified": "single_agent"}
 
 
 def lead_agent_mode() -> str:
-    """执行形态开关：legacy（默认，四个 prompt 工位）| single_agent（单 Agent 循环）。
+    """执行形态开关：single_agent（默认，唯一目标形态）| legacy（待删除的逃生口）。
 
-    非法值一律当 legacy——配置写错时**退回到已验证的路径**，而不是进一条没人跑过的新路。
+    默认值与兜底值都改成 single_agent：
+      · 此前默认 legacy，靠**未入库的** backend/.env 才切成 single_agent → 交付包会静默
+        跑 legacy（docs/SUPER_OPTIMIZATION_MVP.md §1）；
+      · 配置写错（非法值）现在也走 single_agent：单 Agent 是唯一还在维护、且被评测覆盖的
+        路径，「退回已验证的路径」这句话在 legacy 上已经不成立。
     """
-    raw = str(getattr(settings, "LEAD_AGENT_MODE", "legacy") or "legacy").strip().lower()
+    raw = str(getattr(settings, "LEAD_AGENT_MODE", "single_agent") or "single_agent").strip().lower()
     if raw in _MODE_ALIASES:
         return _MODE_ALIASES[raw]
-    return raw if raw in ("legacy", "single_agent") else "legacy"
-
-
-def _provider_context_blocks(assembled) -> tuple[str, str, str, str]:
-    """P4 装配统一：从 provider 的装配结果取出决策路径要的四块。
-
-    顺序必须与 `lead_decider._build_context_blocks` 的返回一致：
-    (数据源, 画布, 子任务评估, 已完成摘要)。两边用同一批渲染函数，故逐字节等价。
-    """
-    from app.services.context.types import BlockKind
-
-    parts = getattr(assembled, "parts", {}) or {}
-    return (
-        parts.get(BlockKind.DATASOURCES.value, ""),
-        parts.get(BlockKind.CANVAS.value, ""),
-        parts.get(BlockKind.ASSESSMENT.value, ""),
-        parts.get(BlockKind.SUBTASK.value, ""),
-    )
+    return raw if raw in ("legacy", "single_agent") else "single_agent"
 
 
 class LeadAgent:
@@ -435,19 +390,6 @@ class LeadAgent:
         self._memo: dict = {}
         self._memo_lock = asyncio.Lock()
 
-    def _log_ctx_ledger(self, assembled, label: str, trace=None) -> None:
-        """上下文装配台账落 trace + 本地日志（Langfuse 未启用时也有本地记录）。
-
-        回答"这个 prompt 为什么这么大"：每个块的 token 占用 / 丢了谁 / 为什么降级。
-        """
-        try:
-            ledger = assembled.ledger
-            logger.info("[ctx_ledger] %s %s", label, ledger.summary())
-            if trace is not None:
-                span = trace.span(f"context_assembly_{label}", span_type="span")
-                span.update(metadata=ledger.as_dict())
-        except Exception:  # noqa: BLE001
-            logger.debug("[ctx_ledger] trace span failed", exc_info=True)
 
     # ── 对外主入口：异步事件流 ──
     async def stream(
@@ -491,226 +433,11 @@ class LeadAgent:
                 trace_cm = None
 
         try:
-            # ── P1：single_agent 模式（一个 system + 工具循环）──────────────────
-            # 默认 legacy → 本分支不进，行为零变化；切换由 LEAD_AGENT_MODE 控制，
-            # 出问题改回 legacy 即可回滚（双跑对拍通过前不动默认值）。
-            if lead_agent_mode() == "single_agent":
-                async for ev in self._stream_unified(
-                    user_msg, ctx=ctx, db_session=db_session, trace=trace
-                ):
-                    yield ev
-                return
-
-            # ── 0.5) 请求级上下文门面（阶段 6）：一次构造全轮复用，装配产台账落 trace。
-            # P0 语义：parts["history_summary"] 与 ctx.digest() 逐字节等价（测试锁定），
-            # 决策 prompt 的实际内容不变——本步只增加"每块 token 台账"这一可观测产物。
-            from app.services.context.provider import TurnContextProvider, TurnInputs
-
-            ctx_provider = TurnContextProvider.for_turn(TurnInputs(
-                user_id=str(ctx.user_id),
-                session_id=ctx.session_id,
-                entry=ctx.entry,
-                turns=list(ctx.turns),
-                history_summary=ctx.history_summary,
-                subtask_summaries=ctx.turn_summaries,
-                metrics_ctx=ctx.metrics_ctx,
-                artifact_note=ctx.extra_context,
-            ))
-
-            # ── 1) 首轮合并调用：意图 + 决策 一次 LLM 请求（省一次调用，语义同源）──
-            available_datasources = await _load_available_datasources(
-                db_session, str(ctx.user_id), ctx.datasource_id,
-                inject_fields_unselected=(ctx.entry == "canvas"),
-            )
-            # 画布感知（对 Supervisor）：读库中已落盘的画布布局，注入决策 prompt，
-            # 让 Lead 知道"画布上现已落成什么图表/文本、布局如何"（完成的真实效果）。
-            # 走请求级 provider（带缓存）：同一轮多处消费不会重复读库。
-            canvas_layout = await ctx.canvas_state.layout() if ctx.canvas_state else ""
-            # ── 0) 确认守卫（HITL gate）：前端确认卡片的显式信号优先，文本"确认"兜底。
-            # 命中即短路 merged LLM 调用（绕开超时降级风险）；恢复走与正常派发
-            # 完全相同的执行/评审/收尾路径——只是跳过了"重新理解意图"这一步。
-            # 状态观测：守卫 pop 槽之前读（pop 后 AWAITING_CONFIRM 就变 IDLE 了）
-            try:
-                logger.info("[lead] phase=%s entry=%s", read_phase(ctx.session_id).value, ctx.entry)
-            except Exception:  # noqa: BLE001
-                pass
-            _guard = await self._confirm_guard(ctx, user_msg)
-            if _guard is None:
-                # 决策还需要两个请求级块：数据源清单与画布快照（本分支刚加载完）
-                ctx_provider._sources[BlockKind.DATASOURCES] = DatasourceSource(available_datasources)
-                ctx_provider._sources[BlockKind.CANVAS] = CanvasSource(canvas_layout)
-                assembled = ctx_provider.for_decision(user_msg)
-                self._log_ctx_ledger(assembled, "decision_r0", trace=trace)
-                merged = await decide_action_merged(
-                    user_msg,
-                    entry=ctx.entry,
-                    history_summary=assembled.parts["history_summary"],
-                    datasources=available_datasources,
-                    subtask_summaries=ctx.turn_summaries,
-                    canvas_layout=canvas_layout,
-                    llm=self.llm,
-                    timeout=settings.LEAD_DECISION_TIMEOUT,
-                    degradation=degradation,
-                    trace=trace,
-                    # P4：四块交给 provider 装配（渲染函数同源，逐字节等价）
-                    context_blocks=_provider_context_blocks(assembled),
-                )
-            elif _guard[0] == "resume":
-                merged = MergedOutcome(
-                    intent=IntentResult(
-                        intent=IntentType.FOLLOWUP, confidence=1.0,
-                        needs_plan=False, degraded=False,
-                    ),
-                    decision=_guard[1],
-                )
-            else:
-                # cancel / 确认过期：确定性文本收尾（合成 STOP，主管循环第一轮即收敛）
-                merged = _guard_stop_outcome(_guard[1])
-            intent = merged.intent
-            ctx.add_turn("user", user_msg)
-            yield {
-                "type": "intent",
-                "intent": intent.intent.value,
-                "confidence": intent.confidence,
-                "needs_plan": intent.needs_plan,
-                "degraded": intent.degraded,
-            }
-
-            # ── 2) Supervisor 循环：第 0 轮复用合并决策，后续轮次独立决策，直到 stop / 轮次上限 ──
-            # 默认值必须与 config.LEAD_MAX_SUPERVISOR_ROUNDS 一致（3）——写成 4 的话，
-            # 一旦有人删掉那条配置，行为会从"3 轮上限"悄悄变成"4 轮上限"。
-            max_rounds = getattr(settings, "LEAD_MAX_SUPERVISOR_ROUNDS", 3)
-            stopped = False        # 是否经决策器 STOP 收敛
-            had_analysis = False   # 本轮回是否已派发过分析（用于轮次耗尽提示）
-            prev_action: str | None = None  # 上一轮动作（决策输入，prompt 据此硬化 stop）
-            for rnd in range(max_rounds):
-                if rnd == 0:
-                    decision = merged.decision
-                else:
-                    # 每轮决策前刷新画布快照：上一轮子任务落块后（前端已写库），DB 里的画布
-                    # 已变化 → force=True 跳过缓存重读
-                    if ctx.canvas_state is not None:
-                        canvas_layout = await ctx.canvas_state.layout(force=True) or canvas_layout
-                    ctx_provider.refresh_canvas(canvas_layout)
-                    decision_assembled = ctx_provider.for_decision(user_msg)
-                    self._log_ctx_ledger(decision_assembled, f"decision_r{rnd}", trace=trace)
-                    decision = await decide_action(
-                        user_msg,
-                        intent,
-                        history_summary=decision_assembled.parts["history_summary"],
-                        datasources=available_datasources,
-                        subtask_summaries=ctx.turn_summaries,
-                        canvas_layout=canvas_layout,
-                        prev_action=prev_action,
-                        llm=self.llm,
-                        timeout=settings.LEAD_DECISION_TIMEOUT,
-                        degradation=degradation,
-                        trace=trace,
-                        # P4：四块交给 provider 装配（每轮都重新装配，快照保持最新）
-                        context_blocks=_provider_context_blocks(decision_assembled),
-                    )
-                prev_action = decision.action.value
-                yield {
-                    "type": "decision",
-                    "round": rnd,
-                    "action": decision.action.value,
-                    "tool": decision.tool_name,
-                    "reason": decision.reason,
-                    "degraded": decision.degraded,
-                }
-
-                # 反问：输出反问后本轮回结束，等用户下一轮消息带回目标。
-                # 不能直接 return：必须走下方统一收尾（_maybe_final_summary / 记忆回流 / done），
-                # 否则前端收不到 done 事件，流式状态永远停在"执行中"。
-                if decision.action == ActionType.ASK_USER:
-                    # 挂起本轮待确认目标（Redis 槽，跨请求存活，TTL 与会话锁对齐）；
-                    # 封闭确认（ask_kind=confirm）额外发 confirm_request 事件，
-                    # 前端渲染确认卡片——用户点按钮产生显式 ui_action，下一请求守卫直接恢复。
-                    lead_session_state.set_pending(ctx.session_id, str(user_msg or ""))
-                    async for ev in self._emit_answer(decision.direct_text or "请补充更多信息，我好帮你继续。"):
-                        yield ev
-                    if getattr(decision, "ask_kind", "clarify") == "confirm":
-                        yield {
-                            "type": "confirm_request",
-                            "goal": str(user_msg or ""),
-                            "question": decision.direct_text or "",
-                        }
-                    break
-                # 主管收尾
-                if decision.action == ActionType.STOP:
-                    stopped = True
-                    # 守卫的取消/过期收尾经由此处输出确定性话术（正常 STOP 的 direct_text 为空，不受影响）
-                    if decision.direct_text:
-                        async for ev in self._emit_answer(decision.direct_text):
-                            yield ev
-                    break
-                # 降级防御：首轮降级按原兜底行为执行一次；非首轮降级意味着 LLM 已不可用，
-                # 直接收尾（避免兜底路径在每轮重复触发分析，白白消耗预算）
-                if decision.degraded and rnd > 0:
-                    break
-                if decision.action == ActionType.CALL_ANALYSIS:
-                    had_analysis = True
-                    # 派发目标解析（lead_worker）。优先级：
-                    #   P2.5 的 repair_kind（**内含路由意图**：patch→react / redo→orchestrator）
-                    #   > 显式 constraints.mode > 「入口 × 复杂度」表
-                    _repair_kind = str(getattr(decision, "repair_kind", "") or "")
-                    from app.services.agents.lead.lead_agent_tools import REPAIR_KIND_KERNEL
-
-                    _explicit_kernel = REPAIR_KIND_KERNEL.get(_repair_kind)
-                    worker = resolve_worker(
-                        ctx.entry,
-                        getattr(decision, "complexity", "complex"),
-                        _explicit_kernel
-                        or ((decision.tool_args or {}).get("constraints") or {}).get("mode"),
-                    )
-                    async for ev in run_worker(
-                        user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
-                        db_session=db_session, available_datasources=available_datasources,
-                        llm=self.llm, memo=self._memo, memo_lock=self._memo_lock,
-                        extra_plannable_tools=self.extra_plannable_tools,
-                        round_idx=rnd, degradation=degradation, trace=trace,
-                    ):
-                        yield ev
-                    # 子任务执行完毕 → 继续下一轮决策（靠 subtask_summaries 注入 + prompt 硬规则
-                    # 决定 stop，避免重复执行同目标；run_analysis memo 幂等兜底）
-                else:
-                    async for ev in self._answer_branch(
-                        user_msg, decision, ctx, canvas_layout=canvas_layout, trace=trace,
-                        ctx_provider=ctx_provider,
-                    ):
-                        yield ev
-                    # 纯回答路径：答完即代码层收尾，不再开下一轮决策。
-                    # 曾经靠 prompt 硬规则（"上一轮为 answer 必须 stop"）让 LLM 自觉收敛，
-                    # 实测 LLM 连续多轮重复输出 answer（同类问题每轮 reason 不同、回答重复），
-                    # 收敛闸必须落在代码层，不依赖 LLM 自觉。
-                    break
-            else:
-                # 循环走满（无 break）仍未 stop：轮次上限耗尽 → 透明提示 + 记录可观测
-                if had_analysis:
-                    degradation.append("lead_max_rounds_reached")
-                    yield {
-                        "type": "status",
-                        "message": (
-                            f"本轮已连续派发 {max_rounds} 个子任务仍未收尾，已停止；"
-                            "如需继续请再说。"
-                        ),
-                    }
-
-            # ── 2.5) 收尾总结：多子任务完成时给一句汇总（纯文本，不额外调 LLM）──
-            async for ev in self._maybe_final_summary(ctx):
+            # 单 Agent 循环是**唯一**执行路径：legacy 的四工位（merged + decision + answer）            # 已删除（见 docs/SUPER_OPTIMIZATION_MVP.md：默认值不能是 legacy）。            # 循环本体在 lead_agent_unified.stream_unified；这里只做入口装配 + 后处理。
+            async for ev in self._stream_unified(
+                user_msg, ctx=ctx, db_session=db_session, trace=trace
+            ):
                 yield ev
-
-            # ── 3) 记忆回流（水位驱动的累积合并：旧长期记忆 + 未合并对话段 → 新累积摘要）──
-            # 事件一律交给 API 层的 _save_memory 决策落库（含失败计数、水位推进）：
-            # 只有真正产出摘要时才向用户下发 memory_saved；失败/仅推进水位的事件
-            # 由 _save_memory 消费但不外发。
-            memory_event = await self._maybe_summarize(ctx, db_session=db_session, trace=trace)
-            if memory_event:
-                if memory_event.get("summary"):
-                    yield {"type": "memory_saved", "chars": len(memory_event["summary"])}
-                yield {"type": "compressed_history", **memory_event}
-
-            yield {"type": "done", "degraded": bool(degradation), "degradations": degradation}
         finally:
             if trace_cm is not None:
                 try:
@@ -767,74 +494,6 @@ class LeadAgent:
                 yield {"type": "memory_saved", "chars": len(memory_event["summary"])}
             yield {"type": "compressed_history", **memory_event}
         yield {"type": "done", "degraded": bool(degradation), "degradations": degradation}
-
-    # ── 分支：直接回答（decision 已给文本则直出，否则轻量 LLM 生成）──
-    async def _answer_branch(
-        self,
-        user_msg: str,
-        decision: Decision,
-        ctx: LeadContext,
-        canvas_layout: str = "",
-        trace=None,
-        ctx_provider=None,
-    ) -> AsyncIterator[dict]:
-        text = (decision.direct_text or "").strip()
-        if text:
-            async for ev in self._emit_answer(text):
-                yield ev
-            return
-        if ctx_provider is not None:
-            # 阶段 6：回答路径走四件套装配（messages 与 legacy 逐字节等价）+ 台账落 trace
-            ctx_provider.refresh_canvas(canvas_layout)
-            assembled = ctx_provider.for_answer(user_msg, system_text=_ANSWER_SYSTEM)
-            self._log_ctx_ledger(assembled, "answer", trace=trace)
-            messages = assembled.messages
-        else:
-            messages = [{"role": "system", "content": _ANSWER_SYSTEM}]
-            if ctx.history_summary.strip():
-                # 长期记忆也要给上限：legacy 摘要可能上千字，原样注入会挤占追问所需的空间
-                mem = ctx.history_summary.strip()
-                mem_cap = max(200, int(getattr(settings, "LEAD_CTX_MAX_TOKENS", 2400) or 2400) * 5 // 9)
-                if len(mem) > mem_cap:
-                    mem = mem[:mem_cap] + "…"
-                messages.append({"role": "assistant", "content": f"【历史记忆】{mem}"})
-            if ctx.metrics_ctx.strip():
-                messages.append({"role": "assistant", "content": f"【受治理指标清单】\n{ctx.metrics_ctx}"})
-            if canvas_layout.strip():
-                # 画布感知也要覆盖"直接回答"分支：此前只有决策与 Worker 有画布快照，
-                # 于是"画布上有什么？""我刚让你画的是什么？"这类短问句若被路由成 answer
-                # 就会失去画布信息（能力层已有 provider，这里取用即可，不额外读库）。
-                messages.append({
-                    "role": "assistant",
-                    "content": f"【当前画布布局（已落盘，回答涉及画布时以此为准）】\n{canvas_layout}",
-                })
-            for t in ctx.recent_turns(max_turns=12):  # AB-B: 8->12
-                messages.append({"role": t["role"], "content": t["content"]})
-        messages.append({"role": "user", "content": user_msg})
-        collected: list[str] = []
-        try:
-            if trace is not None:
-                from app.services.observability import observe_llm_call
-
-                with observe_llm_call(trace, "lead_answer", messages=messages,
-                                      model=settings.openai_model):
-                    async for delta in self.llm.stream_chat(messages, temperature=0.5, max_tokens=1200):
-                        if delta:
-                            collected.append(delta)
-                            yield {"type": "text", "content": delta}
-            else:
-                async for delta in self.llm.stream_chat(messages, temperature=0.5, max_tokens=1200):
-                    if delta:
-                        collected.append(delta)
-                        yield {"type": "text", "content": delta}
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"[lead_agent] answer_llm_failed: {e}")
-            yield {"type": "text", "content": "抱歉，我暂时无法回答这个问题，请稍后重试。"}
-            return
-        answer = "".join(collected).strip()
-        if answer:
-            yield {"type": "report", "content": answer, "source": "lead"}
-            ctx.add_turn("assistant", answer)
 
     async def _confirm_guard(self, ctx: LeadContext, user_msg: str) -> tuple[str, object] | None:
         """确认守卫（HITL gate，决策之前拦截）。

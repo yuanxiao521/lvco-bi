@@ -113,35 +113,3 @@ class _CaptureStreamLLM:
         yield "好的"
 
 
-async def test_answer_branch_includes_canvas_layout():
-    """此前画布快照只注入决策与 Worker，answer 分支漏了 → 短问句失去画布信息。"""
-    from app.services.agents.lead.lead_agent import LeadAgent, LeadContext
-    from app.services.agents.lead.lead_decider import ActionType, Decision
-
-    llm = _CaptureStreamLLM()
-    agent = LeadAgent(llm=llm)
-    ctx = LeadContext(user_id="u1", session_id="s1", entry="canvas", canvas_id="c1")
-    layout = "画布当前共有 2 个块：图表 1 个、文本 1 个。\n图表清单：\n- [A1] 销售额柱状图（bar）"
-
-    events = [
-        ev async for ev in agent._answer_branch(
-            "画布上有什么", Decision(action=ActionType.ANSWER), ctx, canvas_layout=layout
-        )
-    ]
-    assert events  # 有输出
-    joined = "\n".join(str(m.get("content")) for m in llm.messages[0])
-    assert "【当前画布布局" in joined and "[A1] 销售额柱状图" in joined
-
-
-async def test_answer_branch_without_canvas_layout_has_no_note():
-    from app.services.agents.lead.lead_agent import LeadAgent, LeadContext
-    from app.services.agents.lead.lead_decider import ActionType, Decision
-
-    llm = _CaptureStreamLLM()
-    agent = LeadAgent(llm=llm)
-    ctx = LeadContext(user_id="u1", session_id="s1", entry="chat")
-    [ev async for ev in agent._answer_branch(
-        "你好", Decision(action=ActionType.ANSWER), ctx
-    )]
-    joined = "\n".join(str(m.get("content")) for m in llm.messages[0])
-    assert "【当前画布布局" not in joined          # 对话入口不注入，避免噪声
