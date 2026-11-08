@@ -230,7 +230,13 @@ def _extract_sql_aggregates(node: Any) -> list[dict]:
             continue
         agg_name = _norm_agg(type(agg).__name__)  # Sum→SUM
         col = agg.find(__import__("sqlglot").exp.Column)
-        distinct = bool(agg.args.get("distinct"))
+        # DISTINCT 检测（2026-11-08 修）：sqlglot 把 `COUNT(DISTINCT x)` 解析成
+        # `Count(this=Distinct(expressions=[Column]))` —— DISTINCT 是**子节点**，
+        # 不是 args["distinct"]。此前只看 args 导致 DISTINCT 被丢掉：
+        # V002 的 `COUNT(DISTINCT customer_id)` 被当成普通 COUNT → 与受治指标
+        # customer_count(COUNT_DISTINCT, customer_id) 指纹不匹配 → 被误判"指标口径缺失"。
+        exp = __import__("sqlglot").exp
+        distinct = bool(agg.args.get("distinct")) or (agg.find(exp.Distinct) is not None)
         if distinct or agg_name == "COUNT_DISTINCT" or (agg_name == "COUNT" and col is None):
             out.append({"agg": "COUNT_DISTINCT" if col else "COUNT",
                         "field": col.name if col else "*"})
