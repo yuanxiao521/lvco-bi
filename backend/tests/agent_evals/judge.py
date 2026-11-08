@@ -120,26 +120,36 @@ def judge_attempt(
 
     # ---- 2. SQL 准确率 ----
     agent_sql = _extract_agent_sql(attempt.events)
-    if agent_sql and sql_executor:
+    agent_rows = _extract_agent_rows(attempt.events)
+    if sql_executor:
         try:
             expected_rows = sql_executor(question["expected_sql_template"])
-            actual_rows = sql_executor(agent_sql)
             if not expected_rows:
                 # 期望模板自己都查不到数据 → 这道题的 SQL 对错无从判定（数据集/数据快照过期）
                 result.sql_scorable = False
                 result.notes.append("expected_empty(unscorable)")
             else:
-                result.sql_accuracy = _rows_match(expected_rows, actual_rows)
-                if not result.sql_accuracy:
-                    result.notes.append(
-                        f"result_set_mismatch: expected_rows={len(expected_rows)} actual_rows={len(actual_rows)}"
-                    )
+                actual_rows = None
+                if agent_sql:
+                    actual_rows = sql_executor(agent_sql)
+                elif agent_rows:
+                    # query_engine 路径没有 SQL 文本可执行，直接比它真实查出来的行
+                    actual_rows = agent_rows
+                if actual_rows is None:
+                    result.notes.append("no_agent_query_result")
+                else:
+                    result.sql_accuracy = _rows_match(expected_rows, actual_rows)
+                    if not result.sql_accuracy:
+                        result.notes.append(
+                            f"result_set_mismatch: expected_rows={len(expected_rows)} actual_rows={len(actual_rows)}"
+                        )
         except Exception as e:
             result.notes.append(f"sql_executor_error={e}")
-            result.sql_accuracy = _sql_keyword_overlap(
-                question.get("expected_sql_template", ""),
-                agent_sql,
-            ) >= 0.6
+            result.sql_accuracy = (
+                _sql_keyword_overlap(question.get("expected_sql_template", ""), agent_sql) >= 0.6
+                if agent_sql
+                else False
+            )
     elif agent_sql:
         result.sql_accuracy = _sql_keyword_overlap(
             question.get("expected_sql_template", ""),
@@ -488,6 +498,44 @@ def _extract_agent_sql(events: list[dict[str, Any]]) -> str:
             if isinstance(sql, str) and sql.strip():
                 last_sql = sql
     return last_sql
+
+
+def _extract_agent_rows(events: list[dict[str, Any]]) -> list:
+    """从最后一个**成功的** query 工具结果里取 rows。
+
+    为什么需要：`_extract_agent_sql` 只能取到 `query_sql` 的 SQL 文本，而
+    **query_engine 走的是结构化取数**（dimensions/measures），根本没有 SQL 文本可提取
+    → 这类题此前 SQL 准确率恒为 False 且没有任何 note（2026-11-08 基线里 3 题如此）。
+    这里改为直接比对「Agent 实际查出来的结果行」，两条取数路径都覆盖。
+    """
+    rows: list = []
+    for e in events:
+        if e.get("type") != "tool_result":
+            continue
+        if e.get("name") not in ("query_sql", "query_engine"):
+            continue
+        res = e.get("result")
+        parsed = res
+        if isinstance(res, str):
+            try:
+                parsed = json.loads(res)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(parsed, dict) or parsed.get("error"):
+            continue
+        raw = parsed.get("rows")
+        if not isinstance(raw, list) or not raw:
+            continue
+        normalized = []
+        for row in raw:
+            if isinstance(row, dict):
+                normalized.append(list(row.values()))
+            elif isinstance(row, (list, tuple)):
+                normalized.append(list(row))
+            else:
+                normalized.append([row])
+        rows = normalized  # 取最后一个有效结果（Agent 可能先探查再纠错）
+    return rows
 
 
 def _rows_match(expected: list, actual: list, *, tolerance: float = 1e-6) -> bool:
