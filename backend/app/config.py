@@ -248,6 +248,26 @@ class Settings(BaseSettings):
     CONTEXT_MIN_ROUNDS: int = 3
     CONTEXT_KEEP_ROUNDS: int = 3
 
+    # ── 模型窗口与降级（P1：超窗不再整轮报废） ──────────────────────────
+    # 一次请求最多能发多少 token。超过它时装配层**先裁剪再加降级**，而不是发出去被上游 400。
+    # 64000 是保守值（DeepSeek 上下文普遍 ≥64k）；按实际模型改，宁小勿大。
+    LLM_CONTEXT_WINDOW_TOKENS: int = 64000
+    # 留给模型输出的余量（窗口 × 该比例）。裁剪目标是 window - 该余量。
+    LLM_CONTEXT_OUTPUT_RESERVE_RATIO: float = 0.25
+
+    # ── 执行内核的层内并发（P0 结论：默认关） ──────────────────────────
+    # 实测 77 份计划里 62.3% 是纯链，并行上限仅 1.23×；而并发步骤共用同一个
+    # AsyncSession（SQLAlchemy 非并发安全）且写画布是 read-modify-write → 会丢块。
+    # 想开就显式置 true，并确认每步有独立 session（见 docs/research/07）。
+    AGENT_CONCURRENT_STEPS: bool = False
+
+    # ── 工具调用记录（B1） ────────────────────────────────────────────
+    # off = 不记录；full = 全量记录（每轮 5-20 行，量很小，建议 full）。
+    # 失败行无条件记录（不受采样影响）。
+    AGENT_CALL_LOG: str = "full"
+    # 明细保留天数；turn 级汇总行长期保留（1 行/轮）。
+    AGENT_CALL_RETAIN_DAYS: int = 30
+
     # 单工具结果压缩（rows 数据行保留前 N 行；insights 等建议列表不按条数截断，
     # 完整保留，仅受总 token 上限兜底）。
     # JSON ≈0.4 token/字：旧 2000 字 → 800 token / 旧 8000 字 → 3200 token。

@@ -1,3 +1,4 @@
+from app.models.agent_call import AgentCall
 from app.models.ai_memory import AIMemory
 from app.models.ai_message import AIMessage, AIMessageRole
 from app.models.ai_session import AISession
@@ -40,6 +41,7 @@ __all__ = [
     "Report",
     "ReportStatus",
     "ReportSourceType",
+    "AgentCall",
     "AISession",
     "AIMessage",
     "AIMessageRole",

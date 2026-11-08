@@ -14,6 +14,8 @@ import hashlib
 import inspect
 import json
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -81,6 +83,41 @@ def _make_memo_key(tool_name: str, args: dict) -> str:
     """生成幂等 memo key：`tool_name:sha1(args)[:8]`（与 orchestrator 失败签名同构）。"""
     h = hashlib.sha1(json.dumps(args or {}, sort_keys=True).encode("utf-8")).hexdigest()
     return f"{tool_name}:{h[:8]}"
+
+
+# ── P1-C：agent_calls 采集辅助（脱敏在 agent_trace 落库前统一做）────────────
+def _args_hash(args: dict) -> str:
+    """与 memo key 同构的 8 位参数指纹（同名工具同参数的调用可聚合）。"""
+    try:
+        raw = json.dumps(args or {}, sort_keys=True, default=str)
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:8]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _classify_error(msg: str) -> str:
+    """把工具错误的自由文本归到有限枚举（供 error_kind 聚合统计）。"""
+    text = str(msg or "")
+    low = text.lower()
+    if "敏感" in text or "sensitive" in low:
+        return "sensitive_column"
+    if "超时" in text or "timeout" in low:
+        return "query_timeout"
+    if "不在当前入口允许范围" in text:
+        return "whitelist"
+    if "未知工具" in text:
+        return "unknown_tool"
+    return "tool_error"
+
+
+def _extract_blocked_columns(msg: str) -> list[str]:
+    """从"…：col1、col2"式错误文案里抽出被拦的列名（排障线索，不整体 omit）。"""
+    try:
+        tail = str(msg).replace(":", "：").split("：")[-1]
+        parts = [part.strip(" \t\"'") for part in re.split(r"[、,，]", tail)]
+        return [part for part in parts if part][:20]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 async def _noop_emit(_ev: dict) -> None:
@@ -159,6 +196,7 @@ class ToolExecutor:
         """
         tname = tc.get("name", "")
         targs = args if args is not None else parse_tool_arguments(tc)
+        started = time.perf_counter()  # P1-C：duration_ms（工具本身可能很慢，必须计时）
         await self.emit({"type": "tool_call", "name": tname, "args": targs})
 
         # 入口工具白名单校验：受限入口（如画布助手）只允许白名单内工具，
@@ -170,11 +208,17 @@ class ToolExecutor:
                 ensure_ascii=False,
             )
             await self.emit({"type": "tool_result", "name": tname, "result": result})
+            self._record_agent_call(
+                tc, targs, tname, result, ok=False, error_kind="whitelist", started=started
+            )
             return ToolCallResult(name=tname, args=targs, result=result, is_error=True, fatal=False, tc=tc)
 
         tool = ToolRegistry.get(tname)
         if tool is None:
             result = json.dumps({"error": f"未知工具: {tname}"}, ensure_ascii=False)
+            self._record_agent_call(
+                tc, targs, tname, result, ok=False, error_kind="unknown_tool", started=started
+            )
             return ToolCallResult(name=tname, args=targs, result=result, is_error=True, fatal=True, tc=tc)
 
         if tname in self.idempotent_tools and self.memo is not None:
@@ -187,6 +231,10 @@ class ToolExecutor:
 
         is_error = is_error_result(result)
         await self.emit({"type": "tool_result", "name": tname, "result": result, "memo": memo_hit})
+        self._record_agent_call(
+            tc, targs, tname, result,
+            ok=not is_error, started=started, memo_hit=memo_hit,
+        )
 
         # render_chart 成功时转发 chart 事件（供前端直接渲染）
         if not is_error and tname == "render_chart":
@@ -201,6 +249,59 @@ class ToolExecutor:
             name=tname, args=targs, result=result,
             is_error=is_error, fatal=False, memo_hit=memo_hit, tc=tc,
         )
+
+    def _record_agent_call(
+        self,
+        tc: dict,
+        targs: dict,
+        tname: str,
+        result,
+        *,
+        ok: bool,
+        error_kind: str | None = None,
+        started: float | None = None,
+        memo_hit: bool = False,
+    ) -> None:
+        """P1-C：把一次工具调用写入 agent_calls（同步、绝不抛；未绑定 trace 自动跳过）。
+
+        白名单/未知工具两条"静默拒绝"分支也在这里留痕 —— 越权尝试是最该被审计的一类事件。
+        """
+        try:
+            from app.services import agent_trace
+
+            if not agent_trace.enabled():
+                return
+            parsed = None
+            try:
+                parsed = json.loads(result) if isinstance(result, str) else None
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            err_msg = None
+            blocked: list[str] = []
+            if isinstance(parsed, dict) and parsed.get("error"):
+                err_msg = str(parsed.get("error"))
+                if not error_kind:
+                    error_kind = _classify_error(err_msg)
+                if error_kind == "sensitive_column":
+                    blocked = _extract_blocked_columns(err_msg)
+            agent_trace.record({
+                "kind": "tool",
+                "tool_name": tname,
+                "tool_call_id": str(tc.get("id") or "") or None,
+                "args": targs,
+                "args_hash": _args_hash(targs),
+                "ok": bool(ok),
+                "error_kind": error_kind,
+                "error_msg": err_msg,
+                "result_chars": len(result) if isinstance(result, str) else None,
+                "result_preview": result[:500] if isinstance(result, str) else None,
+                "duration_ms": int((time.perf_counter() - started) * 1000) if started else None,
+                "attempt": 1,
+                "memo_hit": bool(memo_hit),
+                "blocked_columns": blocked,
+            })
+        except Exception:  # noqa: BLE001
+            logger.debug("agent_trace tool record failed", exc_info=True)
 
     async def _exec_with_memo(self, tname: str, targs: dict, tool, cache_errors: bool = True) -> tuple[str, bool]:
         """幂等/可缓存工具执行：命中 memo 直接返回缓存，否则执行并写缓存（按 key 加锁防并发重复）。

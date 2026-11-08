@@ -12,6 +12,8 @@ P0（行为零变化）：
 """
 from __future__ import annotations
 
+import json
+
 from app.config import settings
 from app.services.context.budgets import TOKENS_PER_CHAR_JSON, active_table, chars_for_tokens
 from app.services.context.compress import DEGRADE_TOOL_COMPACTED, Compressor
@@ -166,6 +168,76 @@ def compress_tool_message(content: str, max_tokens: int) -> tuple[str, bool]:
     return compacted, compacted != content
 
 
+# ── 超窗守卫（P1-A）────────────────────────────────────────────────────────
+#
+# 为什么必须有：模型窗口是**硬边界**，超了上游直接 400。而 400 在调用方只会被
+# 当成"LLM 不可用"（lead_agent_unified 的 except 一律归为"服务暂时不可用"），
+# 结果是一整轮对话报废、画布什么都不动。所以"超窗"必须在装配出口变成"裁剪"，
+# 而不是把命运交给上游返回什么。
+#
+# 裁剪顺序（先丢"用完即弃"的，再丢"越旧越不值钱"的，最后才动任务产物）：
+#   ① 最旧的 TOOL_RESULT 组（整组丢：assistant.tool_calls 与 role=tool 必须同生共死，
+#      只丢一半会破坏工具协议，下一次调用直接 400）
+#   ② WINDOW 最旧的消息（近端原文，越旧越不重要；不是"近端才重要"的倒置）
+#   ③ SUBTASK 最旧的条目（派发产物，模型真正依赖的是最新一条评估）
+#   ④ 兜底硬截断：仍超预算就按体积从大到小截断剩余文本块——保证"绝不静默超窗"
+
+TRIM_TOOL_RESULT = "context_trimmed:tool_result"
+TRIM_WINDOW = "context_trimmed:window"
+TRIM_SUBTASK = "context_trimmed:subtask"
+TRIM_HARD_CAP = "context_trimmed:hard_cap"
+OVER_BUDGET_UNSATISFIABLE = "context_over_budget_unsatisfiable"
+
+
+def input_token_budget() -> int:
+    """本次装配允许的**输入** token 上限 = 窗口 × (1 − 输出预留比)。
+
+    配置：`LLM_CONTEXT_WINDOW_TOKENS`（默认 64000）、
+    `LLM_CONTEXT_OUTPUT_RESERVE_RATIO`（默认 0.25 → 48000）。
+    两处都做防御：配置写错（0 / 负数 / 比例 >0.9）时回落到可用值，
+    绝不把预算算成 0 或负数（那会把整轮上下文裁空）。
+    """
+    window = int(getattr(settings, "LLM_CONTEXT_WINDOW_TOKENS", 64000) or 64000)
+    if window <= 0:
+        window = 64000
+    ratio = float(getattr(settings, "LLM_CONTEXT_OUTPUT_RESERVE_RATIO", 0.25) or 0.25)
+    ratio = min(max(ratio, 0.0), 0.9)
+    # round 而不是 int：1.0-0.9 在浮点里是 0.0999…，直接 int 会少 1 token
+    return max(1, int(round(window * (1.0 - ratio))))
+
+
+def message_tokens(msg: dict) -> int:
+    """一条消息的估算 token（含 tool_calls 的 JSON 体积）。
+
+    只算 content 会低估工具轮：assistant 的 tool_calls（name + arguments JSON）
+    本身也是输入 token，漏算就会"以为没超、实际超了"。
+    """
+    n = estimate_tokens(str(msg.get("content") or ""))
+    calls = msg.get("tool_calls")
+    if calls:
+        n += estimate_tokens(json.dumps(calls, ensure_ascii=False, default=str))
+    return n
+
+
+def messages_tokens(messages: list[dict]) -> int:
+    """整组 messages 的估算 token（守卫的唯一度量口径）。"""
+    return sum(message_tokens(m) for m in messages)
+
+
+def _trim_oldest_entry(text: str) -> str | None:
+    """删掉文本里**最旧**的一条 `- ` 条目；没有可删的结构时返回 None。
+
+    子任务摘要的渲染顺序是"旧→新"（sources/state.py:render_subtask_summaries
+    取 recent[-keep:]，顺序保持原样），所以第一条 `- ` 就是最旧的那条。
+    """
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.startswith("- "):
+            rest = "\n".join(lines[:i] + lines[i + 1:]).strip()
+            return rest or None
+    return None
+
+
 class Assembler:
     """按用途装配上下文（P0：委托模式，输出与旧路径逐字节等价）。"""
 
@@ -281,10 +353,14 @@ class Assembler:
         table = active_table("agent_loop")
         ledger = Ledger(purpose="agent_loop", budget_tokens=table.input_budget())
         parts: dict[str, str] = {}
-        system_text = ""
-        ctx_lines: list[str] = []
+        system_prompt = ""
+        # 状态块按"种类 + 渲染文本"存放（而不是直接拼成 ctx_lines）：
+        # 超窗守卫要能按种类单独裁剪（如 SUBTASK 丢最旧条目），拼成字符串就回不去了。
+        ctx_items: list[list] = []          # [[BlockKind, text], ...]
         window_msgs: list[dict] = []
-        tool_msgs: list[dict] = []
+        # 每个 TOOL_RESULT 块 = 一组（assistant.tool_calls + 其 role=tool 结果）。
+        # 整组增删——只丢一半会破坏工具协议配对，下一次调用直接 400。
+        tool_groups: list[list[dict]] = []
 
         for b in blocks:
             if b.is_empty:
@@ -298,6 +374,7 @@ class Assembler:
                 # 不会因为后面又来了两条结果而改变已发出去的内容——前缀缓存不吃亏。
                 tool_budget = _tool_result_budget(table)
                 added_tokens = 0
+                group: list[dict] = []
                 for m in b.messages:
                     msg = dict(m)
                     if msg.get("role") == "tool":
@@ -307,8 +384,9 @@ class Assembler:
                         if compacted:
                             msg["content"] = text
                             ledger.degrade(DEGRADE_TOOL_COMPACTED)
-                    tool_msgs.append(msg)
+                    group.append(msg)
                     added_tokens += estimate_tokens(str(msg.get("content") or ""))
+                tool_groups.append(group)
                 ledger.record(BlockKind.TOOL_RESULT.value, added_tokens)
                 continue
 
@@ -323,28 +401,197 @@ class Assembler:
                         ledger.degrade(reason)
 
             if b.kind is BlockKind.SYSTEM:
-                system_text = text
+                system_prompt = text
                 ledger.record(BlockKind.SYSTEM.value, estimate_tokens(text))
             elif b.kind is BlockKind.WINDOW:
-                window_msgs = [dict(m) for m in b.messages]
-                ledger.record(BlockKind.WINDOW.value, b.tokens())
+                window_block = b
+                budget_block = table.get(BlockKind.WINDOW)
+                window_budget = budget_block.max_tokens if budget_block else 0
+                if window_budget > 0:
+                    # P1-A：窗口块现在 compressible=True，让 compress.MessageListPolicy
+                    # 真正可达（超过 CONTEXT_KEEP 条才折叠；Source 上限 30 条 → no-op）。
+                    # 这里**不受 table.enforced 约束**：enforced 治的是"要不要按配额改渲染
+                    # 结果"（改了要配评测），"条数无界"则是缺陷兜底——与工具结果 800 token
+                    # 收口同一取舍（见上面那段注释）。
+                    w2, reason = self._compressor.compress(b, window_budget)
+                    if reason:
+                        ledger.degrade(reason)
+                    window_block = w2
+                window_msgs = [dict(m) for m in window_block.messages]
+                ledger.record(BlockKind.WINDOW.value, window_block.tokens())
             else:
-                parts[b.kind.value] = text
                 ledger.record(b.kind.value, estimate_tokens(text))
-                header = AGENT_LOOP_HEADERS.get(b.kind, b.kind.value)
-                ctx_lines.append(f"【{header}】\n{text}")
+                ctx_items.append([b.kind, text])
 
-        if ctx_lines:
-            system_text = (system_text.rstrip() + "\n\n" + "\n\n".join(ctx_lines)).strip()
-
-        messages: list[dict] = []
-        if system_text:
-            messages.append({"role": "system", "content": system_text})
-        messages.extend(t for t in window_msgs if t.get("role") in ("user", "assistant"))
-        # 本轮用户消息必须排在工具结果**之前**：工具结果是本轮用户诉求引发的动作，
-        # 顺序反了就是"先看到工具结果再看到问题"，模型会误判因果。
-        messages.append({"role": "user", "content": user_msg})
-        messages.extend(tool_msgs)
+        messages, trimmed = self._fit_to_budget(
+            system_prompt=system_prompt,
+            ctx_items=ctx_items,
+            window_msgs=window_msgs,
+            tool_groups=tool_groups,
+            user_msg=user_msg,
+            ledger=ledger,
+        )
+        # parts 只承载"进了 system 的状态块"：裁剪后重建一次，保证与 messages 一致
+        parts.update({kind.value: text for kind, text in ctx_items})
 
         ledger.record("user", estimate_tokens(user_msg))
-        return Assembled(messages=messages, ledger=ledger, parts=parts)
+        return Assembled(messages=messages, ledger=ledger, parts=parts, trimmed=trimmed)
+
+    # ── 超窗守卫：把"超窗"降级为"裁剪" ──────────────────────────────────────
+
+    def _fit_to_budget(
+        self,
+        *,
+        system_prompt: str,
+        ctx_items: list[list],
+        window_msgs: list[dict],
+        tool_groups: list[list[dict]],
+        user_msg: str,
+        ledger: Ledger,
+    ) -> tuple[list[dict], bool]:
+        """按预算裁剪这一次装配；返回 (messages, trimmed)。
+
+        未超窗 → 原样返回（逐字节不变，测试锁住）。
+        超窗 → 依次丢最旧的工具结果组 / 最旧的窗口消息 / 最旧的子任务条目；
+        仍超再按体积硬截断文本。每次裁剪都写 `context_trimmed:*` 到台账，
+        绝不"静默超窗"——即便裁到无可再裁，也留一条
+        `context_over_budget_unsatisfiable`，让上游看得见。
+
+        实现要点：**滚动记账**。裁剪只做"删除/缩短"，被删块自己的体积是确定值，
+        所以每轮只需减去增量（`total -= 被删块的 token`），不必重算整组 messages。
+        这一步很关键：守卫落在每步的装配出口上，重算全量会让"超窗"从"一次报错"
+        变成"每步多几十毫秒"，大租户上尤其明显（system 段动辄上万 token）。
+        """
+
+        def render() -> list[dict]:
+            system_text = system_prompt
+            if ctx_items:
+                lines = [
+                    f"【{AGENT_LOOP_HEADERS.get(kind, getattr(kind, 'value', kind))}】\n{text}"
+                    for kind, text in ctx_items
+                ]
+                system_text = (
+                    system_text.rstrip() + "\n\n" + "\n\n".join(lines)
+                ).strip()
+            msgs: list[dict] = []
+            if system_text:
+                msgs.append({"role": "system", "content": system_text})
+            msgs.extend(t for t in window_msgs if t.get("role") in ("user", "assistant"))
+            # 本轮用户消息必须排在工具结果**之前**：工具结果是本轮用户诉求引发的动作，
+            # 顺序反了就是"先看到工具结果再看到问题"，模型会误判因果。
+            msgs.append({"role": "user", "content": user_msg})
+            for group in tool_groups:
+                msgs.extend(group)
+            return msgs
+
+        budget = input_token_budget()
+        messages = render()
+        total = messages_tokens(messages)
+        if total <= budget:
+            return messages, False
+
+        trimmed = False
+        # ① 最旧的工具结果组（L0 热层：用完即弃）
+        while tool_groups and total > budget:
+            total -= sum(message_tokens(m) for m in tool_groups.pop(0))
+            ledger.degrade(TRIM_TOOL_RESULT)
+            trimmed = True
+        # ② 最旧的窗口消息（L1：越旧越不值钱；至少留一条，别把"最近的对话"整段抽干）
+        while len(window_msgs) > 1 and total > budget:
+            total -= message_tokens(window_msgs.pop(0))
+            ledger.degrade(TRIM_WINDOW)
+            trimmed = True
+        # ③ 子任务摘要里最旧的条目（任务产物；模型真正依赖的是最新一条评估）
+        while total > budget:
+            idx = next(
+                (i for i, (kind, _t) in enumerate(ctx_items) if kind == BlockKind.SUBTASK),
+                None,
+            )
+            if idx is None:
+                break
+            old_text = ctx_items[idx][1]
+            new_text = _trim_oldest_entry(old_text)
+            if new_text is None:
+                ctx_items.pop(idx)
+                total -= estimate_tokens(old_text)
+            else:
+                ctx_items[idx][1] = new_text
+                total -= estimate_tokens(old_text) - estimate_tokens(new_text)
+            ledger.degrade(TRIM_SUBTASK)
+            trimmed = True
+        # ④ 兜底硬截断：结构性块都丢完了仍超 → 截文本本体。
+        #    每轮至少切掉一段（有界循环 400 次），防止异常配置下死循环。
+        guard = 0
+        while total > budget and guard < 400:
+            guard += 1
+            saved = _truncate_largest_ctx_item(ctx_items)
+            if saved is None:
+                saved = _truncate_oldest_window(window_msgs)
+            if saved is None:
+                saved = _truncate_oldest_tool(tool_groups)
+            if saved is None:
+                break
+            total -= saved
+            ledger.degrade(TRIM_HARD_CAP)
+            trimmed = True
+        messages = render()
+        # 滚动记账是精确的；这里再做一次独立核对，防止"记账漂移"导致悄悄超窗
+        if messages_tokens(messages) > budget:
+            # 连 system 提示词本身都超预算：无可再裁。**必须留痕**，
+            # 不允许"看起来正常、实际超窗"。
+            ledger.degrade(OVER_BUDGET_UNSATISFIABLE)
+            trimmed = True
+        return messages, trimmed
+
+
+# ── 兜底硬截断的三个原语（确定性 + 返回"省下多少 token"）─────────────────────
+
+_MIN_KEEP_CHARS = 40   # 单块最少保留字符数：再小就只剩残句，不如整块丢掉
+
+
+def _truncate_largest_ctx_item(ctx_items: list[list]) -> int | None:
+    """截断体积最大的 system 文本块；返回省下的 token（None = 无可截）。"""
+    if not ctx_items:
+        return None
+    idx = max(range(len(ctx_items)), key=lambda i: len(ctx_items[i][1]))
+    text = ctx_items[idx][1]
+    before = estimate_tokens(text)
+    if len(text) <= _MIN_KEEP_CHARS:
+        ctx_items.pop(idx)
+        return before
+    cut = max(_MIN_KEEP_CHARS, len(text) // 2)
+    new_text = text[: len(text) - cut].rstrip() + "…"
+    ctx_items[idx][1] = new_text
+    return before - estimate_tokens(new_text)
+
+
+def _truncate_oldest_window(window_msgs: list[dict]) -> int | None:
+    """把最旧的窗口消息截半（从旧到新找第一条够长的）；返回省下的 token。"""
+    for msg in window_msgs:
+        text = str(msg.get("content") or "")
+        if len(text) <= _MIN_KEEP_CHARS:
+            continue
+        before = estimate_tokens(text)
+        msg["content"] = text[: len(text) // 2].rstrip() + "…"
+        return before - estimate_tokens(str(msg["content"]))
+    return None
+
+
+def _truncate_oldest_tool(tool_groups: list[list[dict]]) -> int | None:
+    """把最旧工具结果里的 role=tool 内容截半；返回省下的 token。
+
+    只动 content（协议字段 tool_call_id / assistant.tool_calls 一字不改），
+    与 compress_tool_message 的铁律一致。
+    """
+    for group in tool_groups:
+        for msg in group:
+            if msg.get("role") != "tool":
+                continue
+            text = str(msg.get("content") or "")
+            if len(text) <= _MIN_KEEP_CHARS:
+                continue
+            before = estimate_tokens(text)
+            msg["content"] = text[: len(text) // 2].rstrip() + "…"
+            return before - estimate_tokens(str(msg["content"]))
+    return None
+

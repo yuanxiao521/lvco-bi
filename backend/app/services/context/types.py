@@ -155,11 +155,17 @@ class Ledger:
 
 @dataclass
 class Assembled:
-    """装配产物：直接下发给 LLM 的消息列表 + 台账 + 各块最终文本。"""
+    """装配产物：直接下发给 LLM 的消息列表 + 台账 + 各块最终文本。
+
+    trimmed=True 表示**超窗守卫真的裁剪过**（P1-A）：调用方据此知道这一轮的
+    messages 不是"全部上下文"，而是按优先级丢过东西的版本（具体丢了什么见
+    ledger.degraded 的 context_trimmed:* ）。未超窗时恒为 False，行为逐字节不变。
+    """
 
     messages: list[dict[str, Any]]
     ledger: Ledger
     parts: dict[str, str] = field(default_factory=dict)
+    trimmed: bool = False
 
     def history_summary(self) -> str:
         """兼容旧调用点：决策/回答仍需要一个 `history_summary` 字符串。

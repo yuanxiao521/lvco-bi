@@ -29,6 +29,8 @@ from app.config import settings
 from app.core.cache import get_cache_repository
 from app.core.database import async_session_factory
 from app.models.ai_message import AIMessage
+from app.models.ai_session import AISession
+from app.services import agent_trace
 from app.services.chat_stream_registry import chat_registry
 from app.services.event_stream import event_stream
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError
@@ -180,6 +182,15 @@ def _chat_text_key(session_id: object) -> str:
 
 
 
+def _is_error_payload(result_str: Any) -> bool:
+    """工具结果是否为错误（用于 turn 行的 tool_failures 计数）。"""
+    try:
+        parsed = json.loads(result_str) if isinstance(result_str, str) else None
+    except Exception:  # noqa: BLE001
+        return False
+    return isinstance(parsed, dict) and bool(parsed.get("error"))
+
+
 def _write_streamed_text(session_id: object, content: str) -> None:
     """写入文本快照：刷新/断线重连时补发已产出内容（进程重启也能兜底捞回）。"""
     try:
@@ -206,6 +217,9 @@ async def run_chat_task(
     事件的文本处理（代码块剥离、状态行过滤、全量累积）从"每个连接"上移到任务级，
     保证多个订阅者看到完全一致的结果，且刷新后能拿到完整文本。
     """
+    # P1-C：本轮的 turn 汇总指标（收尾写 agent_calls 的 turn 行）
+    _turn_started = time.monotonic()
+    _turn_stats: dict[str, Any] = {"rounds": 0, "tool_calls": 0, "tool_failures": 0, "degraded": False}
     full_content = ""
     collected_charts: list[dict] = []
     seen_chart_keys: set[str] = set()
@@ -358,6 +372,21 @@ async def run_chat_task(
                 _write_streamed_text(session_id, full_content)
 
     async with async_session_factory() as db:
+        # P1-C：绑定 trace 上下文。进程内模式由 api 入口继承；队列模式下任务在
+        # worker 进程，contextvars 传不过来 —— 这里按 session_id 兜底绑定。
+        try:
+            _sess_row = await db.get(AISession, session_id) if session_id else None
+        except Exception:  # noqa: BLE001
+            _sess_row = None
+        _bind_kwargs: dict[str, Any] = {}
+        if _sess_row is not None:
+            _bind_kwargs["entry"] = getattr(_sess_row, "entry", None)
+            _bind_kwargs["user_id"] = getattr(_sess_row, "user_id", None)
+        if session_id is not None:
+            _bind_kwargs["session_id"] = session_id
+        if assistant_msg_id is not None:
+            _bind_kwargs["message_id"] = assistant_msg_id
+        agent_trace.bind(**_bind_kwargs)
         try:
             async for event in _idle_guard(event_factory(db), label="chat_task_stream"):
                 ev_type = event["type"]
@@ -374,6 +403,10 @@ async def run_chat_task(
                 elif ev_type == "tool_result":
                     tname = event.get("name") or ""
                     result_str = event.get("result", "")
+                    # P1-C：turn 行的工具计数（明细行由 ToolExecutor 钩子写，这里只汇总）
+                    _turn_stats["tool_calls"] += 1
+                    if _is_error_payload(result_str):
+                        _turn_stats["tool_failures"] += 1
                     result_narration = ""
                     try:
                         parsed = json.loads(result_str) if isinstance(result_str, str) else {}
@@ -426,6 +459,7 @@ async def run_chat_task(
                         "source": event.get("source"), "step": event.get("step"),
                     })
                 elif ev_type == "decision":
+                    _turn_stats["rounds"] += 1
                     _publish({
                         "type": "decision",
                         "round": event.get("round"), "action": event.get("action"),
@@ -455,18 +489,23 @@ async def run_chat_task(
                 elif ev_type == "memory_saved":
                     _publish({"type": "memory_saved", "chars": event.get("chars", 0)})
                 elif ev_type == "done":
+                    if event.get("degraded"):
+                        _turn_stats["degraded"] = True
                     _publish({"type": "done", "charts": collected_charts, "degraded": event.get("degraded", False)})
                 elif ev_type == "error":
                     _publish({"type": "error", "message": event["message"]})
                 elif ev_type == "compressed_history":
                     await _save_memory(db, session_id, event)
         except AINotConfiguredError:
+            _turn_stats["degraded"] = True
             _publish({"type": "error", "message": "AI 未配置"})
             _publish({"type": "done", "degraded": True})
         except AIUpstreamError as e:
+            _turn_stats["degraded"] = True
             _publish({"type": "error", "message": str(e)})
             _publish({"type": "done", "degraded": True})
         except Exception:
+            _turn_stats["degraded"] = True
             _log.exception("Agent chat task error")
             _publish({"type": "error", "message": "服务异常，请查看日志"})
             # 任务级异常必须补终止信号：前端只在 done 上解锁输入框（error 不解锁），
@@ -521,6 +560,21 @@ async def run_chat_task(
                             )
                 except Exception:
                     pass
+            # P1-C：turn 汇总行 + 冲刷明细（ToolExecutor / llm_client 钩子入队的记录）。
+            # 必须在进程退出/锁释放前 flush：队列里的记录不落库就丢了。
+            try:
+                agent_trace.record({
+                    "kind": "turn",
+                    "ok": completed,
+                    "degraded": _turn_stats["degraded"],
+                    "rounds": _turn_stats["rounds"] or None,
+                    "tool_calls": _turn_stats["tool_calls"],
+                    "tool_failures": _turn_stats["tool_failures"],
+                    "duration_ms": int((time.monotonic() - _turn_started) * 1000),
+                })
+                await agent_trace.flush(db=db)
+            except Exception:  # noqa: BLE001
+                _log.debug("agent_calls turn flush failed", exc_info=True)
             # 会话锁：任务结束才释放（连接断开不释放，让任务继续独占到跑完）
             release_session_lock(session_id, lock_token)
 

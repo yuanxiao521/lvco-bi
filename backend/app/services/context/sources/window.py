@@ -64,6 +64,10 @@ class WindowSource:
             kind=BlockKind.WINDOW,
             messages=tuple(window),
             priority=Priority.WINDOW,
-            compressible=False,   # L1 丢不起：近端原文不压缩（P0 语义）
+            # P1-A：改为可压缩——近端原文"丢不起"是优先级问题（Priority.WINDOW=90，
+            # 最后才动），不是"永不压缩"。标 True 后 compress.MessageListPolicy 才可达：
+            # 超过 CONTEXT_KEEP 条时会折叠成"已省略 N 条"的 digest（当前窗口 30 条
+            # 以内是 no-op，属于兜底而非常态）。
+            compressible=True,
             min_tokens=0,
         )

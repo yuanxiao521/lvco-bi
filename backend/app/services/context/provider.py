@@ -34,6 +34,37 @@ from app.services.context.sources.window import WindowSource
 from app.services.context.types import Assembled, Block, BlockKind, Ledger, Priority
 
 
+# ── 单 Agent 循环的块顺序（P1-A：前缀稳定）──────────────────────────────────
+#
+# 顺序原则：**恒定块在前、易变块在后**。前缀缓存的粒度是"从开头算起的公共前缀"，
+# 中间某块一变，它**后面的一切**都要重算并按未命中计费。
+# 实测（docs/research/05-perception-context-review.md §2.5）：CANVAS 排在 METRICS
+# 之前时，一次派发刷新画布就把可缓存前缀从 ~8.6k token 压到 ~2.9k。
+# 因此把派发后才变化的块（subtask/assessment/canvas）尽量后置。
+AGENT_LOOP_BLOCK_ORDER: tuple[BlockKind, ...] = (
+    BlockKind.SYSTEM,        # 系统提示词（整轮不变）
+    BlockKind.MEMORY,        # 长期记忆（请求级）
+    BlockKind.DATASOURCES,   # 数据源清单（请求级）
+    BlockKind.METRICS,       # 指标清单（请求级）
+    BlockKind.SUBTASK,       # 派发后变化（体积小）
+    BlockKind.ASSESSMENT,    # 派发后变化（体积小）
+    BlockKind.CANVAS,        # 派发后变化，且是本轮最大的可变块 → 尽量靠后
+    BlockKind.ARTIFACT,      # 上一轮产物摘要（请求级常量，通常很短）
+    BlockKind.WINDOW,        # 真消息（不拼进 system）
+    BlockKind.TOOL_RESULT,   # 真消息（append-only）
+)
+
+
+def ordered_agent_loop_blocks(blocks: list[Block]) -> list[Block]:
+    """按"恒定块在前、易变块在后"重排；同类块保持原相对顺序（sorted 稳定）。
+
+    **只给 for_agent_loop 用**：for_decision / for_answer 的输出被逐字节等价测试
+    锁住，它们的块顺序不能因为这次改动而变。未知种类排到最后。
+    """
+    order = {kind: i for i, kind in enumerate(AGENT_LOOP_BLOCK_ORDER)}
+    return sorted(blocks, key=lambda b: order.get(b.kind, len(order)))
+
+
 @dataclass
 class TurnInputs:
     """一轮对话的原始输入（P0 由调用方收集；阶段 3 起逐步收归 Source 内部）。"""
@@ -141,6 +172,9 @@ class TurnContextProvider:
                 kind=BlockKind.TOOL_RESULT, messages=tuple(msgs),
                 priority=Priority.TOOL_RESULT, compressible=False,
             ))
+        # P1-A：整个循环的**唯一**顺序决定点——恒定块在前、易变块在后，
+        # 让"派发后刷新画布"只失效它自己那一小段前缀，而不是它后面的全部。
+        blocks = ordered_agent_loop_blocks(blocks)
         return self._assembler.for_agent_loop(blocks, user_msg=user_msg)
 
     def for_answer(

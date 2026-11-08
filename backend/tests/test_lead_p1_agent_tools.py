@@ -11,6 +11,7 @@ import re
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
 
 from app.config import Settings
@@ -110,16 +111,68 @@ def test_unified_prompt_declares_ask_kind():
         assert token in LEAD_AGENT_SYSTEM, f"LEAD_AGENT_SYSTEM 未声明 {token}"
 
 
-def test_unified_prompt_loads_from_yaml_not_fallback():
-    """生效的统一 prompt 必须来自 yaml（否则改 yaml 不会生效且无人发现）。"""
-    from app.services.ai_prompts import LEAD_AGENT_SYSTEM
+# P1-D：统一 prompt 拆成三段（core + chat profile + canvas profile）。
+# 逐字节断言从"整份 == 一个 yaml"改成"**每段各自 == 自己的 yaml**"，
+# 再加一条组合层结构化断言（顺序 + 段内容 + 入口差异）。
+_PROMPT_SEGMENTS = (
+    ("lead_core", "_LEAD_CORE_FALLBACK"),
+    ("chat_profile", "_CHAT_PROFILE_FALLBACK"),
+    ("canvas_profile", "_CANVAS_PROFILE_FALLBACK"),
+)
+
+
+@pytest.mark.parametrize("name,fallback_attr", _PROMPT_SEGMENTS)
+def test_prompt_segment_matches_yaml_and_fallback(name, fallback_attr):
+    """三段提示词**各自**必须与自己的 yaml、自己的 fallback 逐字节一致。
+
+    两条都不能少：
+      · yaml ≠ 生效值 → 改 yaml 不生效（静默跑 fallback）；
+      · yaml ≠ fallback → 双份漂移（换台机器就变行为）。
+    """
+    import app.services.ai_prompts as ap
+
+    data = yaml.safe_load(
+        (BACKEND / "prompts" / f"{name}.yaml").read_text(encoding="utf-8"))
+    yaml_system = textwrap.dedent(data["system"]).strip("\n")
+    assert ap.load_prompt_segment(name) == yaml_system, (
+        f"生效的 {name} 与 prompts/{name}.yaml 不一致——yaml 可能加载失败，正在跑 fallback"
+    )
+    assert getattr(ap, fallback_attr) == yaml_system, (
+        f"prompts/{name}.yaml 与 {fallback_attr} 不一致（双份声明漂移）"
+    )
+
+
+def test_composed_prompt_is_core_then_profile():
+    """组合层结构化断言：core 在前、入口 profile 在后，两段都在、顺序固定。"""
+    from app.services.ai_prompts import (
+        CANVAS_PROFILE,
+        CHAT_PROFILE,
+        LEAD_AGENT_SYSTEM,
+        LEAD_AGENT_SYSTEM_CANVAS,
+        LEAD_CORE,
+        compose_lead_system,
+    )
+
+    assert LEAD_AGENT_SYSTEM == compose_lead_system(LEAD_CORE, CHAT_PROFILE)
+    assert LEAD_AGENT_SYSTEM_CANVAS == compose_lead_system(LEAD_CORE, CANVAS_PROFILE)
+    assert LEAD_AGENT_SYSTEM.index(LEAD_CORE[:40]) < LEAD_AGENT_SYSTEM.index(CHAT_PROFILE[:40])
+    assert (
+        LEAD_AGENT_SYSTEM_CANVAS.index(LEAD_CORE[:40])
+        < LEAD_AGENT_SYSTEM_CANVAS.index(CANVAS_PROFILE[:40])
+    )
+    # 入口差异的**可验证证据**：画布才有画布观察工具，对话页没有（死工具不进提示词）
+    assert "get_canvas_layout" in LEAD_AGENT_SYSTEM_CANVAS
+    assert "get_canvas_layout" not in LEAD_AGENT_SYSTEM
+
+
+def test_legacy_alias_prompt_matches_composed_chat():
+    """兼容别名 prompts/lead_agent_system.yaml 必须 == core + chat（旧消费者仍在读它）。"""
+    import app.services.ai_prompts as ap
 
     data = yaml.safe_load(
         (BACKEND / "prompts" / "lead_agent_system.yaml").read_text(encoding="utf-8"))
-    yaml_system = textwrap.dedent(data["system"]).strip("\n")
-    assert yaml_system == LEAD_AGENT_SYSTEM, (
-        "生效的 lead_agent_system 与 prompts/lead_agent_system.yaml 不一致——"
-        "yaml 可能加载失败，正在跑 Python fallback"
+    assert textwrap.dedent(data["system"]).strip("\n") == ap.compose_lead_system(
+        ap.LEAD_CORE, ap.CHAT_PROFILE
     )
 
 

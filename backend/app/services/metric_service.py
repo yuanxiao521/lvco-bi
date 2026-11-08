@@ -262,19 +262,86 @@ async def list_metrics_for_user(db: AsyncSession, user_id: UUID | None) -> list[
     return list(result.scalars().all())
 
 
-def format_metrics_context(metrics: list[MetricDefinition]) -> str:
-    """把指标清单格式化为 AI 可读的上下文文本。
+# ── 指标上下文的有界化（P1-A）──────────────────────────────────────────────
+# 为什么封顶必须做在**这个函数内部**：调用方是 api/v1/ai.py（本轮不归本任务改），
+# 而且有两个调用点（对话入口 + 画布入口）。只要有第二个入口，"在调用方截断"就
+# 迟早漏一个——所以上限落在"唯一渲染函数"里，签名加默认参数，调用方零改动。
+#
+# 实测依据（docs/research/05-perception-context-review.md §2.3）：300 条指标
+# = 6348 token，而这段文本每一步都会随 system 重发，且落在前缀的可缓存区之外。
+# 不封顶的后果是"租户指标越多、每步越贵"，且与推理延迟正相关。
+DEFAULT_METRICS_MAX_ITEMS = 30
+DEFAULT_METRICS_MAX_CHARS = 1200
+_METRICS_TRUNCATED_HINT = (
+    "（共 {total} 个可用指标，此处仅展示前 {shown} 个示例；"
+    "完整清单请调用 list_metrics 工具获取，不要凭印象编造 key。）"
+)
+
+
+def format_metrics_context(
+    metrics: list[MetricDefinition],
+    *,
+    max_items: int = DEFAULT_METRICS_MAX_ITEMS,
+    max_chars: int = DEFAULT_METRICS_MAX_CHARS,
+) -> str:
+    """把指标清单格式化为 AI 可读的上下文文本（**有界**）。
 
     沿用"口径优先"原则：每个指标给出 key（供工具引用）+ 名称 + 口径说明 + 聚合表达式，
     避免 LLM 直接臆造列名或口径。
+
+    有界化（P1-A）：按 max_items / max_chars 双上限截断；被截断时在末尾显式告诉
+    模型"还有更多，请用 list_metrics 取全量"——否则它会以为清单就这些，
+    或者干脆编一个 key 出来。
+    **未触发截断时输出与旧实现逐字节一致**（老测试与 eval 基线不受影响）。
+
+    Args:
+        metrics: 全部可用指标（调用方一般不截断，直接传全量）。
+        max_items: 最多展示多少条（默认 30）。
+        max_chars: 渲染文本的字符上限（默认 1200，≈1200 token 中文）。
     """
     if not metrics:
         return ""
-    lines = ["可用指标（建议优先用指标 key 而非裸字段聚合）："]
-    for m in metrics:
+    items = list(metrics)
+    total = len(items)
+    limit_items = max(1, int(max_items))
+    limit_chars = max(200, int(max_chars))
+
+    prefix = "可引用指标清单：\n"
+    head = "可用指标（建议优先用指标 key 而非裸字段聚合）："
+
+    def _line(m: MetricDefinition) -> str:
         desc = f"，{m.description}" if m.description else ""
-        lines.append(f"- key={m.key}｜{m.name}{desc}（表达式: {m.formula}）")
-    return "可引用指标清单：\n" + "\n".join(lines)
+        return f"- key={m.key}｜{m.name}{desc}（表达式: {m.formula}）"
+
+    candidates = [_line(m) for m in items[:limit_items]]
+    full = prefix + "\n".join([head, *candidates])
+    # 没有触发任何截断（条数与字数都在限内）→ 逐字节等于旧实现
+    if len(candidates) == total and len(full) <= limit_chars:
+        return full
+
+    # 会截断：**先为提示预留空间，再按剩余空间填条目**。
+    # 反过来（先填满再塞提示）会把提示切成"请调用 list_metric…"——那比没有提示更糟，
+    # 模型会把它当成正式建议，反而更容易编 key。
+    reserve = len(_METRICS_TRUNCATED_HINT.format(total=total, shown=limit_items)) + 1
+    room = max(0, limit_chars - len(prefix) - len(head) - 1 - reserve)
+    rendered: list[str] = []
+    used = 0
+    for line in candidates:
+        if used + len(line) + 1 > room:
+            break
+        rendered.append(line)
+        used += len(line) + 1
+
+    shown = len(rendered)
+    text = prefix + "\n".join([head, *rendered])
+    hint = _METRICS_TRUNCATED_HINT.format(total=total, shown=shown)
+    if len(text) + 1 + len(hint) <= limit_chars:
+        return text + "\n" + hint
+    # 极端小的 max_chars：退化成最短提示（关键指令"用 list_metrics 取全量"必须留下）
+    short = f"（共 {total} 个指标，完整清单请调用 list_metrics 工具获取。）"
+    if len(text) + 1 + len(short) <= limit_chars:
+        return text + "\n" + short
+    return (text + "\n" + short)[:limit_chars]
 
 
 def resolve_to_expression(metric: MetricDefinition, dimensions: list[str]) -> str:

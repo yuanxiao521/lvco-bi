@@ -30,12 +30,16 @@ WRITE_TOOL_NAMES: frozenset[str] = frozenset({
     "clear_canvas",
 })
 
+# 观察工具**全集**（目录）。注意这是 catalog，不是"每个入口都能看到"：
+# 具体入口可见哪些由 capability.EntryProfile.observe_tools 决定
+# （chat 不含 get_canvas_layout——对话页没有画布，该工具恒返回空串，是死工具）。
 OBSERVE_TOOL_NAMES: frozenset[str] = frozenset({
     "get_canvas_layout",
     "list_datasources",
     "list_fields",
     "list_metrics",
     "query_sample",
+    "profile_datasource",
 })
 DISPATCH_TOOL_NAMES: frozenset[str] = frozenset({"dispatch_analysis", "repair"})
 # P2.5 护栏（§6 不变量 2b）：repair 本质是"补缺口"，需要**独立上限**——
@@ -97,6 +101,14 @@ OBSERVE_SPECS: list[dict] = [
     _fn("query_sample", "取指定数据源的 5 行样本数据，用于确认数据实际形态。",
         {"datasource_id": {"type": "string", "description": "数据源 id"}},
         ["datasource_id"]),
+    _fn("profile_datasource",
+        "全表数据画像（一次扫描聚合，不是样本）：总行数、每列的 distinct 基数、空值率、"
+        "数值列的 min-max/均值、时间列的取值范围。用于判断「这张表能分析什么」——"
+        "有没有可用时间列、哪些列能当维度（基数小的适合饼图）、哪些列空值高不可作口径来源。"
+        "拿不准字段含义或数据形态时先调它，再决定派发什么。",
+        {"datasource_id": {"type": "string",
+                           "description": "数据源 id（可省略，默认当前上下文里的数据源）"}},
+        []),
 ]
 
 DISPATCH_SPECS: list[dict] = [
@@ -133,13 +145,26 @@ TERMINAL_SPECS: list[dict] = [
 ]
 
 
-def lead_tool_specs() -> list[dict]:
-    """注册给 Lead 的完整工具表（顺序：观察 → 执行 → 终止）。"""
-    return [*OBSERVE_SPECS, *DISPATCH_SPECS, *TERMINAL_SPECS]
+def lead_tool_specs(profile=None) -> list[dict]:
+    """注册给 Lead 的工具表（顺序：观察 → 执行 → 终止）。
+
+    profile=None → 返回**全目录**（向后兼容：测试与审计脚本按目录断言；
+    真正跑循环的调用方必须传画像）。
+
+    传 EntryProfile 时按 `profile.tool_names` 过滤——这是"chat 入口看不见
+    get_canvas_layout"的实现点：工具不是"注册了再拦截"，而是**根本不出现在表里**，
+    模型无从尝试（与写工具的硬边界同一思路）。
+    """
+    specs = [*OBSERVE_SPECS, *DISPATCH_SPECS, *TERMINAL_SPECS]
+    if profile is None:
+        return specs
+    allowed = profile.tool_names
+    return [s for s in specs if s["function"]["name"] in allowed]
 
 
-def registered_tool_names() -> set[str]:
-    return {s["function"]["name"] for s in lead_tool_specs()}
+def registered_tool_names(profile=None) -> set[str]:
+    """工具名集合（默认全目录；传 profile 时只含该入口可见的工具）。"""
+    return {s["function"]["name"] for s in lead_tool_specs(profile)}
 
 
 def decision_action(name: str) -> str:

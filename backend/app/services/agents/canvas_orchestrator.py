@@ -23,6 +23,7 @@ import json
 import logging
 from typing import AsyncIterator
 
+from app.config import settings
 from app.services.agent_tools import ToolRegistry
 from app.services.agents.agent_orchestrator import (
     _group_steps_by_level,
@@ -33,7 +34,12 @@ from app.services.agents.agent_orchestrator import (
 )
 from app.services.agents.graph import Graph
 from app.services.agents.planner_agent import PlannerAgent
-from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
+from app.services.agents.step_helpers import (
+    append_tool_results,
+    build_assistant_tool_message,
+    run_llm_step,
+)
+from app.services.agents.tool_executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -271,9 +277,15 @@ class CanvasOrchestrator:
                 await self._cancel_skip_steps(remaining, results, emit, "画布步骤")
                 cancelled = True
                 break
-            await asyncio.gather(
-                *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
-            )
+            # AGENT_CONCURRENT_STEPS 默认 False：层内串行（单元素层行为与并发完全一致）。
+            # 打开后回到"同层并发"，但调用方需自行承担共享 AsyncSession 的并发风险（见 07 报告 §1）。
+            if getattr(settings, "AGENT_CONCURRENT_STEPS", False):
+                await asyncio.gather(
+                    *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
+                )
+            else:
+                for step in level:
+                    await self._run_step_with_timeout(step, results, state, **shared)
         if cancelled:
             # 取消后不再补图/重排（那会把"停止"变成"又跑了两次 LLM/落块"）
             state_sink = shared.get("state_sink")
@@ -392,13 +404,17 @@ class CanvasOrchestrator:
         sid = step["step_id"]
         goal = step.get("goal") or step.get("purpose") or "执行当前步骤"
 
+        # 执行层白名单与 `_executor_tools()` 暴露的 schema **严格同一集合**（入口白名单 ∩ 落块工具集）：
+        # 此前 allowed=入口白名单（12 个）而 schema 只给 7 个，LLM 幻觉调用 query_sql 会被放行，
+        # 与模块头"执行阶段工具集再次收紧"的声明自相矛盾。现在看不见 = 也执行不了。
+        executor_allowed = self._executor_allowed_tools()
         executor = ToolExecutor(
             user_id=user_id,
             db_session=db_session,
             emit=emit,
             memo=shared.get("tool_memo"),
             memo_locks=shared.get("tool_memo_locks"),
-            allowed_tools=self.extra_plannable_tools or None,
+            allowed_tools=executor_allowed or None,
             # 画布上下文由系统绑定：get_canvas_layout 等工具缺参时自动补 canvas_id；
             # 台账随本轮运行共享，工具据此校验存在性并让快照反映本轮动作
             context={"canvas_id": str(state.get("canvas_id") or ""),
@@ -415,6 +431,7 @@ class CanvasOrchestrator:
         tool_call_count = 0
         fail_counts: dict[str, int] = {}
         consecutive_errors = 0
+        reasoning_content = ""  # DeepSeek reasoning 模式：必须随 assistant 消息回传
         no_tool_streak = 0  # goal 达成校验：连续"无工具调用直接收尾"次数
 
         while tool_call_count < _MAX_TOOL_CALLS_PER_STEP:
@@ -427,36 +444,21 @@ class CanvasOrchestrator:
                 await emit({"type": "tool_result", "name": goal[:20], "result": results[sid]})
                 logger.info("[canvas_orchestrator] 步骤 %s 用户取消，提前终止", sid)
                 return
-            # 1. LLM 决策
-            tool_calls: list[dict] = []
-            text_parts: list[str] = []
-            # LLM 决策观测：同 Lead/ReAct 口径（Langfuse generation + 真实模型名）
-            _obs_cm = None
-            _trace = shared.get("trace")
-            if _trace is not None:
-                from app.services.observability import observe_llm_call
-
-                _obs_cm = observe_llm_call(
-                    _trace, f"canvas_exec_{sid}", messages=messages,
+            # 1. LLM 决策（观测 / 事件解析 / reasoning 累积统一走 step_helpers）
+            try:
+                # streaming=False：同通用编排器——中间文字不展示，报告末尾整块 emit。
+                step_llm = await run_llm_step(
+                    self.llm, messages, all_tools,
+                    temperature=0.3, max_tokens=2000, streaming=False,
+                    trace=shared.get("trace"),
+                    span_name=f"canvas_exec_{sid}",
                     model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
                 )
-                _obs_cm.__enter__()
-            try:
-                try:
-                    # streaming=False：同通用编排器——中间文字不展示，报告末尾整块 emit。
-                    async for event in self.llm.tool_call_round(
-                        messages, all_tools, temperature=0.3, max_tokens=2000, streaming=False,
-                    ):
-                        if event["type"] == "text":
-                            text_parts.append(event.get("content", ""))
-                        elif event["type"] == "tool_call":
-                            tool_calls.append(event)
-                finally:
-                    if _obs_cm is not None:
-                        try:
-                            _obs_cm.__exit__(None, None, None)
-                        except Exception:  # noqa: BLE001
-                            logger.debug("canvas exec span exit failed", exc_info=True)
+                tool_calls = step_llm.tool_calls
+                text_parts = step_llm.text_parts
+                # reasoning 漂移修复：canvas 此前捕获 0 处、回传 0 处，多轮工具调用会降质。
+                if step_llm.reasoning_content:
+                    reasoning_content = step_llm.reasoning_content
             except Exception as e:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
@@ -489,20 +491,20 @@ class CanvasOrchestrator:
                 })
                 continue
 
-            # 2b. 并行执行工具（ToolExecutor 统一执行/观测/白名单校验/emit）
-            messages.append(build_assistant_message(tool_calls))
+            # 2b. 执行工具（ToolExecutor 统一执行/观测/白名单校验/emit）
+            messages.append(build_assistant_tool_message(tool_calls, reasoning_content))
             parallel_results = await asyncio.gather(
                 *(executor.execute_tool_call(tc) for tc in tool_calls)
             )
 
             # 3. 结果回传 + 失败签名
             any_fatal = any(pr.fatal for pr in parallel_results)
+            # canvas 保持原有行为：结果原样回写（canvas_action 含完整行数据，不走压缩）
+            append_tool_results(
+                messages, parallel_results, id_prefix="call_",
+                id_offset=tool_call_count, compact=False,
+            )
             for i, pr in enumerate(parallel_results):
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": pr.tc.get("id", f"call_{tool_call_count + i}"),
-                    "content": pr.result,
-                })
                 if pr.is_error and not pr.fatal:
                     fkey = _make_fail_key(pr.name, pr.args)
                     fails = fail_counts.get(fkey, 0) + 1
@@ -548,6 +550,16 @@ class CanvasOrchestrator:
         else:
             results[sid] = json.dumps({"error": "步骤执行失败（超过工具调用上限）"}, ensure_ascii=False)
 
+    def _executor_allowed_tools(self) -> set[str]:
+        """执行层白名单 = 入口白名单 ∩ 落块工具集（与 _executor_tools() 暴露的 schema 同一集合）。
+
+        单点定义：schema 给 LLM 看的、执行层放行的，必须是同一个集合，
+        否则"看不见但能执行"（幻觉调用 query_sql）会绕过"执行阶段只允许落块"的约束。
+        """
+        if not self.extra_plannable_tools:
+            return set()
+        return set(self.extra_plannable_tools) & _EXECUTOR_TOOL_NAMES
+
     def _executor_tools(self) -> list[dict]:
         """Executor 可见工具 schema：执行阶段只暴露纯落块工具（入口白名单 ∩ 落块工具集）。
 
@@ -573,8 +585,6 @@ class CanvasOrchestrator:
         弥补纯单步工单的衔接盲区（如叙事步骤看不到兄弟图表的存在，导致引用不全）。
         开关关闭或 plan 缺失时返回空串（不注入），保持原单步行为。
         """
-        from app.config import settings
-
         if not settings.AGENT_PLAN_INJECTION_ENABLED:
             return ""
         plan = state.get("plan") or {}

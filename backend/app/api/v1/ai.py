@@ -42,6 +42,7 @@ from app.schemas import (
     SuccessResponse,
 )
 from app.services.ai_service import AIService, VALID_CHART_TYPES
+from app.services import agent_trace
 from app.services.ai_prompts import CANVAS_SYSTEM
 from app.services.canvas_tools import CANVAS_TOOL_NAMES
 from app.services.session_lock import (
@@ -715,6 +716,9 @@ async def data_chat_stream(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "AI_NOT_CONFIGURED", "message": "请配置 OPENAI_API_KEY"},
         )
+
+    # P1-C：本轮 trace/turn 标识（只进 agent_calls，不改 SSE 协议）
+    agent_trace.bind(entry="chat", user_id=current_user.id)
 
     async def event_generator():
         # Resolve session if session_id provided
@@ -1772,6 +1776,9 @@ async def canvas_ai_chat(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "AI_NOT_CONFIGURED", "message": "请配置 OPENAI_API_KEY"},
         )
+
+    # P1-C：本轮 trace/turn 标识（只进 agent_calls，不改 SSE 协议）
+    agent_trace.bind(entry="canvas", user_id=current_user.id)
 
     # Get datasource info (optional — only if datasource_id provided)
     datasource = None

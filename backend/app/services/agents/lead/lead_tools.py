@@ -147,40 +147,51 @@ def _has_canvas_mutation(tool_chain: list[dict]) -> bool:
 def assess_subtask_detail(
     result: RunAnalysisResult, *,
     entry: str = "chat", user_goal: str = "", acceptance: dict | None = None,
+    policy=None,
 ) -> SubtaskAssessment:
     """确定性评审的**结构化**版本：text 与旧 assess_subtask 逐字节一致，另附 HARD/SOFT 分级。
 
     HARD（事实性失败，Lead 不得翻案）：
       ① 执行失败（success=False）
       ② 工具链中存在失败项（ok=False）
-      ③ 画布入口成功却零落块
+      ③ 本入口把"产物"计入硬交付、却零产物（画布：成功却零落块）
     SOFT（存疑，需质量判断）：
       ④ 报告数字未过后验（画布且已产出内容块时豁免，照旧）
       ⑤ 画布入口且用户点名多个维度但覆盖不全
+      ⑥ Lead 声明的 acceptance 未满足
 
-    实现要点：用**单一有序列表**记录判定，再按级别分流。
-    若先维护 hard/soft 两个列表再拼接，text 里各条的**顺序会与旧实现不同**，
-    就破坏了「文本逐字节兼容」——这是本次重构唯一的真正风险点。
+    **入口差异不再写在这里**：由 `capability.EntryProfile.review_policy` 表达
+    （numbers_mode / hard_zero_artifact / dimension_coverage / acceptance）。
+    本函数只按 policy 的开关决定"记不记这一条"，判定顺序保持原样——
+    文本逐字节兼容是硬要求（既有测试直接对字符串做断言）。
     """
+    if policy is None:
+        # 映射只在 capability：这里从 entry 取画像，**不做 entry 判定**
+        from app.services.agents.lead.capability import get_profile
+
+        policy = get_profile(entry).review_policy
     items: list[tuple[str, str]] = []  # (级别, 原因)，追加顺序与旧实现完全一致
     if not result.success:
         items.append(("hard", f"执行失败({result.error or 'unknown'})"))
-    if not result.verified:
+    if not result.verified and policy.flags_unverified_numbers(result.blocks_added):
         # 画布主交付是"块成功落盘"。若已产出内容块，叙事里"无法严格后验"的数字只属
         # 软存疑，不应把整体敲成失败触发重派级联；纯对话才把数字存疑当硬失败。
-        if entry != "canvas" or result.blocks_added == 0:
-            items.append(("soft", "报告数字存疑"))
+        items.append(("soft", "报告数字存疑"))
     failed = [t.get("name") for t in result.tool_chain if not t.get("ok")]
     if failed:
         items.append(("hard", "存在失败工具: " + ", ".join(str(n) for n in failed[:3])))
-    if entry == "canvas" and result.success and result.blocks_added == 0:
-        # 方案 4（修正规则假设）：画布任务的产物不只有"增加内容块"——
-        # 清空/删块/改标题/重排这些变更操作成功后 blocks_added 本来就是 0。
-        # 只有"成功 + 零落块 + 无任何变更操作"才构成"什么都没干"的事实性失败。
-        if not _has_canvas_mutation(result.tool_chain):
-            items.append(("hard", "未在画布上产出内容块"))
-    # 维度覆盖检查：画布 + 用户点名 ≥2 维度 + 有图表落块记录
-    if entry == "canvas" and result.success and result.blocks_added > 0:
+    # 方案 4（修正规则假设）：画布任务的产物不只有"增加内容块"——
+    # 清空/删块/改标题/重排这些变更操作成功后 blocks_added 本来就是 0。
+    # 只有"成功 + 零产物 + 无任何变更操作"才构成"什么都没干"的事实性失败。
+    # 哪个入口把产物计入硬交付，由 policy.hard_zero_artifact 决定（对话页恒 False）。
+    if policy.zero_artifact_is_hard(
+        success=result.success,
+        blocks_added=result.blocks_added,
+        has_mutation=_has_canvas_mutation(result.tool_chain),
+    ):
+        items.append(("hard", "未在画布上产出内容块"))
+    # 维度覆盖检查：入口启用该质量项 + 用户点名 ≥2 维度 + 有图表落块记录
+    if policy.dimension_coverage and result.success and result.blocks_added > 0:
         try:
             named_dims = _count_named_dimensions(user_goal or "")
         except Exception:  # noqa: BLE001
@@ -191,7 +202,7 @@ def assess_subtask_detail(
                 items.append(("soft", f"维度覆盖不全（用户点名{named_dims}个维度，仅落{covered}个）"))
     # ⑥ Lead 声明的验收标准未满足（**声明缺失 → 跳过**，向后兼容）
     # 归 SOFT：它是"标准是否达成"的质量判断，不是 ①②③ 那种事实性失败
-    accept_problem = _check_acceptance(result, acceptance)
+    accept_problem = _check_acceptance(result, acceptance) if policy.acceptance else ""
     if accept_problem:
         items.append(("soft", accept_problem))
 

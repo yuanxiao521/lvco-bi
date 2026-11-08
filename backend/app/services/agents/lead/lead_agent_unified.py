@@ -31,8 +31,8 @@ import logging
 from typing import AsyncIterator, Awaitable, Callable
 
 from app.config import settings
+from app.services.agents.lead.capability import get_profile
 from app.services.agents.lead.lead_agent_tools import (
-    QUOTA,
     decision_action,
     lead_tool_specs,
     tool_class,
@@ -124,6 +124,36 @@ def explicit_kernel(name: str) -> str | None:
     return None
 
 
+def build_dispatch_receipt(
+    review_note: str, exec_summary: str, *, max_chars: int | None = None
+) -> str:
+    """派发回执 = 评审结论 + 执行摘要（**截断到工具结果预算**）。
+
+    为什么必须把摘要一起回给模型（真机根因）：
+    此前 role=tool 只回一句 review_note（"子任务评审通过/未通过…"），模型看不到
+    "上一轮到底做了什么"——第 3 次派发时就容易重复同一个 goal、或凭记忆重提参数。
+    `build_execution_summary` 早就算好了（成败/规划/工具链/数值证据/报告），
+    只是没回给模型，等于白算。
+
+    预算口径与普通工具结果一致：`TOOL_RESULT_MAX_TOKENS` → `RESULT_MAX_CHARS`
+    （config 的旧字符别名），保证回执与工具结果在上下文里占同一档空间，
+    不会让"回执"变成绕过压缩层的第二条大字段通道。
+    """
+    note = (review_note or "").strip()
+    summary = (exec_summary or "").strip()
+    if not summary:
+        return note
+    budget = (
+        int(max_chars) if max_chars is not None
+        else int(getattr(settings, "RESULT_MAX_CHARS", 2000) or 2000)
+    )
+    if budget <= 0:
+        return note
+    if len(summary) > budget:
+        summary = summary[: max(0, budget - 1)] + "…"
+    return f"{note}\n\n{summary}" if note else summary
+
+
 def _parse_args(raw) -> dict:
     if isinstance(raw, dict):
         return raw
@@ -156,8 +186,11 @@ async def stream_unified(
     """single_agent 模式的一轮：单 system + 工具循环 + 代码层收敛闸。"""
     degradation = degradation if degradation is not None else []
     limit = max_steps or int(getattr(settings, "LEAD_AGENT_MAX_STEPS", 6))
-    tools = lead_tool_specs()
-    remaining = dict(QUOTA)  # 每类工具剩余次数（观察 ≤2 / 派发 ≤3）
+    # 能力画像：入口差异的**唯一**映射点（工具子集 / 配额 / 提示词 / 派发内核 / 验收口径）。
+    # 本模块不再判断 entry——判断就会长出第二个映射点，两处迟早漂移。
+    profile = get_profile(getattr(ctx, "entry", "chat"))
+    tools = lead_tool_specs(profile)          # 例：chat 画像不含 get_canvas_layout（死工具）
+    remaining = dict(profile.quota)           # 每类工具剩余次数（观察 ≤2 / 派发 ≤3）
 
     async def _answer(text: str) -> AsyncIterator[dict]:
         if emit_answer is not None:
@@ -188,10 +221,9 @@ async def stream_unified(
             if guard[0] == "resume":
                 from app.services.agents.lead.lead_decider import Decision  # noqa: F401
                 from app.services.agents.lead.lead_dispatch import run_worker
-                from app.services.agents.lead.lead_worker import resolve_worker
 
                 decision = guard[1]
-                worker = resolve_worker(ctx.entry, getattr(decision, "complexity", "complex"))
+                worker = profile.resolve_worker(getattr(decision, "complexity", "complex"))
                 async for ev in run_worker(
                     user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
                     db_session=db_session, available_datasources=available_datasources or [],
@@ -224,7 +256,7 @@ async def stream_unified(
     #     （legacy 也是这么接的：`subtask_summaries=ctx.turn_summaries` 不拷贝，
     #      画布每轮 `layout(force=True)` 后 `refresh_canvas`。）
     # 构造必须在 ctx.add_turn 之前（否则本轮用户消息会在窗口里出现两次）。
-    from app.services.ai_prompts import LEAD_AGENT_SYSTEM
+    # system 提示词按画像取（core + 入口 profile 两段组合），不再固定用一份
     from app.services.context.provider import TurnContextProvider, TurnInputs
 
     provider = TurnContextProvider.for_turn(TurnInputs(
@@ -271,7 +303,7 @@ async def stream_unified(
             logger.debug("[lead_unified] cancel_check_failed", exc_info=True)
 
         # 每步都向 provider 要**完整** messages：循环不手工维护消息列表
-        assembled = provider.for_agent_loop(user_msg, system_text=LEAD_AGENT_SYSTEM)
+        assembled = provider.for_agent_loop(user_msg, system_text=profile.system_prompt())
         messages = assembled.messages
         # S0-3：每步落一次台账。此前只在循环结束后记一笔"整轮总账"，
         # 看不到"第几步开始超预算"；上下文是动态曲线，没有逐步台账就无法优化
@@ -466,7 +498,6 @@ async def stream_unified(
             # ── 派发：复用 run_worker（子任务摘要/评审/画布刷新与 legacy 同路径）──
             from app.services.agents.lead.lead_decider import ActionType, Decision
             from app.services.agents.lead.lead_dispatch import run_worker
-            from app.services.agents.lead.lead_worker import resolve_worker
 
             if name == "repair":
                 goal = str(args.get("goal") or user_msg)
@@ -497,7 +528,7 @@ async def stream_unified(
                 complexity=complexity,
                 guidance=guidance,
             )
-            worker = resolve_worker(ctx.entry, complexity, explicit_kernel(name))
+            worker = profile.resolve_worker(complexity, explicit_kernel(name))
             captured: dict = {}   # 接住 RunAnalysisResult，供随后的评审阶段使用
             async for ev in run_worker(
                 user_msg=user_msg, decision=decision, ctx=ctx, worker=worker,
@@ -532,6 +563,7 @@ async def stream_unified(
             # 并作为**本次派发的工具结果**回给模型——它靠这个决定 repair / 重派 / 收尾。
             result = captured.get("result")
             review_note = "已派发子任务，执行摘要见上文。"
+            exec_summary = ""   # 回执正文：执行摘要（下面评审阶段算一次，两处复用）
             if result is not None:
                 from app.services.agents.lead.lead_review import build_execution_summary
                 from app.services.agents.lead.lead_review_stage import run_review_stage
@@ -556,7 +588,13 @@ async def stream_unified(
                     if outcome.guidance:
                         review_note += "。改进指导：" + outcome.guidance
                     review_note += "。小缺口用 repair 补；方向错或执行失败则重新 dispatch_analysis。"
-            step_msgs.append({"role": "tool", "tool_call_id": call_id, "content": review_note})
+            # 回执 = 评审结论 + 执行摘要（截断到工具结果预算），见 build_dispatch_receipt。
+            # 只回 review_note 时模型看不到上轮做了什么 → 第 3 次派发重复同一目标。
+            step_msgs.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": build_dispatch_receipt(review_note, exec_summary),
+            })
         # 本步新增消息（assistant 的 tool_calls + 各 role=tool 结果）提交给 provider；
         # 下一步重建 messages 时自然带上它们——循环里的"增量"只有这一个来源。
         provider.add_tool_result(step_msgs)

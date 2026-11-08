@@ -23,8 +23,12 @@ from app.services.agents.graph import Graph
 # P0-3：取消位读取（同一条链路三个编排器共用；实现在 agent_orchestrator，
 # 它是本包内唯一「被 canvas_orchestrator 反向依赖」的模块，放这里避免循环）。
 from app.services.agents.agent_orchestrator import cancel_requested
-from app.services.agents.tool_executor import ToolExecutor, build_assistant_message
-from app.services.context_utils import compact_result_json
+from app.services.agents.step_helpers import (
+    append_tool_results,
+    build_assistant_tool_message,
+    run_llm_step,
+)
+from app.services.agents.tool_executor import ToolExecutor
 
 from app.services.llm_client import LLMClient
 
@@ -139,56 +143,29 @@ class ReactGraphAgent:
             }
         tools = self._tools_for_state(state)
 
-        # 观测：agent_trace 存在时走 Langfuse generation（同 Lead/Planner 口径，
-        # 带真实模型与 token；无 trace 退化为纯本地 span）。
-        cm = None
-        if self.agent_trace is not None:
-            from app.services.observability import observe_llm_call
+        # 观测 + 事件 + reasoning 累积统一走 step_helpers（与 orchestrator / canvas 同一实现）。
+        # streaming=True：本路径工具循环的最后会产出**用户要看的报告正文**，
+        # 逐字流式有真实体验收益（打字机）。实测：同一请求流式 294 个增量 vs 非流式 2 块。
+        async def _emit_text_event(ev: dict) -> None:
+            if ev.get("type") == "text":
+                await emit(ev)
 
-            cm = observe_llm_call(
-                self.agent_trace,
-                f"react_iter_{iteration}",
-                messages=messages,
-                model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
-            )
-            llm_span = cm.__enter__()
-            llm_span.input = {
+        step = await run_llm_step(
+            self.llm, messages, tools,
+            temperature=0.3, max_tokens=3000, streaming=True,
+            trace=self.agent_trace,
+            span_name=f"react_iter_{iteration}",
+            model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+            on_call=_emit_text_event,
+            span_input={
                 "iteration": iteration,
                 "tools_count": len(tools),
                 "messages_count": len(messages),
-            }
-        else:
-            llm_span = None
-
-        tool_calls: list[dict] = []
-        text_chunks: list[str] = []
-        has_text_output = False
-        try:
-            # streaming=True：本路径工具循环的最后会产出**用户要看的报告正文**，
-            # 逐字流式有真实体验收益（打字机）。实测：同一请求流式 294 个增量 vs 非流式 2 块。
-            async for event in self.llm.tool_call_round(
-                messages, tools, temperature=0.3, max_tokens=3000, streaming=True,
-            ):
-                if event["type"] == "text":
-                    has_text_output = True
-                    text_chunks.append(event.get("content", ""))
-                    await emit(event)
-                elif event["type"] == "tool_call":
-                    tool_calls.append(event)
-        finally:
-            if llm_span is not None:
-                llm_span.update(
-                    output={
-                        "text_length": sum(len(c) for c in text_chunks),
-                        "tool_calls": [{"name": t.get("name")} for t in tool_calls],
-                        "has_text_output": has_text_output,
-                    },
-                )
-            if cm is not None:
-                try:
-                    cm.__exit__(None, None, None)
-                except Exception:  # noqa: BLE001
-                    logger.debug("react llm span exit failed", exc_info=True)
+            },
+        )
+        tool_calls: list[dict] = step.tool_calls
+        text_chunks: list[str] = step.text_parts
+        has_text_output = step.has_text
 
         # 输出质量兜底：LLM 即将收尾（无工具调用）时，
         # 1) 完全无文本（静默） → 强制生成收尾报告；
@@ -213,6 +190,9 @@ class ReactGraphAgent:
         return {
             "tool_calls": tool_calls,
             "has_text_output": has_text_output,
+            # DeepSeek reasoning 模式：本轮 assistant 消息必须带 reasoning_content，
+            # 否则多轮工具调用会被上游拒绝/降质（与 orchestrator 同一约定）。
+            "reasoning_content": step.reasoning_content,
             "iteration": iteration + 1,
         }
 
@@ -271,6 +251,8 @@ class ReactGraphAgent:
         db_session = shared.get("db_session")
         user_id = state["user_id"]
         messages = state["messages"]
+        # reasoning 由 _reason_node 累积、必须随 assistant(tool_calls) 一起回传
+        reasoning_content = str(state.get("reasoning_content") or "")
         tool_calls = state.get("tool_calls") or []
         executed_tool_names = list(state.get("executed_tool_names") or [])
         consecutive_query_failures = state.get("consecutive_query_failures", 0)
@@ -306,7 +288,7 @@ class ReactGraphAgent:
             # 再注入纠正并回 reason。若连续多次无效调用（decode 惯性），不再让 LLM 空转，
             # 直接强制 wrapup 收尾报告。
             invalid_tool_streak = state.get("invalid_tool_streak", 0) + 1
-            messages.append(build_assistant_message(tool_calls or original_tool_calls))
+            messages.append(build_assistant_tool_message(tool_calls or original_tool_calls))
             for tc in (tool_calls or original_tool_calls):
                 messages.append({
                     "role": "tool",
@@ -348,8 +330,8 @@ class ReactGraphAgent:
                 "invalid_tool_streak": invalid_tool_streak,
             }
 
-        # 构建 assistant message with tool_calls
-        messages.append(build_assistant_message(tool_calls))
+        # 构建 assistant message with tool_calls（含 reasoning 回传，见 step_helpers）
+        messages.append(build_assistant_tool_message(tool_calls, reasoning_content))
 
         # 共享工具执行器：统一执行/观测/事件 emit/错误判定（react 无幂等 memo）
         executor = ToolExecutor(
@@ -398,12 +380,8 @@ class ReactGraphAgent:
                 "title": f"执行 {tname}", "status": "fail" if has_error else "ok", "tool": tname,
             })
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": pr.tc.get("id", f"call_{len(messages)}"),
-                # 防爆：大结果压缩后进上下文（error 结果由 compact_result_json 完整保留供自纠错）
-                "content": compact_result_json(pr.result),
-            })
+            # tool 结果回写（id 兜底 + 大结果压缩；error 结果由 compact_result_json 完整保留供自纠错）
+            append_tool_results(messages, [pr], id_prefix="call_", id_offset=len(messages))
 
         # 被并发上限顺延的调用必须回喂：否则 LLM 以为全部执行成功，
         # 下一轮凭记忆重提参数（典型：重提已删除的 block_id）→ 反复 blocked、删不干净。

@@ -1409,9 +1409,13 @@ class TestRunner:
         banner("12 · 权限与审计测试 (Permission & Audit) — 用户列表/角色/操作日志")
 
         def list_users():
+            # P0 起 /permissions/users 收为 admin only：本脚本用新注册账号（默认 editor），
+            # 期望 403；admin 账号跑这套脚本时才是 200。
             resp = self._request("GET", "/permissions/users", params={"page": 1, "pageSize": 10})
-            data = self.assert_ok(resp, "用户列表")
-            return "用户列表正常"
+            if resp.status_code == 403:
+                return "用户列表：非 admin 正确拒绝 403"
+            self.assert_ok(resp, "用户列表")
+            return "用户列表正常（admin）"
 
         def modify_role_self():
             """尝试修改自己的角色(非admin应被拒绝)"""
@@ -1428,15 +1432,21 @@ class TestRunner:
                 return f"角色修改响应: {resp.status_code}"
 
         def audit_logs():
+            # P0 起 /audit/logs 收为 admin only（原注释写的是"任何登录用户可访问"）
             resp = self._request("GET", "/audit/logs", params={"page": 1, "pageSize": 10})
+            if resp.status_code == 403:
+                return "操作日志：非 admin 正确拒绝 403"
             data = self.assert_ok(resp, "操作日志")
             items = self._safe_get(data, "data.items") or self._safe_get(data, "data", [])
             return f"操作日志: {len(items) if isinstance(items, list) else 'N/A'} 条"
 
         def audit_summary():
+            # 同 audit_logs：P0 起仅 admin（与列表/导出同源同类数据）
             resp = self._request("GET", "/audit/logs/summary")
-            data = self.assert_ok(resp, "审计摘要")
-            return "审计摘要正常"
+            if resp.status_code == 403:
+                return "审计摘要：非 admin 正确拒绝 403"
+            self.assert_ok(resp, "审计摘要")
+            return "审计摘要正常（admin）"
 
         def audit_export_csv():
             resp = self._request("GET", "/audit/logs/export", timeout=30)
@@ -1448,12 +1458,14 @@ class TestRunner:
                 return f"审计导出响应: {resp.status_code}（非致命）"
 
         def audit_filtered():
-            """测试审计日志的筛选功能"""
+            """测试审计日志的筛选功能（P0 起仅 admin 可用）"""
             resp = self._request("GET", "/audit/logs", params={
                 "page": 1, "pageSize": 5, "method": "GET",
             })
+            if resp.status_code == 403:
+                return "审计日志筛选：非 admin 正确拒绝 403"
             self.assert_ok(resp, "审计日志筛选")
-            return "审计日志筛选正常"
+            return "审计日志筛选正常（admin）"
 
         self._run_test("用户列表(权限管理)", "Permission", list_users)
         self._run_test("角色修改(权限边界)", "Permission", modify_role_self)

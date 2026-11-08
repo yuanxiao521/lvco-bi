@@ -31,7 +31,12 @@ from app.services.agents.base_agent import AgentResult
 from app.services.agents.planner_agent import PlannerAgent, _infer_table_description
 from app.services.agents.graph import Graph
 from app.services.agent_tools import ToolRegistry
-from app.services.agents.tool_executor import ToolCallResult, ToolExecutor, build_assistant_message
+from app.services.agents.step_helpers import (
+    append_tool_results,
+    build_assistant_tool_message,
+    run_llm_step,
+)
+from app.services.agents.tool_executor import ToolCallResult, ToolExecutor
 from app.services.context_utils import compact_result_json
 from app.services.llm_client import LLMClient
 from app.services.observability import get_observer
@@ -466,7 +471,6 @@ class AgentOrchestrator:
         if memo is None:
             memo = {}
             shared["tool_memo"] = memo
-        shared.setdefault("tool_memo_lock", asyncio.Lock())
         # P1-9 全局 LLM 调用闸门：超限后跳过剩余执行步骤
         counter = shared.get("llm_call_counter")
         budget = _llm_budget(counter)
@@ -493,9 +497,15 @@ class AgentOrchestrator:
                 if state_sink is not None:
                     state_sink["results"] = dict(results)
                 return {"results": results, "cancelled": True}
-            await asyncio.gather(
-                *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
-            )
+            # AGENT_CONCURRENT_STEPS 默认 False：层内串行（单元素层行为与并发完全一致）。
+            # 打开后回到"同层并发"，但调用方需自行承担共享 AsyncSession 的并发风险（见 07 报告 §1）。
+            if getattr(settings, "AGENT_CONCURRENT_STEPS", False):
+                await asyncio.gather(
+                    *(self._run_step_with_timeout(step, results, state, **shared) for step in level)
+                )
+            else:
+                for step in level:
+                    await self._run_step_with_timeout(step, results, state, **shared)
         state_sink = shared.get("state_sink")
         if state_sink is not None:
             state_sink["results"] = dict(results)
@@ -711,8 +721,6 @@ class AgentOrchestrator:
                 logger.info(f"[orchestrator] 步骤 {sid} 用户取消，提前终止")
                 return
             # 1. LLM 决策：调用工具或输出文本
-            tool_calls: list[dict] = []
-            text_parts: list[str] = []
             try:
                 # P1-9 递增全局 LLM 调用计数
                 if counter is not None:
@@ -724,38 +732,22 @@ class AgentOrchestrator:
                             "skipped_reason": f"全局 LLM 调用已达上限（{_budget}），步骤 {sid} 终止",
                         }, ensure_ascii=False)
                         return
-                # LLM 决策观测：同 Lead/ReAct 口径（Langfuse generation + 真实模型名）
-                from app.services.observability import observe_llm_call
-
-                _obs_cm = None
-                _trace = shared.get("trace")
-                if _trace is not None:
-                    _obs_cm = observe_llm_call(
-                        _trace, f"exec_decision_{sid}", messages=messages,
-                        model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
-                    )
-                    _obs_cm.__enter__()
-                try:
-                    # streaming=False：本路径工具循环的中间文字**不展示给用户**
-                    # （只攒进 text_parts，最终报告在末尾一次性 emit），流式零收益，
-                    # 非流式可省掉 tool_calls 分片拼接。
-                    async for event in self.llm.tool_call_round(
-                        messages, all_tools, temperature=0.3, max_tokens=2000, streaming=False,
-                    ):
-                        if event["type"] == "text":
-                            text_parts.append(event.get("content", ""))
-                        elif event["type"] == "tool_call":
-                            # 保存本轮 LLM 返回的 reasoning_content（DeepSeek 需要回传）
-                            rc = event.get("reasoning_content", "")
-                            if rc:
-                                reasoning_content = rc
-                            tool_calls.append(event)
-                finally:
-                    if _obs_cm is not None:
-                        try:
-                            _obs_cm.__exit__(None, None, None)
-                        except Exception:  # noqa: BLE001
-                            logger.debug("orchestrator exec span exit failed", exc_info=True)
+                # LLM 决策观测 / 事件解析 / reasoning 累积统一走 step_helpers（与 ReAct、canvas 同一实现）。
+                # streaming=False：本路径工具循环的中间文字**不展示给用户**
+                # （只攒进 text_parts，最终报告在末尾一次性 emit），流式零收益，
+                # 非流式可省掉 tool_calls 分片拼接。
+                step_llm = await run_llm_step(
+                    self.llm, messages, all_tools,
+                    temperature=0.3, max_tokens=2000, streaming=False,
+                    trace=shared.get("trace"),
+                    span_name=f"exec_decision_{sid}",
+                    model=getattr(getattr(self.llm, "_settings", None), "openai_model", None),
+                )
+                tool_calls = step_llm.tool_calls
+                text_parts = step_llm.text_parts
+                # 保存本轮 LLM 返回的 reasoning_content（DeepSeek 多轮工具调用需要回传）
+                if step_llm.reasoning_content:
+                    reasoning_content = step_llm.reasoning_content
             except Exception as e:
                 logger.warning(f"[orchestrator] 步骤 {sid} 流式调用异常: {e}")
                 consecutive_errors += 1
@@ -839,29 +831,21 @@ class AgentOrchestrator:
                 *(executor.execute_tool_call(it["tc"], args=it["targs"]) for it in tool_items)
             )
 
-            # 3. 构建 assistant message（包含全部 tool_calls）
-            assistant_msg = build_assistant_message(tool_calls, reasoning_content=reasoning_content, id_offset=tool_call_count)
-            messages.append(assistant_msg)
+            # 3. 构建 assistant message（包含全部 tool_calls 与 reasoning_content）
+            messages.append(
+                build_assistant_tool_message(
+                    tool_calls, reasoning_content, id_offset=tool_call_count,
+                )
+            )
 
             # 4. 追加全部 tool 结果 + 统计（tool_call/tool_result/chart 事件已在 ToolExecutor 内 emit）
-            any_fatal = False
-            any_error = False
+            any_fatal = any(pr.fatal for pr in parallel_results)
+            any_error = any(pr.is_error for pr in parallel_results)
+            append_tool_results(
+                messages, parallel_results, id_prefix="call_", id_offset=tool_call_count,
+            )
             for i, pr in enumerate(parallel_results):
-                _is_error = pr.is_error
-                _is_fatal = pr.fatal
-
-                if _is_fatal:
-                    any_fatal = True
-                if _is_error:
-                    any_error = True
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": pr.tc.get("id", f"call_{tool_call_count + i}"),
-                    # 防爆：大结果压缩后进上下文（error 结果由 compact_result_json 完整保留供自纠错）
-                    "content": compact_result_json(pr.result),
-                })
-                self._record_step_trace(shared.get("trace"), sid, pr.name, tool_call_count + i + 1, _is_error or _is_fatal)
+                self._record_step_trace(shared.get("trace"), sid, pr.name, tool_call_count + i + 1, pr.is_error or pr.fatal)
 
             tool_call_count += len(tool_calls)
             no_tool_streak = 0  # 已发生工具动作 → 逃逸计数归零（"连续"语义）

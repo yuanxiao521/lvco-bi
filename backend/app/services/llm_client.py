@@ -74,18 +74,38 @@ class LLMClient:
         return body
 
     def _log_usage(self, usage: dict) -> None:
-        """统一记录一次调用的 token 与缓存命中（成本分析的基础数据）。"""
+        """统一记录一次调用的 token 与缓存命中（成本分析的基础数据）。
+
+        P1-C：这里是**所有 LLM 调用形态的唯一漏斗**（complete / stream / complete_with_tools
+        都最终走到这里），所以 agent_calls 的 llm 行只在这里记一次即可覆盖 5 处 usage 写入点。
+        """
         if not usage:
             return
         details = usage.get("prompt_tokens_details") or {}
         cached = int(details.get("cached_tokens") or usage.get("prompt_cache_hit_tokens") or 0)
+        tokens_in = int(usage.get("prompt_tokens") or 0)
+        tokens_out = int(usage.get("completion_tokens") or 0)
         logger.info(
             "[llm] call model=%s in=%d out=%d cached=%d",
             self._settings.openai_model,
-            int(usage.get("prompt_tokens") or 0),
-            int(usage.get("completion_tokens") or 0),
+            tokens_in,
+            tokens_out,
             cached,
         )
+        # P1-C：agent_calls llm 行（未绑定 trace 时 record 会自动跳过；绝不抛）
+        try:
+            from app.services import agent_trace
+
+            agent_trace.record({
+                "kind": "llm",
+                "ok": True,
+                "model": self._settings.openai_model,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "tokens_cached": cached,
+            })
+        except Exception:  # noqa: BLE001
+            pass
 
     def _log_stream_usage(self, usage: dict) -> None:
         """流式调用在 [DONE] 前补发的 usage chunk（include_usage 开启后才有）。"""

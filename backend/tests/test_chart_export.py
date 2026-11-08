@@ -13,6 +13,27 @@ import pytest
 from app.services.chart_export import build_option, render_options_to_svg_uris, rows_to_matrix
 
 
+@pytest.fixture(scope="module")
+def _require_chromium():
+    """需要真实浏览器的用例：缺 chromium（或版本不匹配）时 **skip**，不是 fail。
+
+    背景：playwright 的浏览器版本与 pip 包版本绑死，本机曾出现「期望 chromium-1228 /
+    实装 1134」→ launch 直接抛错。这类**环境缺失**不该让整条门禁变红，但也不能静默通过，
+    所以显式 skip 并在 reason 里写清原因（docs/research/04-adversarial-review.md §1.3 提出的
+    门槛修正：1138 collected / 0 failed，环境缺失项 skip 且列名）。
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"playwright 未安装：{exc}")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            browser.close()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"chromium 不可用（未安装或版本不匹配）：{exc}")
+
+
 def test_rows_to_matrix_supports_dict_and_list_rows():
     columns = ["渠道", "销售额"]
     assert rows_to_matrix(columns, [{"渠道": "抖音", "销售额": 120}]) == [["抖音", 120]]
@@ -43,7 +64,7 @@ def test_render_empty_options_returns_empty_list():
     assert asyncio.run(render_options_to_svg_uris([None, {}])) == ["", ""]
 
 
-def test_render_option_to_svg_uri_with_real_data():
+def test_render_option_to_svg_uri_with_real_data(_require_chromium):
     pytest.importorskip("playwright")
     option = {
         "title": {"text": "各渠道销售额"},
@@ -64,7 +85,7 @@ def test_render_option_to_svg_uri_with_real_data():
     assert "__lvco_fmt_y__" not in svg
 
 
-def test_canvas_export_html_to_pdf_with_svg_chart():
+def test_canvas_export_html_to_pdf_with_svg_chart(_require_chromium):
     """端到端：图表块 SVG → 画布模板 → Playwright → PDF（验证 SVG 能进 PDF 且不报错）。"""
     pytest.importorskip("playwright")
     from app.api.v1.canvases import _CANVAS_PDF_HTML_TEMPLATE, _html_to_pdf_subprocess

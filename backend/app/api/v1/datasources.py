@@ -28,6 +28,12 @@ from app.services.datasource_connection import (
 from app.utils.crypto import CredentialKeyMissingError
 from app.core.duckdb_client import duckdb_client
 from app.services.data_quality import dup_row_count, format_issue_count, null_count, outlier_count, outlier_iqr_count, type_inconsistency_count
+from app.services.datasource_profile import (
+    DatasourceNotFoundError,
+    DatasourceProfileError,
+    InvalidFieldError,
+    profile_datasource,
+)
 from app.services.datasource_service import DataSourceService
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
 from app.connectors.mysql_connector import mysql_connector
@@ -110,6 +116,61 @@ async def get_datasource(
             detail={"code": "NOT_FOUND", "message": "数据源不存在"},
         )
     return SuccessResponse(data=DataSourceResponse.model_validate(ds).model_dump(mode="json", by_alias=True))
+
+
+@router.get("/{datasource_id}/profile")
+async def profile_datasource_endpoint(
+    datasource_id: UUID,
+    fields: str | None = Query(None, description="逗号分隔的字段名；为空则画像全部字段"),
+    sample_limit: int = Query(5, ge=1, le=20, description="每列返回的样例值条数"),
+    db: AsyncSession = Depends(get_db),
+    service: DataSourceService = Depends(get_datasource_service),
+    current_user: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """数据画像：行数 / 基数 / 空值率 / 时间范围（只读）。
+
+    - 属主校验与其它端点一致：`service.get_by_id(id, current_user.id)`，非属主一律 404；
+    - 大表（> SAMPLE_ROW_THRESHOLD）会降级为采样，响应里的 `sampled` / `sample_size`
+      如实说明本次统计是不是全量，`row_count` 仍是真实 COUNT(*)；
+    - 敏感列只返回统计量，不含 `sample_values`。
+    """
+    ds = await service.get_by_id(datasource_id, current_user.id)
+    if ds is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NOT_FOUND", "message": "数据源不存在"},
+        )
+
+    requested = [part.strip() for part in fields.split(",") if part.strip()] if fields else None
+    try:
+        payload = await profile_datasource(
+            db,
+            current_user.id,
+            datasource_id,
+            fields=requested,
+            sample_limit=sample_limit,
+        )
+    except DatasourceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except InvalidFieldError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except DatasourceProfileError as exc:
+        http_code = (
+            status.HTTP_502_BAD_GATEWAY
+            if exc.code == "ATTACH_FAILED"
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+        raise HTTPException(
+            status_code=http_code,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return SuccessResponse(data=payload)
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)

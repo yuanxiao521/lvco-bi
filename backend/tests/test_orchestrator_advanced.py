@@ -411,7 +411,17 @@ def test_group_steps_by_level_dependent():
 
 
 async def test_independent_steps_run_concurrently(monkeypatch, mock_llm, orchestrator):
-    """两个独立步骤应并发执行（开始时间差 < sleep 时长）。"""
+    """显式开启层内并发时，两个独立步骤真并发（开始时间差 < sleep 时长）。
+
+    注意：**默认已改为串行**（`AGENT_CONCURRENT_STEPS=False`）。理由见
+    docs/research/07-orchestration-verdict.md：77 份真实计划里 62.3% 是纯链，并行理论上限
+    仅 1.23×；而并发步骤共用同一个 AsyncSession（SQLAlchemy 非并发安全）、画布写工具又是
+    read-modify-write（会丢块）。所以这条用例改为"显式打开后才并发"，默认行为由
+    `test_independent_steps_run_serially_by_default` 守着。
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_CONCURRENT_STEPS", True, raising=False)
     orch, _ = orchestrator
     timings: list[tuple[str, float]] = []
 
@@ -455,6 +465,45 @@ async def test_independent_steps_run_concurrently(monkeypatch, mock_llm, orchest
     assert len(starts) == 2, f"工具应执行 2 次，实际 {len(starts)}"
     gap = abs(starts[0][1] - starts[1][1])
     assert gap < 0.05, f"两个步骤非并发启动 (gap={gap:.3f}s): {timings}"
+
+
+async def test_independent_steps_run_serially_by_default(monkeypatch, mock_llm, orchestrator):
+    """默认**串行**：两个独立步骤总时长 ≈ 单步 × 2（开关默认 False）。
+
+    这条与上面那条互为反向断言：默认值一被改成 True，这里会立刻红——
+    并发不是"能开就该开"，它换掉的是"写画布丢块 + 共享 session"的安全性。
+    """
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AGENT_CONCURRENT_STEPS", False, raising=False)
+    orch, _ = orchestrator
+    timings: list[tuple[str, float]] = []
+
+    class TimingTool(MockTool):
+        async def execute(self, **kwargs):
+            timings.append((self.name + "_start", asyncio.get_event_loop().time()))
+            await asyncio.sleep(0.15)
+            timings.append((self.name + "_done", asyncio.get_event_loop().time()))
+            return json.dumps({"ok": True})
+
+    tools = {"tA": TimingTool("tA", call_log=timings), "tB": TimingTool("tB", call_log=timings)}
+    tools["tA"].name = "tA"
+    tools["tB"].name = "tB"
+    install_tool_registry(monkeypatch, tools)
+
+    mock_llm.push_tool_call("tA", {}, step_id=1)
+    mock_llm.push_text("done A", step_id=1)
+    mock_llm.push_tool_call("tB", {}, step_id=2)
+    mock_llm.push_text("done B", step_id=2)
+
+    import time
+
+    start = time.monotonic()
+    _, state = await _drain_queue(orch, monkeypatch, mock_llm, [make_step(1, "tA"), make_step(2, "tB")])
+    elapsed = time.monotonic() - start
+
+    assert elapsed >= 0.28, f"默认应为串行（≈0.30s），实际 {elapsed:.3f}s"
+    assert 1 in state["results"] and 2 in state["results"]
 
 
 async def test_dependent_step_waits_for_dep(monkeypatch, mock_llm, orchestrator):
