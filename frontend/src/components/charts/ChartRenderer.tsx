@@ -59,10 +59,6 @@ interface ChartRendererProps {
   onDimensionClick?: (dimension: string, value: string) => void;
 }
 
-/** 后端 result_columns 使用原始字段名（非 SQL 别名），直接返回 field */
-function measureToColumnAlias(m: { field: string; agg: string }): string {
-  return m.field;
-}
 
 export default function ChartRenderer({
   config,
@@ -90,17 +86,32 @@ export default function ChartRenderer({
   }
 
   const chartType = config?.chartType ?? "bar";
-  const dim = config?.dimensions[0] ?? result.columns[0];
+  // 维度键兜底：后端时间桶化后列名会改名（order_date → order_date_month），
+  // queryConfig.dimensions 里还是原始名——若结果列里没有该键，回退用结果集第一列。
+  // 修复"X 轴全是 undefined"：dataKey 必须是 rows 里真实存在的键。
+  const requestedDim = config?.dimensions[0];
+  const dim =
+    requestedDim && result.columns.includes(requestedDim)
+      ? requestedDim
+      : (result.columns[0] ?? "");
   const measures = config?.measures ?? [];
   const measureKey =
     measures[0]?.field ?? result.columns.find((c) => c !== dim) ?? "";
   const data = result.rows;
 
   // 构建多度量信息（用于 ECharts 多度量渲染）
-  const measureFields: MeasureFieldInfo[] = measures.map((m) => ({
-    field: measureToColumnAlias(m),
-    label: `${m.agg}(${m.field})`,
-  }));
+  // 兜底：治理指标形态的 measure（{metric_key}/{metric_id}，无 field/agg）曾渲染出
+  // "undefined(undefined)"——字段与标签都回退到结果集列名（后端解析指标后按其输出列）。
+  const measureFields: MeasureFieldInfo[] = measures.map((m, idx) => {
+    const metricLike = m as { metric_key?: string; metric_id?: string };
+    const colFromResult = result.columns[idx] ?? result.columns.find((cc) => cc !== dim) ?? '';
+    const field = m.field || colFromResult;
+    const label =
+      m.agg && m.field
+        ? `${m.agg}(${m.field})`
+        : metricLike.metric_key || metricLike.metric_id || colFromResult || '指标';
+    return { field, label };
+  });
 
   // 联动筛选事件绑定：点击柱子/节点/扇区时把维度名+维度值抛给上层
   const onEvents = onDimensionClick
