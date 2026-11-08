@@ -46,6 +46,10 @@ class EvalResult:
     # （典型原因：模板用 now() 相对窗口，而演示数据是历史快照），这类题应从
     # SQL 分母里剔除，否则会把"数据集过期"算成"模型算错"。
     sql_scorable: bool = True
+    # 该题是否**根本没跑起来**（上游 LLM 失败 / 服务不可用 / 生产 0 事件）。
+    # 这类题不能算"模型答错"——2026-11-08 的 33 题跑里就有 16 题是 proxy 掉线导致的，
+    # 若计入分母会把基线从 59% 拖到 30%，纯属环境噪声。
+    run_error: bool = False
     tool_success: bool = False       # 工具调用成功（调用了正确工具且无 error）
     final_response_valid: bool = False  # 输出有效率
     chart_type_correct: bool = False  # 图表类型正确
@@ -117,6 +121,26 @@ def judge_attempt(
         result.notes.append(
             f"tool_calls={[e.get('name') for e in tool_events]} query_ok={query_ok}"
         )
+
+    # ---- 1.5 运行失败识别（不计入任何分母）----
+    if not attempt.events:
+        result.run_error = True
+        result.notes.append("run_error:no_events")
+    else:
+        err_ev = next((e for e in attempt.events if e.get("type") == "error"), None)
+        degraded_llm = any(
+            "lead_agent_llm_failed" in ((e.get("degradations") or []) if isinstance(e, dict) else [])
+            for e in attempt.events
+        )
+        if err_ev is not None and not tool_events and (degraded_llm or not result.tool_success):
+            result.run_error = True
+            msg = str(err_ev.get("message") or "")[:40]
+            result.notes.append(f"run_error:{msg}")
+    if result.run_error:
+        # 运行失败题：不评 SQL / 图表（避免把环境故障当成模型能力）
+        result.sql_scorable = False
+        result.notes.append("excluded_from_metrics")
+        return result
 
     # ---- 2. SQL 准确率 ----
     agent_sql = _extract_agent_sql(attempt.events)
@@ -259,17 +283,21 @@ def aggregate_results(results: list[EvalResult]) -> dict[str, Any]:
             "canvas_block_order_rate": 0.0,
         }
 
-    total = len(results)
-    sql_ok = sum(1 for r in results if r.sql_accuracy)
-    sql_scorable = sum(1 for r in results if r.sql_scorable) or 1
-    tool_ok = sum(1 for r in results if r.tool_success)
-    resp_ok = sum(1 for r in results if r.final_response_valid)
-    chart_ok = sum(1 for r in results if r.chart_type_correct)
-    chart_cfg_ok = sum(1 for r in results if r.chart_config_valid)
-    avg_iter = sum(r.iteration_count for r in results) / total
+    run_errors = sum(1 for r in results if r.run_error)
+    scored = [r for r in results if not r.run_error] or results
+    total = len(scored)
+    sql_ok = sum(1 for r in scored if r.sql_accuracy)
+    sql_scorable = sum(1 for r in scored if r.sql_scorable) or 1
+    tool_ok = sum(1 for r in scored if r.tool_success)
+    resp_ok = sum(1 for r in scored if r.final_response_valid)
+    chart_ok = sum(1 for r in scored if r.chart_type_correct)
+    chart_cfg_ok = sum(1 for r in scored if r.chart_config_valid)
+    avg_iter = sum(r.iteration_count for r in scored) / total
 
     summary: dict[str, Any] = {
         "total": total,
+        "run_errors": run_errors,
+        "raw_total": len(results),
         # SQL 分母用**可评分题**（期望模板返回非空的题）。按总题数算会把
         # "数据集过期" 误记成 "模型算错"——2026-11-08 基线里 3/12 题属于此类。
         "sql_accuracy_rate": round(sql_ok / sql_scorable, 4),
