@@ -2,6 +2,8 @@ import apiClient, { unwrapApi } from "./client";
 import type {
   MetricCreatePayload,
   MetricDefinition,
+  MetricDraft,
+  MetricDraftPayload,
   MetricImpact,
   MetricLineageEdge,
   MetricsListParams,
@@ -27,6 +29,14 @@ export async function createMetric(
 ): Promise<MetricDefinition> {
   const response = await apiClient.post("/metrics", payload);
   return unwrapApi<MetricDefinition>(response.data);
+}
+
+/** POST /metrics/draft —— AI 起草指标（不落库）；失败时由调用方从 detail.message 取文案 */
+export async function draftMetric(
+  payload: MetricDraftPayload
+): Promise<MetricDraft> {
+  const response = await apiClient.post("/metrics/draft", payload);
+  return unwrapApi<MetricDraft>(response.data);
 }
 
 export async function updateMetric(

@@ -126,7 +126,7 @@ _ALLOWED_NODE_TYPES: tuple[type, ...] = _classes(
     "DataType", "DataTypeParam",
     # 条件里必需的比较/逻辑（CASE WHEN、COUNT_IF）：只作用在表达式上，不构成查询结构
     "EQ", "NEQ", "GT", "GTE", "LT", "LTE",
-    "And", "Or", "Not", "Is", "Between",
+    "And", "Or", "Not", "Is", "Between", "In",
 )
 
 # 需要"上下文"才允许的节点（* / DISTINCT / 聚合的结构包装）

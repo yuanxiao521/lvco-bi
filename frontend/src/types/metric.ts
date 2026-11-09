@@ -19,6 +19,7 @@ export interface MetricDefinition {
 export interface MetricCreatePayload {
   key: string;
   name: string;
+  description?: string;
   formula?: string;
   formulaType?: MetricFormulaType;
   dependsOnMetricIds?: string[];
@@ -75,4 +76,41 @@ export interface MetricVersionCompare {
   from_version: string;
   to_version: string;
   changes: MetricVersionDiff[];
+}
+
+/** POST /metrics/draft 请求体：一句自然语言需求 → 指标草稿 */
+export interface MetricDraftPayload {
+  prompt: string;
+  datasourceId?: string | null;
+  tableRef?: string | null;
+}
+
+/** 草稿引用的字段与加工方式 */
+export interface MetricDraftReference {
+  field: string;
+  transform: string;
+}
+
+/** 草稿校验结果：errors 非空时不允许采纳创建 */
+export interface MetricDraftValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+/** AI 起草返回的指标草稿（不落库，用户确认后才创建） */
+export interface MetricDraft {
+  key: string;
+  name: string;
+  description: string | null;
+  formula: string;
+  aggKind: string | null;
+  datasourceId: string | null;
+  tableRef: string | null;
+  references: MetricDraftReference[];
+  ambiguities: string[];
+  validation: MetricDraftValidation;
+  sampleValue: number | null;
+  sampleError: string | null;
+  model: string;
 }

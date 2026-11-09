@@ -464,3 +464,37 @@ class MetricResponse(CamelModel):
 
 
 AISessionDetail.model_rebuild()
+
+
+# ── 指标中心「AI 起草」（P3-C1）────────────────────────────────────────────
+# 用户输入一句提示词 → LLM 产出指标草稿 → 前端确认后再调 POST /metrics 落库。
+# 草稿**不落库**，所以这里只有请求/响应两个模型，没有 ORM 对应物。
+
+class MetricDraftRequest(CamelModel):
+    """AI 起草请求：一句自然语言 + 可选的数据源/表引用。"""
+
+    prompt: str = Field(..., min_length=1, max_length=500)
+    datasource_id: UUID | None = None
+    table_ref: str | None = Field(None, max_length=200)
+
+
+class MetricDraftResponse(CamelModel):
+    """AI 起草结果（**草稿**，未落库）。
+
+    validation 内部固定三个键：ok / errors / warnings；references 为
+    [{field, transform}]，由后端从 formula 解析得到（不采信模型自述）。
+    """
+
+    key: str
+    name: str
+    description: str | None = None
+    formula: str
+    agg_kind: str | None = None
+    datasource_id: UUID | None = None
+    table_ref: str | None = None
+    references: list[dict] = Field(default_factory=list)
+    ambiguities: list[str] = Field(default_factory=list)
+    validation: dict = Field(default_factory=dict)
+    sample_value: float | int | None = None
+    sample_error: str | None = None
+    model: str = ""

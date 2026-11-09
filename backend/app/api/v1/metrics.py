@@ -15,12 +15,19 @@ from app.models.metric_version import MetricVersion
 from app.models.user import User
 from app.schemas import (
     MetricCreate,
+    MetricDraftRequest,
+    MetricDraftResponse,
     MetricResponse,
     MetricUpdate,
     SuccessResponse,
 )
 from app.repositories.unit_of_work import UnitOfWork
 from app.services.metric_parser import parse_derived_formula
+from app.services.metric_ai_service import (
+    MetricDraftError,
+    MetricDraftUnavailable,
+    draft_metric,
+)
 from app.services.metric_service import MetricService, MetricServiceError, assert_formula_allowed
 
 router = APIRouter(prefix="/metrics", tags=["指标中心"])
@@ -184,6 +191,44 @@ async def create_metric(
     await service._extract_lineage(metric.id, metric.formula)
     return SuccessResponse(
         data=MetricResponse.model_validate(metric).model_dump(mode="json", by_alias=True)
+    )
+
+
+# ── 指标中心「AI 起草」（P3-C1）──────────────────────────────────────────
+# ⚠️ 本路由必须声明在 `@router.get("/{metric_id}")` **之前**：
+# 路径匹配按声明顺序进行，先声明 /{metric_id} 会把 /metrics/draft 当成 metric_id
+# （结果是 422 uuid 解析失败，而不是走到这里）。
+@router.post("/draft", dependencies=[Depends(require_editor)])
+async def draft_metric_ai(
+    body: MetricDraftRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SuccessResponse:
+    """AI 起草指标（**不落库**）：一句提示词 → 草稿 + 校验结果。
+
+    草稿给人确认后，前端再调 POST /metrics 落库；这里不产生任何写操作。
+    校验失败仍返回 200（validation.errors 非空）——那是"草稿没写好"，不是接口出错。
+    """
+    try:
+        data = await draft_metric(
+            prompt=body.prompt,
+            datasource_id=body.datasource_id,
+            table_ref=body.table_ref,
+            user_id=current_user.id,
+            db=db,
+        )
+    except MetricDraftUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "AI_UNAVAILABLE", "message": exc.message},
+        ) from exc
+    except MetricDraftError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    return SuccessResponse(
+        data=MetricDraftResponse(**data).model_dump(mode="json", by_alias=True)
     )
 
 

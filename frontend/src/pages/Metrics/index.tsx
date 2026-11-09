@@ -11,10 +11,12 @@ import {
   Search,
   X,
   Layers,
+  Sparkles,
 } from "lucide-react";
 import {
   listMetrics,
   createMetric,
+  draftMetric,
   publishMetricVersion,
   rollbackMetricVersion,
 } from "../../api/metrics";
@@ -23,8 +25,33 @@ import type { DataSource, SchemaField } from "../../api/types";
 import type {
   MetricCreatePayload,
   MetricDefinition,
+  MetricDraft,
   MetricFormulaType,
 } from "../../types/metric";
+
+/** 统一提取后端错误文案：优先 axios 的 detail.message（如 503 AI_UNAVAILABLE） */
+function apiErrorMessage(e: unknown, fallback: string): string {
+  const err = e as {
+    response?: {
+      data?: {
+        detail?: string | { message?: string };
+        error?: { message?: string };
+        message?: string;
+      };
+    };
+    message?: string;
+  };
+  const data = err?.response?.data;
+  const detail = data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  const detailMessage = typeof detail === "object" ? detail?.message : undefined;
+  if (detailMessage) return detailMessage;
+  if (data?.error?.message) return data.error.message;
+  if (data?.message) return data.message;
+  // 无响应（网络中断 / 超时）：用 axios 的原始文案
+  if (!err?.response && err?.message) return err.message;
+  return fallback;
+}
 
 interface MetricModalProps {
   title: string;
@@ -356,10 +383,262 @@ function CreateMetricModal({
   );
 }
 
+function AiDraftModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [datasources, setDatasources] = useState<DataSource[]>([]);
+  const [prompt, setPrompt] = useState("");
+  const [datasourceId, setDatasourceId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<MetricDraft | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftKey, setDraftKey] = useState("");
+
+  // 数据源下拉（可选）：只用于给 AI 限定提示范围
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listDatasources({ pageSize: 100 });
+        if (!cancelled) setDatasources(res.items ?? []);
+      } catch {
+        if (!cancelled) setDatasources([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const inputCls =
+    "w-full px-3 py-2 text-[13px] rounded-lg border border-border bg-white text-card-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+
+  const generate = async () => {
+    if (!prompt.trim() || loading) return;
+    setLoading(true);
+    setError(null);
+    setDraft(null);
+    try {
+      const res = await draftMetric({
+        prompt: prompt.trim(),
+        datasourceId: datasourceId || null,
+      });
+      setDraft(res);
+      setDraftName(res.name);
+      setDraftKey(res.key);
+    } catch (e) {
+      setError(apiErrorMessage(e, "AI 起草失败，请稍后重试"));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const adopt = async () => {
+    if (!draft || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await createMetric({
+        key: draftKey.trim(),
+        name: draftName.trim(),
+        description: draft.description ?? undefined,
+        formula: draft.formula,
+        datasourceId: draft.datasourceId ?? undefined,
+        aggKind: draft.aggKind ?? undefined,
+        tableRef: draft.tableRef ?? undefined,
+      });
+      onCreated();
+      onClose();
+    } catch (e) {
+      setError(apiErrorMessage(e, "创建指标失败，请检查 Key 是否已存在"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const references = draft?.references ?? [];
+  const ambiguities = draft?.ambiguities ?? [];
+  const validationErrors = draft?.validation?.errors ?? [];
+  const warnings = draft?.validation?.warnings ?? [];
+  const canAdopt = Boolean(
+    draft && draftName.trim() && draftKey.trim() && validationErrors.length === 0
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-[12px] shadow-lg w-full max-w-[640px] p-5 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-[15px] font-semibold text-foreground inline-flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-ai" />
+            AI 起草指标
+          </h3>
+          <button onClick={onClose} className="p-1 text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="text-[12px] text-muted-foreground mb-3">
+          用一句话描述想要的指标，AI 生成草稿后由你确认创建
+        </p>
+
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-md bg-danger-light text-danger text-[12px]">{error}</div>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[12px] text-muted-foreground mb-1">指标需求</label>
+            <textarea
+              autoFocus
+              rows={3}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="例：已支付订单的客单价 / 各渠道退货率"
+              className={inputCls + " resize-none"}
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] text-muted-foreground mb-1">数据源（可选）</label>
+            <select
+              className={inputCls}
+              value={datasourceId}
+              onChange={(e) => setDatasourceId(e.target.value)}
+            >
+              <option value="">不指定（AI 自动判断）</option>
+              {datasources.map((ds) => (
+                <option key={ds.id} value={ds.id}>{ds.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={generate}
+              disabled={loading || !prompt.trim()}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-ai hover:bg-ai-hover disabled:opacity-50 transition-colors"
+            >
+              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              {loading ? "生成中..." : "生成草稿"}
+            </button>
+          </div>
+        </div>
+
+        {draft && (
+          <div className="mt-4 space-y-3 border-t border-border-light pt-4">
+            <div className="text-[12px] font-medium text-foreground">草稿预览（名称与 Key 可修改）</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[12px] text-muted-foreground mb-1">指标名称</label>
+                <input className={inputCls} value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-[12px] text-muted-foreground mb-1">标识 Key</label>
+                <input className={inputCls} value={draftKey} onChange={(e) => setDraftKey(e.target.value)} />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[12px] text-muted-foreground mb-1">口径说明</label>
+              <div className="px-3 py-2 text-[13px] rounded-lg bg-muted text-card-foreground whitespace-pre-wrap">
+                {draft.description || "—"}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[12px] text-muted-foreground mb-1">计算公式</label>
+              <div className="px-3 py-2 text-[12px] font-mono rounded-lg bg-muted text-card-foreground break-all">
+                {draft.formula || "—"}
+              </div>
+            </div>
+
+            {references.length > 0 && (
+              <div className="text-[12px] text-muted-foreground">
+                引用字段：
+                {references
+                  .map((r) => (r.transform ? r.field + "（" + r.transform + "）" : r.field))
+                  .join("、")}
+              </div>
+            )}
+
+            {ambiguities.length > 0 && (
+              <div className="px-3 py-2 rounded-md bg-warning-light text-[12px] text-[#92400E]">
+                <div className="font-medium mb-1">AI 判断存在多种口径，请确认：</div>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {ambiguities.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {validationErrors.length > 0 && (
+              <div className="px-3 py-2 rounded-md bg-danger-light text-[12px] text-danger">
+                <div className="font-medium mb-1">校验未通过，请先修正 Key / 公式：</div>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {validationErrors.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {warnings.length > 0 && (
+              <div className="px-3 py-2 rounded-md bg-warning-light text-[12px] text-[#92400E]">
+                <ul className="list-disc pl-4 space-y-0.5">
+                  {warnings.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="text-[12px] text-muted-foreground">
+              {draft.sampleValue !== null && (
+                <span className="text-foreground">试算值: {draft.sampleValue}</span>
+              )}
+              {draft.sampleError && <span className="ml-2">{draft.sampleError}</span>}
+              {draft.model && <span className="ml-2">· 模型 {draft.model}</span>}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end gap-2 mt-5">
+          {validationErrors.length > 0 && (
+            <span className="mr-auto text-[12px] text-danger">请先修正校验错误后再采纳</span>
+          )}
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-[13px] font-medium text-muted-foreground hover:bg-muted transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={adopt}
+            disabled={submitting || !canAdopt}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-primary hover:bg-primary-hover disabled:opacity-50 transition-colors"
+          >
+            {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            采纳并创建
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type ModalState =
   | { kind: "publish"; metric: MetricDefinition }
   | { kind: "rollback"; metric: MetricDefinition }
   | { kind: "create" }
+  | { kind: "draft" }
   | null;
 
 export default function MetricsPage() {
@@ -406,7 +685,7 @@ export default function MetricsPage() {
   }, [modal]);
 
   const runModal = async (value: string) => {
-    if (!modal || modal.kind === "create") return;
+    if (!modal || modal.kind === "create" || modal.kind === "draft") return;
     setSubmitting(true);
     setModalError(null);
     try {
@@ -475,13 +754,22 @@ export default function MetricsPage() {
             <option value="derived">派生指标</option>
           </select>
         </div>
-        <button
-          onClick={() => setModal({ kind: "create" })}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-primary hover:bg-primary-hover transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          新建指标
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setModal({ kind: "draft" })}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-ai bg-ai-light hover:bg-ai/10 transition-colors"
+          >
+            <Sparkles className="w-4 h-4" />
+            AI 起草
+          </button>
+          <button
+            onClick={() => setModal({ kind: "create" })}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-white bg-primary hover:bg-primary-hover transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            新建指标
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -608,6 +896,7 @@ export default function MetricsPage() {
       </div>
 
       {modal?.kind === "create" && <CreateMetricModal onClose={() => setModal(null)} onCreated={() => fetchList()} />}
+      {modal?.kind === "draft" && <AiDraftModal onClose={() => setModal(null)} onCreated={() => fetchList()} />}
       {modal?.kind === "publish" && (
         <MetricModal
           title={`发布新版本：${modal.metric.name}`}

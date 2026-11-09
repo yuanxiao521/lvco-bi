@@ -46,6 +46,8 @@ ALLOWED_FORMULAS = [
     'SUM({{amount}}) / NULLIF(COUNT(*),0)',
     "SUM(CASE WHEN \"status\"='paid' AND \"qty\">0 THEN \"amount\" END)",
     "SUM(CASE WHEN \"status\" IS NULL THEN 1 ELSE 0 END)",
+    # IN 列表（AI 起草很爱这么写，实测漏在第一次白名单里 → 判"不支持的语法结构: In"）
+    "SUM(CASE WHEN \"status\" IN ('paid','shipped') THEN \"amount\" ELSE 0 END)",
     'GREATEST(SUM("a"), 0)',
     'ABS(-SUM("a"))',
     'TRY_CAST(SUM("a") AS DOUBLE)',
