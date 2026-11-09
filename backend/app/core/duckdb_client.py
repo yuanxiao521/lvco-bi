@@ -40,13 +40,15 @@ class DuckDBClient:
                 cls._instance = super().__new__(cls)
         return cls._instance
 
-    def _init_conn(self, conn: duckdb.DuckDBPyConnection) -> None:
-        """对新连接做统一初始化：内存上限 + 扩展加载（+ 查询连接禁本地文件系统）。
+    def _init_conn(self, conn: duckdb.DuckDBPyConnection, read_only: bool = False) -> None:
+        """对新连接做统一初始化：内存上限 + 扩展加载（+ 只读查询连接禁本地文件系统）。
 
         安全分层（docs/research/10）：扩展 INSTALL/LOAD 本身要写本地磁盘，
         必须先于禁用；禁用后 DuckDB 层直接拒绝 read_csv/read_parquet 等文件函数
         （实测 1.5.5：File system LocalFileSystem has been disabled by configuration），
         不再单靠 AST 黑名单。
+        **按连接实际的 read_only 参数判断**——write_window 的读写连接（导入/上传，
+        commit 要写 WAL）绝不能禁，否则事务提交失败。
         """
         conn.execute(f"SET memory_limit='{settings.DUCKDB_MEMORY_LIMIT}'")
         # 装载 spatial 扩展（Excel 上传需要）
@@ -67,10 +69,11 @@ class DuckDBClient:
             conn.execute("LOAD mysql;")
         except duckdb.Error as e:
             log.error("mysql extension unavailable, MySQL ATTACH will fail: %s", e)
-        if bool(getattr(settings, "DUCKDB_READ_ONLY", False)):
+        if read_only:
             # 只读查询连接：禁本地文件系统（挡 read_csv/read_parquet/glob 等文件读取）。
             # 不影响：本地表/内存表查询、外部库 ATTACH（走网络，不经 LocalFileSystem）。
-            # 写窗口（write_window 的独立读写连接）不走这里，导入/上传不受影响。
+            # 写连接（write_window 独占升级的读写连接）走 read_only=False，不禁——
+            # 导入/上传的 commit 要写 WAL，禁了会 TransactionContext Error。
             try:
                 conn.execute("SET disabled_filesystems='LocalFileSystem'")
             except duckdb.Error as e:
@@ -78,7 +81,7 @@ class DuckDBClient:
 
     def _connect(self, db_path: Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
         conn = duckdb.connect(str(db_path), read_only=read_only)
-        self._init_conn(conn)
+        self._init_conn(conn, read_only=read_only)
         return conn
 
     def _connect_with_readonly_fallback(self, db_path: Path) -> duckdb.DuckDBPyConnection:

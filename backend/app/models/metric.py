@@ -3,9 +3,10 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.metric_filter import MetricFilter  # noqa: F401 - relationship 字符串引用
 
 
 class MetricDefinition(TimestampMixin, Base):
@@ -65,4 +66,13 @@ class MetricDefinition(TimestampMixin, Base):
     depends_on_metric_ids: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # 指标级范围口径（metric_filters 表）：resolve_metric 编译进 WHERE。
+    # selectin 策略：任何加载 MetricDefinition 的查询自动带出 filters，
+    # 无需各调用点补 selectinload（AsyncSession 下惰性访问会抛 MissingGreenlet）。
+    filters: Mapped[list["MetricFilter"]] = relationship(
+        "MetricFilter",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
     )

@@ -17,7 +17,7 @@ from app.schemas.query import ChartQueryConfig, MeasureConfig, QueryResult
 
 
 ALLOWED_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "MAX", "MIN", "STDDEV", "MEDIAN", "COUNT_DISTINCT"})
-ALLOWED_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "like"})
+ALLOWED_OPERATORS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "like", "isnull", "isnotnull"})
 ALLOWED_BUCKETS = frozenset({"day", "week", "month", "quarter", "year"})
 
 logger = structlog.get_logger("query_engine")
@@ -425,6 +425,11 @@ def _build_where(filters: list[dict[str, Any]], schema_fields: set[str], params:
         elif op == "like":
             conditions.append(f'"{field}" LIKE ?')
             params.append(value)
+        elif op == "isnull":
+            # 空值判断不带参数（如 剔除已退款单：refund_date IS NULL）；value 仅作语义标记
+            conditions.append(f'"{field}" IS NULL')
+        elif op == "isnotnull":
+            conditions.append(f'"{field}" IS NOT NULL')
 
     return "WHERE " + " AND ".join(conditions)
 

@@ -420,6 +420,17 @@ class DataChatRequest(CamelModel):
 
 AggKind = Literal["SUM", "AVG", "COUNT", "MAX", "MIN", "COUNT_DISTINCT", "MEDIAN", "STDDEV"]
 
+# 指标级范围条件（与 query_engine.ALLOWED_OPERATORS 对齐，不发明新算子）
+METRIC_FILTER_OPS = Literal["eq", "neq", "gt", "gte", "lt", "lte", "in", "between", "like", "isnull", "isnotnull"]
+
+
+class MetricFilterItem(CamelModel):
+    """一条指标范围条件：in → value 是数组；between → [lo, hi]；其余标量。"""
+
+    field: str = Field(..., min_length=1, max_length=200)
+    op: METRIC_FILTER_OPS
+    value: Any = None
+
 
 class MetricCreate(CamelModel):
     key: str = Field(..., min_length=1, max_length=120)
@@ -434,6 +445,8 @@ class MetricCreate(CamelModel):
     agg_kind: str | None = Field(None, max_length=20)
     datasource_id: UUID | None = None
     table_ref: str | None = Field("data", max_length=200)
+    # 指标级范围口径（如 仅已支付 status=eq=paid）；整组提交，后端整组替换
+    filters: list[MetricFilterItem] | None = None
 
 
 class MetricUpdate(CamelModel):
@@ -444,6 +457,8 @@ class MetricUpdate(CamelModel):
     datasource_id: UUID | None = None
     table_ref: str | None = Field(None, max_length=200)
     active: bool | None = None
+    # 提供即整组替换（传 [] 清空）；不传不动
+    filters: list[MetricFilterItem] | None = None
 
 
 class MetricResponse(CamelModel):
@@ -459,6 +474,7 @@ class MetricResponse(CamelModel):
     datasource_id: UUID | None
     table_ref: str | None
     active: bool
+    filters: list[MetricFilterItem] = []
     created_at: datetime
     updated_at: datetime | None
 
@@ -494,6 +510,7 @@ class MetricDraftResponse(CamelModel):
     table_ref: str | None = None
     references: list[dict] = Field(default_factory=list)
     ambiguities: list[str] = Field(default_factory=list)
+    filters: list[dict] = Field(default_factory=list)
     validation: dict = Field(default_factory=dict)
     sample_value: float | int | None = None
     sample_error: str | None = None

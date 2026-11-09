@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -49,7 +50,11 @@ from app.services.formula_guard import (
     validate_formula,
 )
 from app.services.llm_client import AINotConfiguredError, AIUpstreamError, LLMClient
-from app.services.metric_service import MetricServiceError, resolve_metric
+from app.services.metric_service import (
+    MetricServiceError,
+    resolve_metric,
+    validate_metric_filter_items,
+)
 from app.services.profile_schema import norm_type, type_kind
 from app.services.query_engine import execute_chart_query
 
@@ -91,6 +96,16 @@ _SYSTEM_PROMPT = """你是「Lvco BI 指标中心」的指标起草助手。用�
 ## 口径（description）必须写清
 1-3 句，必须覆盖：**是否含税、是否去重、统计范围（全量/已支付/已完成）、是否排除退款**等口径要点。
 例：成交金额合计，取已支付订单的 amount 求和，含税；不含退款订单。
+
+## 范围口径用 filters（不要塞进 formula）
+如果需求里带**范围/排除条件**（仅已支付、剔除退款单、只看华东、最近完成等），
+产出 filters 数组，formula 保持**纯聚合**：
+{"filters": [{"field": "status", "op": "eq", "value": "paid"},
+             {"field": "refund_date", "op": "isnull"}]}
+- op 只能是：eq/neq/gt/gte/lt/lte/in/between/like/isnull/isnotnull
+- in 的 value 是数组；isnull/isnotnull 的 value 给 true
+- 字段名必须逐字复制【可用字段】里的列名
+- 没有范围条件就给空数组 []
 
 ## 歧义必须说出来（不许猜了不吭声）
 如果这句话存在多种合理口径（是否含税、是否去重订单、是否含未支付/退款、口径字段不同），
@@ -392,6 +407,23 @@ def validate_draft(
     if not str(draft.get("description") or "").strip():
         warnings.append("建议补充口径说明（是否含税 / 是否去重 / 统计范围 / 时间范围）")
 
+    # 5) filters：op 白名单 / value 形态 / 字段存在性（复用指标中心同一套规则）
+    f_items = draft.get("filters")
+    if f_items is None:
+        draft["filters"] = []
+    elif isinstance(f_items, list):
+        items = [x for x in f_items if isinstance(x, dict)]
+        draft["filters"] = items
+        f_errors, _ = validate_metric_filter_items(items)
+        errors.extend(f_errors)
+        known = set(field_types.keys()) | {k.lower() for k in field_types.keys()}
+        for i, it in enumerate(items, 1):
+            fld = str(it.get("field") or "").strip()
+            if fld and fld not in known and fld.lower() not in known:
+                errors.append(f'filters[{i}]: 字段 "{fld}" 不在该数据源 schema 中')
+    else:
+        errors.append("filters 必须是数组")
+
     return errors, warnings
 
 
@@ -400,6 +432,9 @@ def _normalize_draft(obj: dict) -> dict:
     ambiguities = obj.get("ambiguities")
     if not isinstance(ambiguities, list):
         ambiguities = []
+    filters = obj.get("filters")
+    if not isinstance(filters, list):
+        filters = []
     return {
         "key": str(obj.get("key") or "").strip().lower(),
         "name": str(obj.get("name") or "").strip(),
@@ -407,6 +442,7 @@ def _normalize_draft(obj: dict) -> dict:
         "formula": str(obj.get("formula") or "").strip(),
         "agg_kind_raw": str(obj.get("agg_kind") or "").strip().upper() or None,
         "ambiguities": [str(x).strip() for x in ambiguities if str(x).strip()][:6],
+        "filters": [x for x in filters if isinstance(x, dict)][:20],
     }
 
 
@@ -444,6 +480,11 @@ async def _try_sample(
 ) -> tuple[float | int | None, str | None]:
     """用正式查询链路跑一次 LIMIT 5；失败只返回错误文案。"""
     try:
+        # 临时对象直接挂 filters（resolve_metric 读 metric.filters 属性编译 WHERE）
+        draft_filters = [
+            SimpleNamespace(field=str(f.get("field")), op=str(f.get("op")), value=f.get("value"))
+            for f in (draft.get("filters") or [])
+        ]
         metric = MetricDefinition(
             id=uuid4(),
             user_id=user_id,
@@ -456,6 +497,10 @@ async def _try_sample(
             table_ref=table_ref,
             active=True,
         )
+        try:
+            metric.filters = draft_filters
+        except Exception:  # noqa: BLE001 - filters 挂载失败只影响试算准确性
+            pass
         config = resolve_metric(metric, datasource_id=ds.id, limit=SAMPLE_LIMIT)
         result = await execute_chart_query(
             datasource_id=ds.id, config=config, user_id=user_id, db=db, force=True,
@@ -648,6 +693,7 @@ async def draft_metric(
         "table_ref": resolved_table_ref,
         "references": references,
         "ambiguities": draft["ambiguities"],
+        "filters": draft.get("filters") or [],
         "validation": {"ok": ok, "errors": errors, "warnings": warnings},
         "sample_value": sample_value,
         "sample_error": sample_error,

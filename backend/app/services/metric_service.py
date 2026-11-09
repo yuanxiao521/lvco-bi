@@ -326,10 +326,18 @@ def resolve_metric(
     expression = resolve_to_expression(metric, [str(d) for d in (dimensions or [])])
     agg = (metric.agg_kind or "SUM").upper()
     alias = f"{agg.lower()}_{metric.key}" if agg else metric.key
+    # 指标级范围口径（metric_filters）：编译进 WHERE，且**排在调用方 filters 之前**
+    # （指标口径先收窄，调用方的临时过滤在其上继续收紧）。派生指标 metric("key")
+    # 引用的是纯聚合，不继承被引指标的 filter——引用方要范围就在自己 filters 里写。
+    metric_own = [
+        {"field": f.field, "op": f.op, "value": f.value}
+        for f in (getattr(metric, "filters", None) or [])
+    ]
+    merged = [*metric_own, *(filters or [])]
     return ChartQueryConfig(
         dimensions=[str(d) for d in (dimensions or [])],
         measures=[MeasureConfig(field="", agg=agg, expression=expression, alias=alias)],
-        filters=[FilterConfig(**f) for f in (filters or [])],
+        filters=[FilterConfig(**f) for f in merged],
         chart_type=chart_type,
         datasource_id=str(datasource_id) if datasource_id else None,
         limit=limit,
@@ -588,6 +596,71 @@ async def check_metric_field_bindings(
         if missing:
             broken.append({"key": m.key, "name": m.name, "missing_fields": missing})
     return broken
+
+
+# ── 指标级范围口径（metric_filters）──────────────────────────────────────
+
+METRIC_FILTER_OPS: frozenset[str] = frozenset(
+    {"eq", "neq", "gt", "gte", "lt", "lte", "in", "between", "like", "isnull", "isnotnull"}
+)
+
+
+def validate_metric_filter_items(items: list[dict]) -> tuple[list[str], list[str]]:
+    """校验 filter 组：op 白名单 / field 形状 / value 形态。返回 (errors, warnings)。"""
+    errors: list[str] = []
+    warnings: list[str] = []
+    if len(items) > 20:
+        errors.append("filters 最多 20 条")
+    for i, it in enumerate(items, 1):
+        field = str(it.get("field") or "").strip()
+        op = str(it.get("op") or "").strip().lower()
+        value = it.get("value")
+        if not field:
+            errors.append(f"filters[{i}]: field 不能为空")
+        if op not in METRIC_FILTER_OPS:
+            errors.append(
+                f"filters[{i}]: 不支持的操作符 {op or '(空)'}，仅支持 "
+                + ", ".join(sorted(METRIC_FILTER_OPS))
+            )
+            continue
+        if op == "in" and not (isinstance(value, list) and len(value) > 0):
+            errors.append(f"filters[{i}]: in 的 value 必须是非空数组")
+        if op == "between":
+            if not (isinstance(value, list) and len(value) == 2):
+                errors.append(f"filters[{i}]: between 的 value 必须是 [lo, hi]")
+            elif value[0] is None or value[1] is None:
+                errors.append(f"filters[{i}]: between 的边界不能为空")
+        if op not in ("in", "between", "isnull", "isnotnull") and isinstance(value, (list, dict)):
+            errors.append(f"filters[{i}]: {op} 的 value 必须是标量")
+    return errors, warnings
+
+
+async def replace_metric_filters(db: AsyncSession, metric_id: UUID, items: list[dict]) -> None:
+    """整组替换指标的 filters（先删后插，调用方负责 flush/commit）。
+
+    传入空列表即清空。items 已通过 validate_metric_filter_items。
+    """
+    from app.models.metric_filter import MetricFilter
+
+    await db.execute(delete(MetricFilter).where(MetricFilter.metric_id == metric_id))
+    for it in items:
+        db.add(
+            MetricFilter(
+                metric_id=metric_id,
+                field=str(it["field"]).strip(),
+                op=str(it["op"]).strip().lower(),
+                value=it.get("value"),
+            )
+        )
+    await db.flush()
+
+
+def filters_to_dicts(filters: Any) -> list[dict]:
+    """ORM MetricFilter 列表 → [{field, op, value}]（JSON 序列化安全）。"""
+    out: list[dict] = []
+    for f in filters or []:
+        out.append({"field": str(f.field), "op": str(f.op), "value": f.value})
+    return out
 
 
 class MetricService:
