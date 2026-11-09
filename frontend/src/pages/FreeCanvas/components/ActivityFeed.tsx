@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { Loader2, CheckCircle2, XCircle, ChevronDown, ListTree } from "lucide-react";
+import type { MessageStep } from "../../../types/api";
 
 // 工具调用项：画布智能体实时执行的一个工具
 export interface FeedTool {
@@ -328,3 +329,45 @@ function ActivityFeed({ steps, meta }: ActivityFeedProps) {
 }
 
 export default memo(ActivityFeed);
+
+
+/** 历史消息「过程」折叠条：数据来自 ai_messages.steps 投影（随消息持久化，零查询成本）。
+    AIChat 与画布助手面板共用；展开复用上面的 ActivityFeed 时间线。 */
+export function MessageStepsHistory({ steps }: { steps: MessageStep[] }) {
+  const [open, setOpen] = useState(false);
+  const totalMs = steps.reduce((acc, s) => acc + (s.durationMs || 0), 0);
+  const fails = steps.filter((s) => !s.ok).length;
+  const toFeedSteps = steps.map((s) => ({
+    id: s.id,
+    title:
+      s.kind === "llm"
+        ? "AI 推理" + (s.model ? "（" + s.model + "）" : "")
+        : s.kind === "dispatch"
+          ? "任务派发"
+          : "工具调用：" + (s.toolName || "未知"),
+    status: (s.ok ? "done" : "failed") as "done" | "failed",
+    tools: [{
+      name: s.kind === "llm"
+        ? "LLM" + (s.tokens ? "（tokens " + s.tokens + "）" : "")
+        : (s.toolName || "") + (s.summary ? " " + s.summary.slice(0, 60) : ""),
+      status: (s.ok ? "ok" : "err") as "ok" | "err",
+    }],
+  }));
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-primary transition-colors"
+      >
+        <ListTree className="w-3 h-3" />
+        过程（{steps.length} 步 · {(totalMs / 1000).toFixed(1)}s{fails ? " · " + fails + " 失败" : ""}）
+        <span className="text-[10px]">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="mt-2">
+          <ActivityFeed steps={toFeedSteps} />
+        </div>
+      )}
+    </div>
+  );
+}

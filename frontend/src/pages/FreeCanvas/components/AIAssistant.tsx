@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, useCallback, memo } from "react";
 import { MessageCircle, Sparkles, X, Send, Square, Loader2, GripVertical, Plus } from "lucide-react";
 import { useCanvasAssistantStore, abortCanvasStream, getActiveCanvasId } from "../../../stores/canvasAssistantStore";
 import type { CanvasAssistantCtx } from "../../../stores/canvasAssistantStore";
-import ActivityFeed from "./ActivityFeed";
+import ActivityFeed, { MessageStepsHistory } from "./ActivityFeed";
+import type { MessageStep } from "../../../types/api";
 
 // Props 接口：AI 助手组件的所有外部输入属性
 interface AIAssistantProps {
@@ -490,6 +491,10 @@ export default memo(function AIAssistant({
                       <ActivityFeed steps={steps} meta={meta ?? undefined} />
                     </div>
                   )}
+                  {/* 历史消息过程投影：刷新后 steps（直播）为空，折叠条是唯一过程展示 */}
+                  {!(isLastAssistant && steps.length > 0) && ((msg as { steps?: unknown }).steps as MessageStep[] | undefined)?.length ? (
+                    <MessageStepsHistory steps={(msg as { steps?: unknown }).steps as MessageStep[]} />
+                  ) : null}
                 </div>
               </div>
               );

@@ -2197,6 +2197,13 @@ async def canvas_ai_chat(
                         )
                         if hint.strip() not in (am.content or ""):
                             am.content = (am.content or "") + hint
+                    # 过程步骤投影：画布收尾同样生成（与 chat_task 一致）
+                    try:
+                        from app.services.agent_trace import current_trace_id, generate_steps_projection
+
+                        am.steps = await generate_steps_projection(db, current_trace_id())
+                    except Exception:  # noqa: BLE001
+                        pass
                     await db.commit()
                 except Exception:
                     try:

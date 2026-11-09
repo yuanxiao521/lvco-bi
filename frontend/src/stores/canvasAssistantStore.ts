@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { listCanvasSessions, listMessages } from "../api/ai";
+import type { MessageStep } from "../types/api";
 import { tokenStore } from "../api/client";
 import type { AISession } from "../types/api";
 import { mapProgressStatus, TOOL_STAGE } from "../pages/FreeCanvas/components/ActivityFeed";
@@ -21,6 +22,8 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** 本轮过程步骤投影（assistant 消息才有；历史回看用） */
+  steps?: MessageStep[] | null;
 }
 
 export interface CanvasFieldMeta {
@@ -469,6 +472,7 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
               id: m.id,
               role: m.role as "user" | "assistant",
               content: m.content,
+              steps: m.steps ?? null,
             })),
         });
       }

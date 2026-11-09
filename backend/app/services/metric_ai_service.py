@@ -93,6 +93,12 @@ _SYSTEM_PROMPT = """你是「Lvco BI 指标中心」的指标起草助手。用�
 - 中文名（如 金额）只能出现在 name/description 里，不允许出现在 formula 里
 - 时间范围不要写进 formula（指标口径不含时间过滤，时间由查询层控制）
 
+## 枚举值硬规则（违反 = 死指标）
+- 标注【全部取值】的列，其枚举值**只能从清单里选**，一个都不许编造；
+- 清单里没有语义对应的值（如需求说"已支付"但清单只有 Processing/Shipped/Returned）：
+  按**业务语义就近映射**（如 Shipped=已发货即已支付），并在 ambiguities 里写明映射依据；
+- 严禁出现清单外的字符串字面量。
+
 ## 口径（description）必须写清
 1-3 句，必须覆盖：**是否含税、是否去重、统计范围（全量/已支付/已完成）、是否排除退款**等口径要点。
 例：成交金额合计，取已支付订单的 amount 求和，含税；不含退款订单。
@@ -162,6 +168,42 @@ def _field_sensitive(field: dict) -> bool:
     return bool(detect_sensitive(str(field.get("name") or "")))
 
 
+async def _attach_enum_values(db: AsyncSession, ds: DataSource, fields: list[dict]) -> None:
+    """给低基数字符串列（dimension/非敏感）附上**全量取值清单**（最多 20 个）。
+
+    为什么必须全量：只给 3 个随机样例时，模型会按"通用电商惯例"编造枚举值
+    （如把 status 写成 'Paid'，而数据里只有 Processing/Shipped/Returned）——
+    起草出的指标试算为 0 行，等于死指标。全量清单让模型在**真实枚举空间**里选值。
+    """
+    from app.core.duckdb_client import duckdb_client
+
+    schema_name = duckdb_client.get_schema_name(
+        "", str(ds.id), getattr(ds, "name", "") or ""
+    )
+    table = f'"{schema_name}"."data"'
+    for f in fields:
+        if not isinstance(f, dict) or not f.get("name"):
+            continue
+        dtype = norm_type(f.get("data_type") or f.get("type"))
+        if type_kind(dtype) != "other" or _field_sensitive(f):
+            continue
+        if f.get("category") and str(f["category"]) not in ("dimension",):
+            continue
+        col = str(f["name"])
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", col):
+            continue
+        try:
+            rows = duckdb_client.fetchall(
+                f'SELECT DISTINCT "{col}" FROM {table} WHERE "{col}" IS NOT NULL LIMIT 21'
+            )
+        except Exception:  # noqa: BLE001 - 枚举探测失败就退回样例展示
+            continue
+        values = [str(r[0]) for r in rows if r[0] is not None][:20]
+        if len(values) >= 2 and len(values) <= 20:
+            # 恰好 21 → 可能截断，不给全量清单（避免模型以为枚举完备）
+            f["enum_values"] = values
+
+
 def _render_field_line(field: dict) -> str:
     name = str(field.get("name") or "").strip()
     dtype = norm_type(field.get("data_type") or field.get("type"))
@@ -171,8 +213,11 @@ def _render_field_line(field: dict) -> str:
     if category:
         parts.append(f"[{category}]")
     samples = field.get("sample") or []
+    enums = field.get("enum_values") or []
     if _field_sensitive(field):
         parts.append("（敏感列，无样例）")
+    elif enums:
+        parts.append("【全部取值】" + ", ".join(enums))
     elif isinstance(samples, (list, tuple)) and samples:
         rendered = ", ".join(str(s) for s in list(samples)[:3])
         parts.append(f"样例: {rendered}")
@@ -603,6 +648,11 @@ async def draft_metric(
         str(f["name"]): type_kind(norm_type(f.get("data_type") or f.get("type")))
         for f in fields
     }
+    # 枚举列取全量取值清单（防模型编造枚举值 → 死指标）
+    try:
+        await _attach_enum_values(db, ds, fields)
+    except Exception:  # noqa: BLE001
+        logger.warning("[metric_ai] enum_probe_failed", exc_info=True)
     resolved_table_ref = (
         (table_ref or "").strip()
         or str(meta.get("table_name") or "").strip()
