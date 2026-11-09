@@ -678,11 +678,33 @@ async def stream_unified(
                         )
                     except Exception:  # noqa: BLE001
                         logger.warning("[lead_unified] set_pending_failed", exc_info=True)
+                    plan = [
+                        str(x).strip()[:120]
+                        for x in (args.get("plan") or [])
+                        if str(x).strip()
+                    ][:8]
+                    # 「先展示后确认」：confirm 必须带清单，否则用户看到的是
+                    # 「是否按上述方案…」而根本没有"上述方案"（真机实测）。
+                    # 没给清单 → 降级为 clarify（让用户文字补充），不出确认卡片。
+                    # 降级规则只针对**非破坏性**的、模型自己选的 confirm：
+                    # 破坏性操作（命中清空/删除等标记）或代码升级出来的 confirm 一律保留——
+                    # HITL 不变量优先（破坏性操作必须弹卡片，且它没有"交付物清单"可列）。
+                    _destructive = any(m in question for m in _ASK_CONFIRM_MARKERS)
+                    if (
+                        ask_kind == "confirm"
+                        and not plan
+                        and not _ask_upgraded
+                        and not _destructive
+                    ):
+                        ask_kind = "clarify"
+                        degradation.append("lead_confirm_without_plan_downgraded")
+                        logger.info("[lead_unified] confirm_without_plan question=%s",
+                                    question[:40])
                     async for ev in _answer(question):
                         yield ev
                     if ask_kind == "confirm":
                         yield {"type": "confirm_request", "goal": str(user_msg or ""),
-                               "question": question}
+                               "question": question, "plan": plan}
                 else:  # stop
                     reason = str(args.get("reason") or "")
                     if reason:

@@ -139,7 +139,14 @@ TERMINAL_SPECS: list[dict] = [
     _fn("ask_user", "反问用户并结束本轮（等用户下一轮回复）。",
         {"question": {"type": "string"},
          "ask_kind": {"type": "string", "enum": ["confirm", "clarify"],
-                      "description": "confirm=是/否确认执行某具体操作；clarify=需要用户补充具体信息"}},
+                      "description": "confirm=是/否确认执行某具体操作；clarify=需要用户补充具体信息"},
+         "plan": {
+             "type": "array",
+             "items": {"type": "string"},
+             "description": "ask_kind=confirm 时必填：把你要做的事**逐条列出来**给用户确认"
+                            "（如 3 张 KPI 卡 / 5 张图表 / 1 段叙事），3-6 条，每条一句、"
+                            "写清产物与数量。用户在卡片上看到清单后才点确认——"
+                            "没有清单的确认等于没确认，会被降级为 clarify。"}},
         ["question", "ask_kind"], intent=True),
     _fn("stop", "主目标已完成，结束本轮。", {"reason": {"type": "string"}}, [], intent=True),
 ]

@@ -506,7 +506,19 @@ export default memo(function AIAssistant({
               <div className="flex justify-start">
                 <div className="max-w-[90%] px-3 py-2 rounded-[10px] bg-amber-50 border border-amber-200">
                   <div className="text-[12.5px] text-card-foreground whitespace-pre-wrap">
+                    {(pendingConfirm.plan?.length ?? 0) > 0 && (
+                    <div className="mb-1.5">
+                      <div className="text-[11px] font-medium text-amber-800 mb-1">即将执行（请确认清单）：</div>
+                      <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900">
+                        {pendingConfirm.plan!.map((item, i) => (
+                          <li key={i}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="text-[12px] text-amber-900">
                     {pendingConfirm.question || "请确认是否执行上一步操作？"}
+                  </div>
                   </div>
                   <div className="mt-2 flex gap-2">
                     <button

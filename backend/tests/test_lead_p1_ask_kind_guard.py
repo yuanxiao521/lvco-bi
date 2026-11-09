@@ -163,3 +163,37 @@ def test_set_pending_uses_instance_method_not_module_import():
     assert hasattr(m, 'lead_session_state'), '实例不存在'
     assert hasattr(m.lead_session_state, 'set_pending')
     assert not hasattr(m, 'set_pending'), '模块级 set_pending 不应存在（防止再次错误导入）'
+
+
+# ── confirm 必须带 plan（先展示、后确认）────────────────────────────────
+
+async def test_confirm_request_carries_plan(monkeypatch):
+    events = await _run(
+        [[_tc("ask_user", {"question": "是否按上面清单搭报告？", "ask_kind": "confirm",
+                           "plan": ["3 张 KPI 卡", "5 张图表"], "reason": "批量建看板"})]],
+        monkeypatch=monkeypatch,
+    )
+    confirms = [e for e in events if e.get("type") == "confirm_request"]
+    assert confirms, "带 plan 的 confirm 必须弹卡片"
+    assert confirms[0]["plan"] == ["3 张 KPI 卡", "5 张图表"]
+
+
+async def test_model_chosen_confirm_without_plan_downgraded(monkeypatch):
+    """模型自己选的 confirm 却没给清单 → 降级 clarify，不出空确认卡片。
+
+    真实投诉：卡片弹出但只有「是否按上述方案…」，用户根本没看到「上述方案」。
+    """
+    events = await _run(
+        [[_tc("ask_user", {"question": "是否按上述方案搭建完整报告？",
+                           "ask_kind": "confirm", "reason": "批量产物"})]],
+        monkeypatch=monkeypatch,
+    )
+    assert not [e for e in events if e.get("type") == "confirm_request"]
+    done = [e for e in events if e.get("type") == "done"][-1]
+    assert "lead_confirm_without_plan_downgraded" in done["degradations"]
+
+
+def test_ask_user_spec_exposes_plan():
+    spec = next(s for s in TERMINAL_SPECS if s["function"]["name"] == "ask_user")
+    props = spec["function"]["parameters"]["properties"]
+    assert "plan" in props and props["plan"]["type"] == "array"

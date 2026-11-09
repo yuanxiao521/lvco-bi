@@ -127,7 +127,7 @@ interface CanvasAssistantStore {
   send: (content: string, ctx: CanvasAssistantCtx, uiAction?: { type: string } | null) => Promise<void>;
   resumeStream: (ctx: CanvasAssistantCtx) => Promise<void>;
   /** 待确认卡片（后端 confirm_request 事件的载荷）；null = 无待确认。用户点击按钮或取消后清除 */
-  pendingConfirm: { goal: string; question: string } | null;
+  pendingConfirm: { goal: string; question: string; plan?: string[] } | null;
   clearPendingConfirm: () => void;
 }
 
