@@ -70,6 +70,7 @@ export interface MessageStep {
   tokens?: number;
   model?: string;
   errorKind?: string;
+  errorMsg?: string;
 }
 
 export interface AIMessage {

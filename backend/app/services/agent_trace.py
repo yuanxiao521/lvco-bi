@@ -517,6 +517,8 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
                     step["model"] = str(r.model)
             if getattr(r, "error_kind", None):
                 step["errorKind"] = str(r.error_kind)
+            if getattr(r, "error_msg", None):
+                step["errorMsg"] = str(r.error_msg)[:200]
             steps.append(step)
         return steps
     except Exception:  # noqa: BLE001
