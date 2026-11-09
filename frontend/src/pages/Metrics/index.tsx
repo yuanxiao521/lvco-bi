@@ -383,6 +383,20 @@ function CreateMetricModal({
   );
 }
 
+const FILTER_OP_LABEL: Record<string, string> = {
+  eq: "=",
+  neq: "≠",
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+  in: "属于",
+  between: "介于",
+  like: "包含",
+  isnull: "为空",
+  isnotnull: "不为空",
+};
+
 function AiDraftModal({
   onClose,
   onCreated,
@@ -452,6 +466,7 @@ function AiDraftModal({
         datasourceId: draft.datasourceId ?? undefined,
         aggKind: draft.aggKind ?? undefined,
         tableRef: draft.tableRef ?? undefined,
+        filters: draft.filters?.length ? draft.filters : undefined,
       });
       onCreated();
       onClose();
@@ -558,6 +573,19 @@ function AiDraftModal({
                 {draft.formula || "—"}
               </div>
             </div>
+
+            {(draft.filters?.length ?? 0) > 0 && (
+              <div>
+                <label className="block text-[12px] text-muted-foreground mb-1">范围口径（编译为 WHERE，指标生效时自动附加）</label>
+                <div className="px-3 py-2 rounded-lg bg-muted space-y-1">
+                  {draft.filters!.map((f, i) => (
+                    <div key={i} className="text-[12px] font-mono text-card-foreground">
+                      {f.field} {FILTER_OP_LABEL[f.op] ?? f.op} {JSON.stringify(f.value)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {references.length > 0 && (
               <div className="text-[12px] text-muted-foreground">
@@ -829,6 +857,14 @@ export default function MetricsPage() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-[12px] font-mono max-w-[220px] truncate" title={m.formula}>
                       {m.formula || "—"}
+                      {(m.filters?.length ?? 0) > 0 && (
+                        <span
+                          className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-ai-light text-ai align-middle"
+                          title={m.filters!.map((f) => f.field + " " + (FILTER_OP_LABEL[f.op] ?? f.op) + " " + JSON.stringify(f.value)).join("；")}
+                        >
+                          范围×{m.filters!.length}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground font-mono text-[12px]">{m.version}</td>
                     <td className="px-4 py-3">

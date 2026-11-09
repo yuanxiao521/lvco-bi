@@ -14,6 +14,8 @@ export interface MetricDefinition {
   datasourceId?: string | null;
   aggKind?: string | null;
   tableRef?: string | null;
+  /** 指标级范围口径（后端编译进 WHERE） */
+  filters?: MetricFilterField[];
 }
 
 export interface MetricCreatePayload {
@@ -29,6 +31,8 @@ export interface MetricCreatePayload {
   /** 免手写 SQL：选字段 + 聚合方式自动生成公式 */
   sourceField?: string;
   agg?: string;
+  /** 指标级范围口径（仅已支付/剔除退款单等）；后端整组替换 */
+  filters?: MetricFilterField[];
 }
 
 export interface MetricUpdatePayload {
@@ -39,6 +43,7 @@ export interface MetricUpdatePayload {
   tableRef?: string;
   datasourceId?: string;
   active?: boolean;
+  filters?: MetricFilterField[];
 }
 
 export interface MetricsListParams extends PaginationParams {
@@ -98,6 +103,17 @@ export interface MetricDraftValidation {
   warnings: string[];
 }
 
+/** 指标级范围条件（口径 = 聚合 + 过滤）；op 与后端 query_engine.ALLOWED_OPERATORS 对齐 */
+export type MetricFilterOp =
+  | "eq" | "neq" | "gt" | "gte" | "lt" | "lte"
+  | "in" | "between" | "like" | "isnull" | "isnotnull";
+
+export interface MetricFilterField {
+  field: string;
+  op: MetricFilterOp;
+  value: unknown;
+}
+
 /** AI 起草返回的指标草稿（不落库，用户确认后才创建） */
 export interface MetricDraft {
   key: string;
@@ -109,6 +125,7 @@ export interface MetricDraft {
   tableRef: string | null;
   references: MetricDraftReference[];
   ambiguities: string[];
+  filters: MetricFilterField[];
   validation: MetricDraftValidation;
   sampleValue: number | null;
   sampleError: string | null;

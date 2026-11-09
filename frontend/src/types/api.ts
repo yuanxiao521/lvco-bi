@@ -57,12 +57,26 @@ export interface AISessionDetail extends AISession {
   messages: AIMessage[];
 }
 
+/** 本轮过程步骤投影（assistant 消息才有；后端从 agent_calls 事实源生成） */
+export interface MessageStep {
+  id: string;
+  kind: "tool" | "llm" | "dispatch";
+  toolName: string;
+  ok: boolean;
+  durationMs: number;
+  summary: string;
+  tokens?: number;
+  model?: string;
+  errorKind?: string;
+}
+
 export interface AIMessage {
   id: string;
   sessionId: string;
   role: AIMessageRole;
   content: string;
   chartData: Record<string, unknown> | null;
+  steps?: MessageStep[] | null;
   createdAt: string;
 }
 
