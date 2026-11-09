@@ -349,8 +349,10 @@ export function MessageStepsHistory({ steps }: { steps: MessageStep[] }) {
     tools: [{
       name: s.kind === "llm"
         ? "LLM" + (s.tokens ? "（tokens " + s.tokens + "）" : "")
-        : (s.toolName || "") + (s.summary ? " " + s.summary.slice(0, 60) : ""),
+        : s.toolName || "",
       status: (s.ok ? "ok" : "err") as "ok" | "err",
+      args: (s.args ?? undefined) as Record<string, unknown> | undefined,
+      result: s.result || undefined,
     }],
   }));
   return (

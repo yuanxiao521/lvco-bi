@@ -493,6 +493,9 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
                 "ok": bool(getattr(r, "ok", True)),
                 "durationMs": int(getattr(r, "duration_ms", 0) or 0),
                 "summary": str(getattr(r, "result_preview", "") or "")[:120],
+                # 与直播同等信息量：展开能看到完整参数（脱敏后的 args_json）与结果预览
+                "args": getattr(r, "args_json", None) or {},
+                "result": str(getattr(r, "result_preview", "") or "")[:400],
             }
             if kind == "llm":
                 tin = int(getattr(r, "tokens_in", 0) or 0)

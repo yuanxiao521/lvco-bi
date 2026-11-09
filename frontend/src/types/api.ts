@@ -65,6 +65,8 @@ export interface MessageStep {
   ok: boolean;
   durationMs: number;
   summary: string;
+  args?: Record<string, unknown> | null;
+  result?: string | null;
   tokens?: number;
   model?: string;
   errorKind?: string;
