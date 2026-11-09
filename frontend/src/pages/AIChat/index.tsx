@@ -689,7 +689,7 @@ export default function AIChat() {
                           </div>
                         )}
                         {/* 历史消息的过程投影：随消息持久化（ai_messages.steps），点开回看 */}
-                        {!isLastAssistant && !msg.id.startsWith("streaming-") && (msg.steps?.length ?? 0) > 0 && (
+                        {!msg.id.startsWith("streaming-") && !(isLastAssistant && agentSteps.length > 0) && (msg.steps?.length ?? 0) > 0 && (
                           <MessageStepsHistory steps={msg.steps!} />
                         )}
                       </div>
