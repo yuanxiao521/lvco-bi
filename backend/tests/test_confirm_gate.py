@@ -192,3 +192,38 @@ def test_entry_points_still_forward_ui_action():
     src = (root / "app" / "api" / "v1" / "ai.py").read_text(encoding="utf-8")
     n = src.count('ui_action=getattr(body, "ui_action", None)')
     assert n >= 2, f"两个入口都应透传 ui_action，实际只找到 {n} 处"
+
+
+# ── 确认续跑：清单必须随挂起下发 + 复杂度不能写死 simple ──────────────
+
+
+async def test_confirm_resume_carries_plan_and_promotes_complexity(fake_repo):
+    """用户确认了清单，续跑必须按清单派发且走 complex 内核。
+
+    两个历史 bug：
+    1. plan 没随挂起保存 → 子 agent 只拿到用户原话、重新规划；
+    2. complexity 写死 "simple" → ENTRY_WORKERS 把 simple 映射到 react 轻量内核
+       （chat: complex→orchestrator / simple→react），报告类任务被降级执行。
+    """
+    plan = ["3 张 KPI 指标卡", "5 张图表（渠道占比/月度趋势/区域对比…）", "1 段结论叙事"]
+    lead_session_state.set_pending("s9", "搭一个销售完整报告", plan=plan)
+    agent = LeadAgent(llm=None)
+
+    kind, payload = await agent._confirm_guard(_ctx("s9", ui_action={"type": "confirm"}), "确认")
+
+    assert kind == "resume"
+    goal = payload.tool_args["goal"]
+    assert "用户已通过确认卡片批准的交付清单" in goal, "清单必须随 goal 下发到子 agent"
+    assert "3 张 KPI 指标卡" in goal and "5 张图表" in goal
+    assert payload.complexity == "complex", "多条清单必须走编排内核，不能降级 react"
+
+
+async def test_confirm_resume_without_plan_keeps_original_goal(fake_repo):
+    """破坏性操作没有清单：goal 保持原话，不被拼接污染。"""
+    lead_session_state.set_pending("s10", "清空画布上的全部内容")
+    agent = LeadAgent(llm=None)
+
+    kind, payload = await agent._confirm_guard(_ctx("s10", ui_action={"type": "confirm"}), "确认")
+
+    assert kind == "resume"
+    assert payload.tool_args["goal"] == "清空画布上的全部内容"

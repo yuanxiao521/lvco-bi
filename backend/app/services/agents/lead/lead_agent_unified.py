@@ -668,6 +668,11 @@ async def stream_unified(
                             "[lead_unified] ask_kind_upgraded_to_confirm question=%s",
                             question[:40],
                         )
+                    plan = [
+                        str(x).strip()[:120]
+                        for x in (args.get("plan") or [])
+                        if str(x).strip()
+                    ][:8]
                     try:
                         from app.services.lead_session_state import lead_session_state
                         lead_session_state.set_pending(
@@ -675,14 +680,11 @@ async def stream_unified(
                             str(user_msg or ""),
                             # P4-B：把本轮 turn_id 一起挂起，确认续跑时复用它
                             turn_id=agent_trace.current_turn_id(),
+                            # 交付清单一起挂起：用户确认的就是这份清单，续跑必须按它执行
+                            plan=plan,
                         )
                     except Exception:  # noqa: BLE001
                         logger.warning("[lead_unified] set_pending_failed", exc_info=True)
-                    plan = [
-                        str(x).strip()[:120]
-                        for x in (args.get("plan") or [])
-                        if str(x).strip()
-                    ][:8]
                     # 「先展示后确认」：confirm 必须带清单，否则用户看到的是
                     # 「是否按上述方案…」而根本没有"上述方案"（真机实测）。
                     # 没给清单 → 降级为 clarify（让用户文字补充），不出确认卡片。

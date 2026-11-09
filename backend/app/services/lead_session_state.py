@@ -96,17 +96,30 @@ class LeadSessionState:
     def _ttl(self) -> int:
         return int(getattr(settings, "ai_session_lock_ttl", 600))
 
-    def set_pending(self, session_id: object, goal: str, *, turn_id: str | None = None) -> None:
-        """ask_user 时写入挂起目标（用户原话）。
+    def set_pending(
+        self,
+        session_id: object,
+        goal: str,
+        *,
+        turn_id: str | None = None,
+        plan: list[str] | None = None,
+    ) -> None:
+        """ask_user 时写入挂起目标（用户原话 + 已展示给用户的交付清单）。
 
         P4-B：turn_id 一并挂起 —— HITL 确认续跑是新请求（新 trace/turn），
         续跑分支用 take_resumed_turn_id 取回它，让同一轮的记录串在原 turn_id 下。
+
+        plan：确认卡片上展示的交付清单。**必须一起挂起**——否则用户确认了
+        "3 张 KPI + 5 张图"，续跑时子 agent 只拿到用户原话、重新规划，
+        条款与用户看到的不一致（真机投诉）。
         """
         if not session_id or not (goal or "").strip():
             return
-        payload: dict[str, str] = {"goal": goal}
+        payload: dict = {"goal": goal}
         if turn_id:
             payload["turn_id"] = str(turn_id)
+        if plan:
+            payload["plan"] = [str(x) for x in plan if str(x).strip()]
         try:
             _repo().set(
                 self._key(session_id),
@@ -136,6 +149,21 @@ class LeadSessionState:
         except Exception:  # noqa: BLE001
             logger.warning("lead_state_pop_failed session=%s", session_id, exc_info=True)
         return None
+
+    def peek_resumed_plan(self, session_id: object) -> list[str]:
+        """取回上一次 pop 的挂起记录里的交付清单（**不消费** turn_id）。
+
+        在 _confirm_guard 里用：它比 take_resumed_turn_id 更早执行，
+        用 pop 会把 turn_id 一起吃掉，导致续跑记录的 turn 归属丢失。
+        """
+        if not session_id:
+            return []
+        try:
+            payload = _last_resumed.get(str(session_id)) or {}
+            plan = payload.get("plan")
+            return [str(x) for x in plan] if isinstance(plan, list) else []
+        except Exception:  # noqa: BLE001
+            return []
 
     def take_resumed_turn_id(self, session_id: object) -> str | None:
         """取回上一次 pop 的挂起记录里的 turn_id（一次性；没有则 None）。

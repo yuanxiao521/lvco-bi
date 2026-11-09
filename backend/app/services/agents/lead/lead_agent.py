@@ -475,6 +475,53 @@ class LeadAgent:
             yield {"type": "compressed_history", **memory_event}
         yield {"type": "done", "degraded": bool(degradation), "degradations": degradation}
 
+    def _resume_decision(self, pending: str, ctx: LeadContext, *, source: str) -> Decision:
+        """构造确认续跑的派发决策：**带用户已确认的清单 + 正确复杂度**。
+
+        两个历史 bug（真机暴露）：
+        1. 清单丢了：卡片上展示的 plan 没随挂起保存，续跑只拿到用户原话 →
+           子 agent 重新规划，实际交付与用户确认的不一致；
+        2. complexity 写死 "simple" → ENTRY_WORKERS 把 simple 映射到 **react 轻量内核**
+           （chat: complex→orchestrator / simple→react），用户确认了"3 KPI + 5 图表"
+           却被当成单查询执行，产物自然缩水；且这条路**绕过了 effective_complexity 兜底**。
+        """
+        plan: list[str] = []
+        try:
+            from app.services.lead_session_state import lead_session_state
+
+            plan = lead_session_state.peek_resumed_plan(ctx.session_id) or []
+        except Exception:  # noqa: BLE001
+            plan = []
+        goal = pending
+        if plan:
+            lines = "\n".join(f"{i}) {x}" for i, x in enumerate(plan, 1))
+            goal = (
+                f"{pending}\n\n【用户已通过确认卡片批准的交付清单】\n{lines}\n"
+                "必须按这份清单交付（数量与类型都要满足），不要自行缩减或改成别的产物。"
+            )
+        # 复杂度：复用统一循环的确定性兜底（多步/多产物特征 → complex），
+        # 而不是写死 simple——写死会把报告类任务错误降级到 react。
+        try:
+            from app.services.agents.lead.lead_agent_unified import effective_complexity
+
+            complexity, _overridden = effective_complexity(goal, "simple", entry=ctx.entry)
+        except Exception:  # noqa: BLE001
+            complexity = "complex"
+        if plan and len(plan) >= 3:
+            complexity = "complex"
+        logger.info(
+            "[lead] confirm_resume source=%s complexity=%s plan_items=%d",
+            source, complexity, len(plan),
+        )
+        return Decision(
+            action=ActionType.CALL_ANALYSIS,
+            tool_name="run_analysis",
+            tool_args={"goal": goal},
+            reason=("用户通过确认卡片恢复执行" if source == "card" else "用户文本确认，恢复执行上轮目标"),
+            degraded=False,
+            complexity=complexity,
+        )
+
     async def _confirm_guard(self, ctx: LeadContext, user_msg: str) -> tuple[str, object] | None:
         """确认守卫（HITL gate，决策之前拦截）。
 
@@ -490,14 +537,7 @@ class LeadAgent:
         if action_type == "confirm":
             if pending:
                 logger.info("[lead] confirm_gate_resume goal=%s", pending[:40])
-                return ("resume", Decision(
-                    action=ActionType.CALL_ANALYSIS,
-                    tool_name="run_analysis",
-                    tool_args={"goal": pending},
-                    reason="用户通过确认卡片恢复执行上轮目标",
-                    degraded=False,
-                    complexity="simple",
-                ))
+                return ("resume", self._resume_decision(pending, ctx, source="card"))
             return ("text", "这个确认已经过期了，请重新告诉我你想做什么。")
 
         if action_type == "cancel":
@@ -507,14 +547,7 @@ class LeadAgent:
         # 无显式信号：用户偏要打字回复的文本兜底（pop 已取走；非肯定 → 目标丢弃，走正常决策）
         if pending and _is_affirmative(user_msg):
             logger.info("[lead] confirm_text_resume goal=%s", pending[:40])
-            return ("resume", Decision(
-                action=ActionType.CALL_ANALYSIS,
-                tool_name="run_analysis",
-                tool_args={"goal": pending},
-                reason="用户文本确认，恢复执行上轮目标",
-                degraded=False,
-                complexity="simple",
-            ))
+            return ("resume", self._resume_decision(pending, ctx, source="text"))
         return None
 
     async def _emit_answer(self, text: str) -> AsyncIterator[dict]:
