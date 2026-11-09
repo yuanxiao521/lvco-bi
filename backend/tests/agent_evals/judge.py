@@ -160,7 +160,10 @@ def judge_attempt(
                     # query_engine 路径没有 SQL 文本可执行，直接比它真实查出来的行
                     actual_rows = agent_rows
                 if actual_rows is None:
-                    result.notes.append("no_agent_query_result")
+                    # 没有可执行结果就没法判对错：标为不可判，不参与分母。
+                    # （旧实现会退化成"关键字重叠"猜测，等于把噪声当能力。）
+                    result.sql_scorable = False
+                    result.notes.append("no_agent_query_result(unscorable)")
                 else:
                     result.sql_accuracy = _rows_match(expected_rows, actual_rows)
                     if not result.sql_accuracy:
@@ -168,19 +171,17 @@ def judge_attempt(
                             f"result_set_mismatch: expected_rows={len(expected_rows)} actual_rows={len(actual_rows)}"
                         )
         except Exception as e:
-            result.notes.append(f"sql_executor_error={e}")
-            result.sql_accuracy = (
-                _sql_keyword_overlap(question.get("expected_sql_template", ""), agent_sql) >= 0.6
-                if agent_sql
-                else False
-            )
+            # 执行期异常（数据库/数据快照/方言）不等于模型答错：标为不可判并排除分母。
+            # 依据 docs/research/11：把环境失败计成能力失败会同时污染分数与排名。
+            result.sql_scorable = False
+            result.notes.append(f"sql_executor_error(unscorable)={e}")
     elif agent_sql:
-        result.sql_accuracy = _sql_keyword_overlap(
-            question.get("expected_sql_template", ""),
-            agent_sql,
-        ) >= 0.6
-        if not result.sql_accuracy:
-            result.notes.append("sql_keyword_overlap<0.6")
+        # 没有执行器就不判 SQL 对错：关键字重叠是在测判分器，不是在测能力
+        # （docs/research/11：BIRD Mini-Dev 标注错误率 52.8%，修正后排名 ±9）。
+        # 重叠度仅作为排查线索留在 notes 里，不计入 sql_accuracy。
+        result.sql_scorable = False
+        overlap = _sql_keyword_overlap(question.get("expected_sql_template", ""), agent_sql)
+        result.notes.append(f"no_sql_executor(unscorable) keyword_overlap={overlap:.2f}")
 
     # ---- 3. 输出有效率 ----
     keywords = question.get("expected_keywords") or []
