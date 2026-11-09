@@ -788,11 +788,22 @@ export function getActiveCanvasId(): string | null {
   return activeCanvasId;
 }
 
-/** 主动中止当前流（组件卸载不再调用；供"停止"按钮使用） */
+/** 主动中止当前流（供"停止"按钮使用）：断前端 fetch + 通知后端真停后台任务 */
 export function abortCanvasStream(): void {
   abortRequested = true;
   try { activeCancel?.(); } catch { /* ignore */ }
   activeCancel = null;
   streamingLock = false;
   useCanvasAssistantStore.setState({ isStreaming: false });
+  // 真停后台任务：此前只 abort 前端 fetch，画布后台任务继续烧 LLM，
+  // 且 running 键会挡住后续消息（「上一轮还在处理中」实测投诉点）。
+  const sid = useCanvasAssistantStore.getState().curSessionId;
+  if (sid) {
+    const token = tokenStore.getAccess();
+    const base = import.meta.env.VITE_API_BASE_URL || "/api/v1";
+    fetch(`${base}/ai/sessions/${sid}/cancel`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => { /* 取消失败不阻断 UI */ });
+  }
 }

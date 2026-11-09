@@ -66,8 +66,10 @@ async def run_canvas_task(
         except Exception:  # noqa: BLE001
             _sess_row = None
         _bind_kwargs: dict[str, Any] = {"entry": "canvas"}
+        _task_user_id = None
         if _sess_row is not None:
             _bind_kwargs["user_id"] = getattr(_sess_row, "user_id", None)
+            _task_user_id = getattr(_sess_row, "user_id", None)
         if session_id is not None:
             _bind_kwargs["session_id"] = session_id
         if assistant_msg_id is not None:
@@ -92,6 +94,16 @@ async def run_canvas_task(
 
         try:
             async for event in _idle_guard(event_factory(db), label="canvas_task_stream"):
+                # 用户点了「停止」→ 立即中断后台任务（此前只断前端 fetch，
+                # 任务继续烧 LLM 且 running 键挡住后续消息——实测投诉点）。
+                from app.services.agents.agent_orchestrator import cancel_requested
+
+                if _task_user_id and cancel_requested(_task_user_id):
+                    _log.info("[canvas_task] cancel_requested, aborting session=%s", session_id)
+                    # 通过事件日志 + 注册表广播告知前端（本函数不是 generator，不能 yield）；
+                    # break 后走既有 interrupted 收尾（任务态标 interrupted、锁释放）
+                    await _publish({"type": "error", "message": "已按用户请求停止本轮生成。"})
+                    break
                 ev_type = event.get("type")
                 if ev_type == "text":
                     delta = event.get("content", "")
