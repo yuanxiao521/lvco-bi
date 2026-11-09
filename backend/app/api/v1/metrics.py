@@ -23,6 +23,11 @@ from app.schemas import (
 )
 from app.repositories.unit_of_work import UnitOfWork
 from app.services.metric_parser import parse_derived_formula
+from app.services.metric_service import (
+    filters_to_dicts,
+    replace_metric_filters,
+    validate_metric_filter_items,
+)
 from app.services.metric_ai_service import (
     MetricDraftError,
     MetricDraftUnavailable,
@@ -114,6 +119,7 @@ def _metric_dict(m: MetricDefinition) -> dict:
         "dependsOnMetricIds": m.depends_on_metric_ids or [],
         "version": m.version,
         "datasourceId": str(m.datasource_id) if m.datasource_id else None,
+        "filters": filters_to_dicts(getattr(m, "filters", None)),
         "aggKind": m.agg_kind,
         "tableRef": m.table_ref,
     }
@@ -186,6 +192,17 @@ async def create_metric(
     db.add(metric)
     await db.flush()
     await db.refresh(metric)
+    # 指标级范围口径：整组写入（校验失败返回 400，不影响其它字段）
+    if body.filters:
+        items = [f.model_dump() for f in body.filters]
+        errors, _warn = validate_metric_filter_items(items)
+        if errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_METRIC_FILTERS", "message": "；".join(errors)},
+            )
+        await replace_metric_filters(db, metric.id, items)
+        await db.refresh(metric)
     uow = UnitOfWork(db)
     service = MetricService(uow)
     await service._extract_lineage(metric.id, metric.formula)
@@ -289,6 +306,16 @@ async def update_metric(
             setattr(metric, field, getattr(body, field))
     if body.datasource_id is not None:
         metric.datasource_id = body.datasource_id
+    # 范围口径：body.filters 不为 None 即整组替换（传 [] 清空）
+    if body.filters is not None:
+        items = [f.model_dump() for f in body.filters]
+        errors, _warn = validate_metric_filter_items(items)
+        if errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "INVALID_METRIC_FILTERS", "message": "；".join(errors)},
+            )
+        await replace_metric_filters(db, metric.id, items)
     if body.formula is not None and body.formula != old_formula:
         # 公式变更后重新推断派生关系，避免基础/派生类型与依赖失配
         formula_type, dep_ids = await _infer_metric_meta(db, current_user.id, metric.formula)
