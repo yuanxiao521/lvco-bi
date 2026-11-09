@@ -471,6 +471,10 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
 
         from app.models.agent_call import AgentCall
 
+        # 排序不能用 seq：seq 是 ContextVar 计数，Lead（派发）与内核（工具/LLM）
+        # 在不同异步上下文各自从 0 计数，交错后 seq ≠ 真实时序（实测 dispatch 排到了
+        # 全部工具之后）。id 是入库自增，同批 flush 内顺序稳定，且 dispatch 与
+        # 工具分属不同批次 → id 全局单调。dispatch 语义上先于内核执行，再前置一层。
         rows = (
             await db.execute(
                 _select(AgentCall)
@@ -478,9 +482,16 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
                     AgentCall.trace_id == str(trace_id),
                     AgentCall.kind.in_(("tool", "llm", "dispatch")),
                 )
-                .order_by(AgentCall.seq.asc())
+                .order_by(AgentCall.id.asc())
             )
         ).scalars().all()
+        rows = sorted(
+            rows,
+            key=lambda r: (
+                0 if str(r.kind) == "dispatch" else 1,  # 派发动作在最前
+                int(r.id),
+            ),
+        )
         steps: list[dict] = []
         for i, r in enumerate(rows, 1):
             kind = str(r.kind)
