@@ -598,6 +598,14 @@ async def send_message(
                 chart_data=chart_data,
             )
             db.add(assistant_msg)
+            await db.flush()
+            # 过程步骤投影：从 agent_calls 事实源生成，随消息永久
+            try:
+                from app.services.agent_trace import current_trace_id, generate_steps_projection
+
+                assistant_msg.steps = await generate_steps_projection(db, current_trace_id())
+            except Exception:  # noqa: BLE001
+                pass
             await db.commit()
 
             # Send done event

@@ -346,6 +346,8 @@ class AIMessageResponse(CamelModel):
     role: str
     content: str
     chart_data: dict | None
+    # 本轮过程步骤投影（agent_calls 的 UI 物化视图；user 消息恒为空）
+    steps: list[dict] | None = None
     created_at: datetime
 
 

@@ -533,6 +533,14 @@ async def run_chat_task(
                     if row is not None:
                         row.content = full_content
                         row.chart_data = {"charts": collected_charts} if collected_charts else None
+                        # 过程步骤投影：从 agent_calls 事实源生成，随消息永久
+                        # （历史消息展开过程时零查询成本；生成失败不影响收尾）
+                        try:
+                            row.steps = await agent_trace.generate_steps_projection(
+                                db, agent_trace.current_trace_id()
+                            )
+                        except Exception:  # noqa: BLE001
+                            _log.debug("steps_projection_failed", exc_info=True)
                         await db.commit()
                 except Exception:
                     await db.rollback()

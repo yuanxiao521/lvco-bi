@@ -451,6 +451,65 @@ async def flush(db=None) -> int:
         return 0
 
 
+# ── 消息级步骤投影（UI 物化视图；事实源仍是本表）─────────────────────────
+
+# FeedStep 对齐前端 ActivityFeed：{id, kind, toolName, ok, durationMs, summary, tokens?}
+_PROJECTION_KIND_MAP = {"tool": "tool", "llm": "llm", "dispatch": "dispatch"}
+
+
+async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]:
+    """把一轮的 agent_calls 明细生成前端 ActivityFeed 形状的步骤数组。
+
+    事实源是本表（agent_calls）；生成结果随 assistant 消息落库（ai_messages.steps），
+    历史消息展开过程时零查询成本，且不受明细 30 天清理影响。
+    trace_id 为空或查询失败 → 返回 []（投影是附加能力，绝不阻断收尾）。
+    """
+    if not trace_id:
+        return []
+    try:
+        from sqlalchemy import select as _select
+
+        from app.models.agent_call import AgentCall
+
+        rows = (
+            await db.execute(
+                _select(AgentCall)
+                .where(
+                    AgentCall.trace_id == str(trace_id),
+                    AgentCall.kind.in_(("tool", "llm", "dispatch")),
+                )
+                .order_by(AgentCall.seq.asc())
+            )
+        ).scalars().all()
+        steps: list[dict] = []
+        for i, r in enumerate(rows, 1):
+            kind = str(r.kind)
+            if kind not in _PROJECTION_KIND_MAP:
+                continue  # 双保险：turn 汇总行不进投影（SQL 已过滤，这里防将来查询被改）
+            step: dict = {
+                "id": f"{kind}-{i}",
+                "kind": _PROJECTION_KIND_MAP.get(kind, kind),
+                "toolName": str(getattr(r, "tool_name", "") or ""),
+                "ok": bool(getattr(r, "ok", True)),
+                "durationMs": int(getattr(r, "duration_ms", 0) or 0),
+                "summary": str(getattr(r, "result_preview", "") or "")[:120],
+            }
+            if kind == "llm":
+                tin = int(getattr(r, "tokens_in", 0) or 0)
+                tout = int(getattr(r, "tokens_out", 0) or 0)
+                if tin or tout:
+                    step["tokens"] = tin + tout
+                if getattr(r, "model", None):
+                    step["model"] = str(r.model)
+            if getattr(r, "error_kind", None):
+                step["errorKind"] = str(r.error_kind)
+            steps.append(step)
+        return steps
+    except Exception:  # noqa: BLE001
+        logger.warning("[agent_trace] steps_projection_failed", exc_info=True)
+        return []
+
+
 # ── 保留策略（不建调度器，只提供函数）─────────────────────────────────────
 async def purge_old(older_than_days: int | None = None) -> int:
     """删除过期的**明细行**（tool/llm），turn 汇总行保留；返回删除行数。
