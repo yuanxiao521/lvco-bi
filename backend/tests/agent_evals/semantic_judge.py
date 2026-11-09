@@ -245,13 +245,35 @@ def _extract_sql_aggregates(node: Any) -> list[dict]:
     return out
 
 
+def _resolve_group_target(e: Any, node: Any) -> Any:
+    # 把 GROUP BY 里的位置序号/输出别名还原成真实投影表达式。
+    # 第 9 个判分器偏差（2026-11-09）：LLM 写裸 SQL 常用位置化分组 GROUP BY 1
+    # （V004/V010 都是），AST 里是 exp.Literal(1)；只找 Column 会得到「没有维度」，
+    # 于是把完全正确的按月/按季度聚合判成「维度缺失」。
+    exp = __import__('sqlglot').exp
+    proj_exprs = list(getattr(node, 'expressions', []) or [])
+
+    def _unwrap(proj):
+        return proj.this if isinstance(proj, exp.Alias) else proj
+
+    if isinstance(e, exp.Literal) and str(e.this).isdigit():
+        idx = int(str(e.this)) - 1
+        if 0 <= idx < len(proj_exprs):
+            return _unwrap(proj_exprs[idx])
+        return e
+    if isinstance(e, exp.Column) and not getattr(e, 'table', None):
+        for proj in proj_exprs:
+            if isinstance(proj, exp.Alias) and str(proj.alias or '') == e.name:
+                return _unwrap(proj)
+    return e
+
 def _extract_sql_dimensions(node: Any) -> list[dict]:
     out: list[dict] = []
     grp = node.find(__import__("sqlglot").exp.Group)
     if grp is None:
         return out
     for e in grp.expressions:
-        e2 = e
+        e2 = _resolve_group_target(e, node)
         if hasattr(e2, "this") and type(e2).__name__ in ("Alias", "AliasedColumn"):
             e2 = getattr(e2, "this", None)
         if e2 is None:
@@ -261,9 +283,9 @@ def _extract_sql_dimensions(node: Any) -> list[dict]:
         if col is not None:
             func = e2.find(__import__("sqlglot").exp.Func)
             granularity = None
-            if func is not None and type(func).__name__ == "DateTrunc" and func.args.get("unit"):
+            if func is not None and type(func).__name__ in ("DateTrunc", "TimestampTrunc", "DatetimeTrunc", "TimeTrunc") and func.args.get("unit"):
                 unit = func.args["unit"]
-                granularity = unit.name if hasattr(unit, "name") else str(unit)
+                granularity = str(getattr(unit, "name", unit)).lower()
             out.append({"field": col.name, "granularity": granularity})
     return out
 
