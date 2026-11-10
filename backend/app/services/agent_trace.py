@@ -463,9 +463,11 @@ _PROJECTION_KIND_MAP = {"tool": "tool", "dispatch": "dispatch"}
 def _agent_of(parent: Any, kind: str) -> str:
     """投影里的归属标签：dispatch 恒为 Lead；工具行取 trace 的 parent。
 
-    parent 由 agent_trace.parent_scope 维护（lead / recon / agent_orch / canvas_orch）；
-    Lead 自己直连工具时 parent 也是 lead（stream_unified 入口 set_parent("lead")），
-    因此 history 面板能区分"Lead 调了什么"与"子 agent 调了什么"。
+    parent 由 agent_trace.parent_scope 维护（recon / agent_orch / canvas_orch / react）；
+    Lead 自己直连工具时 parent 仍是 lead（stream_unified 入口 set_parent("lead")）——
+    注意 parent=None 只会在作用域缺失时出现，那种情况归到 lead 会把 worker 的
+    工具误报成 Lead 调的，所以每个 worker 内核都必须自己开作用域（见 lead_tools
+    react 分支、canvas_orch/agent_orch 的 _run_step_with_timeout）。
     """
     if kind == "dispatch":
         return "lead"

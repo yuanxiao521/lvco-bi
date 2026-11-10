@@ -334,9 +334,10 @@ export default memo(ActivityFeed);
 /** 归属标签：投影里的 agent key → 展示名（Lead 自己 vs 各子 agent） */
 const AGENT_LABEL: Record<string, string> = {
   lead: "Lead",
-  recon: "侦察",
-  agent_orch: "执行编排",
-  canvas_orch: "画布编排",
+  react: "子agent·轻量执行",
+  recon: "子agent·侦察",
+  agent_orch: "子agent·执行编排",
+  canvas_orch: "子agent·画布编排",
 };
 
 export function agentLabel(agent?: string): string {

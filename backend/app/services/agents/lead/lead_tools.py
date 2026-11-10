@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator, Awaitable, Callable
 
 from app.config import settings
+from app.services import agent_trace
 from app.services.agents.lead.lead_perception import (
     StepProgress,
     perceive_stream,
@@ -881,15 +882,20 @@ async def run_analysis(
 
             async def _run() -> None:
                 try:
-                    react = ReactGraphAgent(llm, _build_react_tools(extra_plannable_tools),
-                                    agent_trace=trace, is_canvas=is_canvas)
-                    await react.run(
-                        messages=messages,
-                        user_id=user_id,
-                        db_session=db_session,
-                        emit=_emit,
-                        canvas_id=canvas_id,
-                    )
+                    # 归属作用域：这是**被派发的 react worker 内核**，不是 Lead 本体。
+                    # 不设作用域会继承 stream_unified 里的 parent="lead"，历史面板就会
+                    # 显示成"Lead 调用 add_chart_block / arrange_layout"（用户实测质疑过）。
+                    # 与 canvas_orch / agent_orch 同一套 parent_scope 语义：进出即还原。
+                    with agent_trace.parent_scope("react"):
+                        react = ReactGraphAgent(llm, _build_react_tools(extra_plannable_tools),
+                                        agent_trace=trace, is_canvas=is_canvas)
+                        await react.run(
+                            messages=messages,
+                            user_id=user_id,
+                            db_session=db_session,
+                            emit=_emit,
+                            canvas_id=canvas_id,
+                        )
                 except Exception as e:  # noqa: BLE001
                     logger.exception(f"[lead_tools] react_failed: {e}")
                     await _emit({"type": "error", "message": f"分析执行异常: {e}"})

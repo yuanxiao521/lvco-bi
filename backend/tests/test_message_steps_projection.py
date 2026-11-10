@@ -62,10 +62,14 @@ async def test_projection_carries_agent_attribution():
     db = _db_returning([
         make_row(kind="dispatch", tool_name=None, parent="lead"),
         make_row(tool_name="query_sql", parent="agent_orch"),
+        make_row(tool_name="add_chart_block", parent="react"),
+        make_row(tool_name="add_text_block", parent="canvas_orch"),
         make_row(tool_name="list_fields", parent=None),
     ])
     steps = await generate_steps_projection(db, "t")
-    assert [s["agent"] for s in steps] == ["lead", "agent_orch", "lead"]
+    assert [s["agent"] for s in steps] == [
+        "lead", "agent_orch", "react", "canvas_orch", "lead",
+    ]
 
 
 async def test_projection_only_actions():
