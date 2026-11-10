@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
-from app.core.database import get_db
+from app.core.database import async_session_factory, get_db
 from app.core.security import decode_token
 from app.core.sse import sse_manager
 from app.models.user import User
@@ -141,7 +141,6 @@ async def push_notification(
 async def notification_stream(
     request: Request,
     token: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
 ):
     """SSE 端点 - 实时推送通知事件
 
@@ -175,19 +174,29 @@ async def notification_stream(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "UNAUTHORIZED", "message": "无效的 Token"},
         )
-    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "UNAUTHORIZED", "message": "用户不存在"},
-        )
+    # 连接池卫生：本端点只在**鉴权时**用一次 DB，之后是无限长的 SSE 推送。
+    # 用 Depends(get_db) 会让这条连接被整个订阅期占用（每个打开的标签页 1 条、永不释放），
+    # 实测把池子打满后 Agent 长任务直接报 QueuePool timeout（30s 等待）。
+    # 所以这里用短生命周期 session：拿到用户就释放连接，再进入流式推送。
     # SSE 是唯一"自行解析 token"的入口（EventSource 不能用 Authorization 头），
     # 因此必须自己补 get_current_user 里那套校验：否则登出/停用/改密后，
     # 旧 token 仍能订阅通知流，直到自然过期（最长 30 分钟），等于吊销失效。
     from app.api.deps import assert_token_state
 
-    assert_token_state(payload, user)
-    user_id = user.id
+    # 连接池卫生（实测教训）：本端点只在**鉴权时**用一次 DB，之后是无限长的推送。
+    # 若走 Depends(get_db)，这条连接会被整个订阅期占住——每个打开的标签页 1 条、
+    # 永不释放，30 条池子会被打满，Agent 长任务随即报
+    # "QueuePool limit ... connection timed out, timeout 30"。
+    # 因此改成短生命周期 session：拿到/校验完用户立刻释放连接，再进入流式推送。
+    async with async_session_factory() as db:
+        user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "UNAUTHORIZED", "message": "用户不存在"},
+            )
+        assert_token_state(payload, user)
+        user_id = user.id
     queue = await sse_manager.subscribe(user_id)
 
     async def event_generator():
