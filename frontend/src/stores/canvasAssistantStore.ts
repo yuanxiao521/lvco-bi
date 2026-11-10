@@ -778,6 +778,10 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
       activeStreamCanvasId = null;
       streamingLock = false;
       set({ isStreaming: false });
+      // 续收结束再对齐一次 DB：回放会**跳过** canvas_action（非幂等），而「挂载时 GET」
+      // 与「续收订阅生效」之间落下的块两处都拿不到（实测 UI 比 DB 少 1 块）。
+      // 收尾这次 GET 保证「续收完 = 画布与 DB 一致」。
+      try { ctx.refreshCanvas?.(); } catch { /* ignore */ }
     }
   },
 }));

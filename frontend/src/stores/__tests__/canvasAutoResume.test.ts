@@ -123,7 +123,8 @@ describe('画布助手：刷新自动续收', () => {
 
     await useCanvasAssistantStore.getState().onCanvasReady('canvas-F', ctx);
 
-    expect(ctx.refreshCanvas).toHaveBeenCalledTimes(1);
+    // 至少一次：resumed 事件里对齐一次，续收收尾再对齐一次（回放跳过的块靠它补齐）
+    expect(ctx.refreshCanvas).toHaveBeenCalled();
   });
 
   it('会话 running=false → 不发 resume 请求', async () => {

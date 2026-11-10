@@ -29,6 +29,21 @@ from app.services import canvas_layout_service as laysvc
 
 log = logging.getLogger("lvco.canvas_block_writer")
 
+# 同一画布的落库必须串行：编排器会 asyncio.gather 并发执行多个画布工具，
+# 而每个动作都是「读 blocks -> 追加 -> 整列写回」的读改写；若并发交错，
+# 后写的那个会用自己读到的旧快照覆盖前一个结果（实测：一轮落 2 块只剩 1 块）。
+_WRITE_LOCKS: dict[str, "asyncio.Lock"] = {}
+
+
+def _lock_for(canvas_id: str):
+    import asyncio
+
+    lock = _WRITE_LOCKS.get(canvas_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _WRITE_LOCKS[canvas_id] = lock
+    return lock
+
 
 def _b36(n: int) -> str:
     digits = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -74,6 +89,12 @@ class CanvasBlockWriter:
         if canvas is None:
             log.warning("[block_writer] canvas_not_found canvas_id=%s", self.canvas_id)
             return None
+        # 强制从库里刷新：本会话的身份映射可能还持有旧快照（前端刚 PUT 过，
+        # 或并发工具刚写过），直接基于内存旧值改会静默回退别人的修改。
+        try:
+            await self.repo.db.refresh(canvas)
+        except Exception:  # noqa: BLE001
+            log.debug("[block_writer] refresh_before_write_failed", exc_info=True)
         blocks: list[dict] = list(canvas.blocks or [])
 
         handler = {
@@ -229,4 +250,6 @@ async def maybe_persist(action: dict, user_id: str, canvas_id: str, db) -> dict 
         return None
     writer = CanvasBlockWriter(db, user_id, canvas_id)
     writer._ctx = dict(action)  # 动作载荷作为各 handler 的 ctx
-    return await writer.apply(action)
+    # 串行化同一画布的读改写（并发 gather 时避免丢块）
+    async with _lock_for(str(canvas_id)):
+        return await writer.apply(action)
