@@ -81,6 +81,30 @@ const ensureBlockIds = (blocks: CanvasBlock[]): CanvasBlock[] =>
     return { ...rec, blockId: newBlockId(String(rec.type ?? "block")) };
   });
 
+/** 把 DB 里的画布 blocks 还原成「纯 blocks + 图表配置表 + 图表结果表」。
+ *
+ *  DB 块内嵌 _chartConfig / _chartResult（前端 autosave 时写进去的），加载入口统一走这里，
+ *  避免「每个入口各抄一份提取逻辑」（模板克隆 / 侧边栏打开 / 断线续收后对齐）。
+ */
+function splitDbBlocks(raw: unknown[]): {
+  blocks: CanvasBlock[];
+  configs: Record<string, ChartQueryConfig>;
+  results: Record<string, QueryResult>;
+} {
+  const configs: Record<string, ChartQueryConfig> = {};
+  const results: Record<string, QueryResult> = {};
+  const blocks = (Array.isArray(raw) ? raw : []).map((b) => {
+    const rec = (b || {}) as Record<string, unknown>;
+    if (rec.type !== "chart") return b as CanvasBlock;
+    const blockId = rec.blockId as string | undefined;
+    if (blockId && rec._chartConfig) configs[blockId] = rec._chartConfig as ChartQueryConfig;
+    if (blockId && rec._chartResult) results[blockId] = rec._chartResult as QueryResult;
+    const { _chartConfig, _chartResult, ...rest } = rec;
+    return rest as unknown as CanvasBlock;
+  });
+  return { blocks, configs, results };
+}
+
 // 画布草稿的数据结构，用于 localStorage 持久化
 interface CanvasDraft {
   blocks: CanvasBlock[];
@@ -298,7 +322,40 @@ export default function FreeCanvas() {
     }
   });
 
-  // 组件挂载时恢复画布数据：优先级为 模板 > 报表传输数据 > localStorage 草稿
+  /** 从 DB 拉画布真值并**只合并内容**（blocks / 图表配置 / 结果），不动选中态与维度度量。
+   *
+   *  两个必须对齐的时机：
+   *  ① 挂载：刷新页面时 blocks 来自 localStorage 草稿，而「后端唯一落库」（P1）之后
+   *     后端可能已把新块写进 DB，草稿是旧的 → 必须从 DB 覆盖一次；
+   *  ② 断线续收：resume 回放会**跳过 canvas_action**（非幂等，重复落块），断线期间
+   *     后端落的块不在前端内存里 → 靠这次 GET 对齐（store 的 refreshCanvas 用途）。
+   */
+  const syncBlocksFromDb = useCallback(async (cid: string): Promise<boolean> => {
+    try {
+      const source = await getCanvas(cid);
+      const { blocks: dbBlocks, configs, results } = splitDbBlocks(source.blocks as unknown[]);
+      const next = ensureBlockIds(dbBlocks);
+      setBlocks(next);
+      // 合并而非覆盖：本地上次编辑留下的配置/结果按 blockId 保留（无对应块时不渲染，无害）
+      setChartConfigs((prev) => ({ ...prev, ...configs }));
+      setChartResults((prev) => ({ ...prev, ...results }));
+      // 记下已同步快照：避免 autosave 把同一份内容再回写一遍（也防止「刚对齐又被旧快照覆盖」）
+      lastBackendSyncRef.current = JSON.stringify(next);
+      return true;
+    } catch (e) {
+      // 对齐失败（离线/接口异常）保留本地内容，不让用户丢画布
+      console.warn("[canvas] 从数据库对齐画布失败，保留本地内容:", e);
+      return false;
+    }
+  }, []);
+
+  /** store 的 refreshCanvas：续收命中运行中任务后对齐 DB（回放跳过 canvas_action） */
+  const refreshCanvasFromDb = useCallback(() => {
+    if (!canvasId) return;
+    void syncBlocksFromDb(canvasId);
+  }, [canvasId, syncBlocksFromDb]);
+
+  // 组件挂载时恢复画布数据：优先级为 模板 > 报表传输数据 > DB（有 canvasId 时）> localStorage 草稿
   useEffect(() => {
     // 1. 模板加载（优先级最高，template=system-xxx 或 uuid）
     const templateId = searchParams.get("template");
@@ -475,10 +532,14 @@ export default function FreeCanvas() {
       return;
     }
 
-    // 3. 回退：从 localStorage 草稿中恢复
+    // 3. 回退：从 localStorage 草稿中恢复（先渲染，保证打开即有内容）
     const draft = readDraft();
+    const draftCanvasId = draft && typeof draft.canvasId === "string" && draft.canvasId
+      ? draft.canvasId
+      : null;
     if (draft) {
-      if (Array.isArray(draft.blocks) && draft.blocks.length > 0) setBlocks(ensureBlockIds(draft.blocks));
+      const draftBlocks = Array.isArray(draft.blocks) ? ensureBlockIds(draft.blocks) : [];
+      if (draftBlocks.length > 0) setBlocks(draftBlocks);
       if (draft.chartConfigs && typeof draft.chartConfigs === "object")
         setChartConfigs(draft.chartConfigs);
       if (draft.chartResults && typeof draft.chartResults === "object")
@@ -490,10 +551,17 @@ export default function FreeCanvas() {
       if (Array.isArray(draft.measures)) setMeasures(draft.measures);
       if (Array.isArray(draft.filters)) setFilters(draft.filters);
       if (typeof draft.renderer === "string") setRenderer(draft.renderer);
-      if (typeof draft.canvasId === "string") setCanvasId(draft.canvasId);
+      if (draftCanvasId) setCanvasId(draftCanvasId);
+      // 关键：先把草稿当作「已同步」基线。否则挂载后 autosave 1.5s 就会把草稿整份回写 DB，
+      // 覆盖掉后端在断线期间落进 DB 的新块（这是唯一会真正丢数据的路径）。
+      // DB 对齐成功后会再用 DB 快照刷新基线。
+      if (draftCanvasId) lastBackendSyncRef.current = JSON.stringify(draftBlocks);
     }
     setHydrated(true);
-  }, []);
+    // DB 优先：草稿只是「上次看到的画面」，P1（后端唯一落库）之后 DB 可能更新。
+    // 对齐失败时保留草稿（离线/接口异常下画布仍可用）。
+    if (draftCanvasId) void syncBlocksFromDb(draftCanvasId);
+  }, [syncBlocksFromDb]);
 
   // 草稿持久化：所有 state 变化 → debounce 300ms → 写 localStorage
   useEffect(() => {
@@ -2137,6 +2205,7 @@ export default function FreeCanvas() {
         onStreamingChange={setAiStreaming}
         onEnsureCanvas={ensureCanvas}
         onFlushBlocks={flushBlocksNow}
+        onRefreshCanvas={refreshCanvasFromDb}
       />
 
       {/* —— 保存到仪表盘弹窗 —— */}

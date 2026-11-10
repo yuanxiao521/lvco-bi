@@ -21,6 +21,8 @@ interface AIAssistantProps {
   onEnsureCanvas?: () => Promise<string>;
   /** 发消息前把画布立即落库（保证 Agent 读到最新画布） */
   onFlushBlocks?: () => Promise<void>;                 // 画布草稿（canvasId=null）时先创建画布，确保会话绑定真实 canvas_id
+  /** 断线续收后从 DB 对齐画布内容（resume 回放会跳过 canvas_action，块状态以 DB 为准） */
+  onRefreshCanvas?: () => void;
 }
 
 /** 从显示内容中剥离 ```json、```sql 等代码块，防止原始结构数据暴露给用户 */
@@ -170,6 +172,7 @@ export default memo(function AIAssistant({
   onApplyChartConfig,
   onCanvasAction,
   onFlushBlocks,
+  onRefreshCanvas,
   onStreamingChange,
   onEnsureCanvas,
 }: AIAssistantProps) {
@@ -298,6 +301,7 @@ export default memo(function AIAssistant({
       onCanvasAction,
       ensureCanvas: onEnsureCanvas,
       flushBlocks: onFlushBlocks,
+      refreshCanvas: onRefreshCanvas,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasourceId, fieldMeta, allDatasources]);
@@ -317,8 +321,9 @@ export default memo(function AIAssistant({
       onCanvasAction,
       ensureCanvas: onEnsureCanvas,
       flushBlocks: onFlushBlocks,
+      refreshCanvas: onRefreshCanvas,
     }),
-    [canvasId, datasourceId, fieldMeta, canvasBlocks, currentDimensions, currentMeasures, currentChartType, allDatasources, onApplyChartConfig, onCanvasAction, onEnsureCanvas, onFlushBlocks],
+    [canvasId, datasourceId, fieldMeta, canvasBlocks, currentDimensions, currentMeasures, currentChartType, allDatasources, onApplyChartConfig, onCanvasAction, onEnsureCanvas, onFlushBlocks, onRefreshCanvas],
   );
 
   // 画布切换：重置当前会话与消息（防跨画布串记忆），并拉取该画布的会话列表。

@@ -28,13 +28,16 @@ vi.mock('../../api/client', () => ({
 import { listCanvasSessions, listMessages } from '../../api/ai';
 import { useCanvasAssistantStore } from '../../stores/canvasAssistantStore';
 
+/** 画布上下文：refreshCanvas 必须是**真的 mock**（早期这里没给，可选链空转，
+ *  「续收后从 DB 对齐画布」这条约定在无声中失效——测试全绿但生产没人传回调）。 */
 const ctxFor = (canvasId: string) => ({
   canvasId,
   datasourceId: null,
   fieldMeta: [],
   canvasBlocks: [],
   allDatasources: [],
-} as never);
+  refreshCanvas: vi.fn(),
+});
 
 /** 只含 status(resumed) + done 的 SSE 响应 */
 function sseResponse(): Response {
@@ -109,6 +112,18 @@ describe('画布助手：刷新自动续收', () => {
     const body = JSON.parse(String(init.body));
     expect(body.resume).toBe(true);
     expect(body.session_id).toBe('sess-R');
+  });
+
+  it('续收命中运行中任务 → 触发 refreshCanvas（回放跳过 canvas_action，块状态靠 DB 对齐）', async () => {
+    // 【回归】resume 的回放会主动跳过 canvas_action（非幂等，重复落块），
+    // 所以断线期间后端落的块只能靠「续收后 GET 画布」补齐。此前 ctx 里没有这个回调，
+    // 结果是：网络一断，画布就少块，且 F5 也补不回来（刷新走的是 localStorage 草稿）。
+    await enterCanvas('canvas-F', 'sess-F', true);
+    const ctx = ctxFor('canvas-F');
+
+    await useCanvasAssistantStore.getState().onCanvasReady('canvas-F', ctx);
+
+    expect(ctx.refreshCanvas).toHaveBeenCalledTimes(1);
   });
 
   it('会话 running=false → 不发 resume 请求', async () => {
