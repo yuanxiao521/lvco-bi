@@ -20,54 +20,9 @@ import { useAIChatStore } from "../../stores/aiChatStore";
 import type { StreamingChart } from "../../stores/aiChatStore";
 import { createSession, deleteSession, updateSession } from "../../api/ai";
 import { listDatasources } from "../../api/datasources";
-// 复用画布助手的 Agent 工作台步骤条：tool_call/tool_result 驱动的工具执行状态展示
-import ActivityFeed from "../FreeCanvas/components/ActivityFeed";
-import type { FeedStep } from "../FreeCanvas/components/ActivityFeed";
-import type { MessageStep } from "../../types/api";
-import { ListTree } from "lucide-react";
-
-/** 历史消息的步骤投影 → ActivityFeed 的 FeedStep 形状（零查询成本：数据随消息返回） */
-function toFeedSteps(steps: MessageStep[]): FeedStep[] {
-  return steps.map((s) => ({
-    id: s.id,
-    title: s.kind === "llm"
-      ? "AI 推理" + (s.model ? "（" + s.model + "）" : "")
-      : s.kind === "dispatch"
-        ? "任务派发"
-        : "工具调用：" + (s.toolName || "未知"),
-    status: s.ok ? "done" : "failed",
-    tools: [{
-      name: s.kind === "llm"
-        ? "LLM" + (s.tokens ? "（tokens " + s.tokens + "）" : "")
-        : (s.toolName || "") + (s.summary ? " " + s.summary.slice(0, 60) : ""),
-      status: s.ok ? "ok" : "err",
-    }],
-  }));
-}
-
-/** 历史消息「过程」折叠条：数据来自 ai_messages.steps（收尾时从 agent_calls 生成的投影） */
-function MessageStepsHistory({ steps }: { steps: MessageStep[] }) {
-  const [open, setOpen] = useState(false);
-  const totalMs = steps.reduce((acc, s) => acc + (s.durationMs || 0), 0);
-  const fails = steps.filter((s) => !s.ok).length;
-  return (
-    <div className="mt-2">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-primary transition-colors"
-      >
-        <ListTree className="w-3 h-3" />
-        过程（{steps.length} 步 · {(totalMs / 1000).toFixed(1)}s{fails ? " · " + fails + " 失败" : ""}）
-        <span className="text-[10px]">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && (
-        <div className="mt-2">
-          <ActivityFeed steps={toFeedSteps(steps)} />
-        </div>
-      )}
-    </div>
-  );
-}
+// 复用画布助手的 Agent 工作台步骤条 + 历史消息「过程」折叠条
+// （步骤投影 → FeedStep 的映射只有一份，两处各写一份必然漂移）
+import ActivityFeed, { MessageStepsHistory } from "../FreeCanvas/components/ActivityFeed";
 
 /** 防御性兜底：去掉历史消息里残留的 ``` 代码块。流式阶段通常已丢，这里只处理从数据库读出来的旧消息。 */
 function stripCodeBlocks(text: string): string {

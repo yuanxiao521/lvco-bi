@@ -453,8 +453,24 @@ async def flush(db=None) -> int:
 
 # ── 消息级步骤投影（UI 物化视图；事实源仍是本表）─────────────────────────
 
-# FeedStep 对齐前端 ActivityFeed：{id, kind, toolName, ok, durationMs, summary, tokens?}
-_PROJECTION_KIND_MAP = {"tool": "tool", "llm": "llm", "dispatch": "dispatch"}
+# FeedStep 对齐前端 ActivityFeed：{id, kind, agent, toolName, ok, durationMs, summary}
+# 只投影 tool / dispatch：用户要看的"做了什么"是**动作**（发了什么工具调用），
+# LLM 推理不是动作——一行一次调用会把真正的工具动作淹掉，且模型名/tokens 对
+# 排查"Agent 到底调了什么"没有信息增量。turn 汇总行同样不进投影。
+_PROJECTION_KIND_MAP = {"tool": "tool", "dispatch": "dispatch"}
+
+
+def _agent_of(parent: Any, kind: str) -> str:
+    """投影里的归属标签：dispatch 恒为 Lead；工具行取 trace 的 parent。
+
+    parent 由 agent_trace.parent_scope 维护（lead / recon / agent_orch / canvas_orch）；
+    Lead 自己直连工具时 parent 也是 lead（stream_unified 入口 set_parent("lead")），
+    因此 history 面板能区分"Lead 调了什么"与"子 agent 调了什么"。
+    """
+    if kind == "dispatch":
+        return "lead"
+    value = str(parent or "").strip()
+    return value or "lead"
 
 
 async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]:
@@ -480,7 +496,7 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
                 _select(AgentCall)
                 .where(
                     AgentCall.trace_id == str(trace_id),
-                    AgentCall.kind.in_(("tool", "llm", "dispatch")),
+                    AgentCall.kind.in_(tuple(_PROJECTION_KIND_MAP)),
                 )
                 .order_by(AgentCall.id.asc())
             )
@@ -500,6 +516,7 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
             step: dict = {
                 "id": f"{kind}-{i}",
                 "kind": _PROJECTION_KIND_MAP.get(kind, kind),
+                "agent": _agent_of(getattr(r, "parent", None), kind),
                 "toolName": str(getattr(r, "tool_name", "") or ""),
                 "ok": bool(getattr(r, "ok", True)),
                 "durationMs": int(getattr(r, "duration_ms", 0) or 0),
@@ -508,13 +525,6 @@ async def generate_steps_projection(db: Any, trace_id: str | None) -> list[dict]
                 "args": getattr(r, "args_json", None) or {},
                 "result": str(getattr(r, "result_preview", "") or "")[:400],
             }
-            if kind == "llm":
-                tin = int(getattr(r, "tokens_in", 0) or 0)
-                tout = int(getattr(r, "tokens_out", 0) or 0)
-                if tin or tout:
-                    step["tokens"] = tin + tout
-                if getattr(r, "model", None):
-                    step["model"] = str(r.model)
             if getattr(r, "error_kind", None):
                 step["errorKind"] = str(r.error_kind)
             if getattr(r, "error_msg", None):

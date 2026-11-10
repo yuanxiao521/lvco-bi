@@ -115,8 +115,12 @@ def test_canvas_endpoint_sends_exactly_one_done_at_stream_end():
     # 事件分发处不再直接 yield done
     assert 'yield _sse({"type": "done", "degraded": event.get("degraded", False)})' not in src
     assert "stream_degraded = bool(event.get(\"degraded\", stream_degraded))" in src
-    # P2 后台任务化：done 在 _canvas_chat_task 尾部以 dict 形式 yield（由连接段统一序列化）
-    assert 'yield ({"type": "done", "degraded": stream_degraded})' in src
+    # P2 后台任务化：done 在 _canvas_chat_task 尾部以 dict 形式 yield（由连接段统一序列化），
+    # 并**携带本轮过程投影**（steps + message_id）：done 之后的事件没有读者，
+    # 投影若不随 done 下发，前端只能靠刷新页面从 DB 补（实测体验问题）。
+    assert '"degraded": stream_degraded,' in src
+    assert '"steps": _final_steps,' in src
+    assert '"message_id": str(assistant_msg_id)' in src
 
 
 # ── 会话级并发锁（抢锁失败提前 return 不能踩到 finally 的未绑定变量） ──────────

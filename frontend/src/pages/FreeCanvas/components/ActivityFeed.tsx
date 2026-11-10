@@ -331,30 +331,57 @@ function ActivityFeed({ steps, meta }: ActivityFeedProps) {
 export default memo(ActivityFeed);
 
 
+/** 归属标签：投影里的 agent key → 展示名（Lead 自己 vs 各子 agent） */
+const AGENT_LABEL: Record<string, string> = {
+  lead: "Lead",
+  recon: "侦察",
+  agent_orch: "执行编排",
+  canvas_orch: "画布编排",
+};
+
+export function agentLabel(agent?: string): string {
+  if (!agent) return "Lead";
+  return AGENT_LABEL[agent] ?? agent;
+}
+
+/**
+ * 消息级步骤投影（ai_messages.steps）→ ActivityFeed 形状。
+ *
+ * 只展示**动作**（tool / dispatch）：
+ *   · LLM 推理不是"做了什么"，旧版本落库的历史数据里可能还有 llm 行，这里一律丢弃；
+ *   · 每条动作带归属（Lead / 执行编排 / 画布编排 / 侦察），回答"哪个环节谁调了什么"。
+ *
+ * AIChat 与画布助手共用这一份映射（此前两处各写一份，格式必然漂移）。
+ */
+export function messageStepsToFeed(steps: MessageStep[]): FeedStep[] {
+  return steps
+    .filter((s) => s.kind !== "llm")
+    .map((s) => {
+      const who = agentLabel(s.agent);
+      const isDispatch = s.kind === "dispatch";
+      const action = isDispatch ? "派发任务" : "调用 " + (s.toolName || "未知工具");
+      return {
+        id: s.id,
+        title: "【" + who + "】" + action,
+        status: (s.ok ? "done" : "failed") as "done" | "failed",
+        tools: [{
+          name: isDispatch ? "派发任务" : s.toolName || "工具",
+          status: (s.ok ? "ok" : "err") as "ok" | "err",
+          args: (s.args ?? undefined) as Record<string, unknown> | undefined,
+          result: s.result || undefined,
+        }],
+      };
+    });
+}
+
 /** 历史消息「过程」折叠条：数据来自 ai_messages.steps 投影（随消息持久化，零查询成本）。
     AIChat 与画布助手面板共用；展开复用上面的 ActivityFeed 时间线。 */
 export function MessageStepsHistory({ steps }: { steps: MessageStep[] }) {
   const [open, setOpen] = useState(false);
+  const feedSteps = messageStepsToFeed(steps);
+  if (!feedSteps.length) return null;
   const totalMs = steps.reduce((acc, s) => acc + (s.durationMs || 0), 0);
-  const fails = steps.filter((s) => !s.ok).length;
-  const toFeedSteps = steps.map((s) => ({
-    id: s.id,
-    title:
-      s.kind === "llm"
-        ? "AI 推理" + (s.model ? "（" + s.model + "）" : "")
-        : s.kind === "dispatch"
-          ? "任务派发"
-          : "工具调用：" + (s.toolName || "未知"),
-    status: (s.ok ? "done" : "failed") as "done" | "failed",
-    tools: [{
-      name: s.kind === "llm"
-        ? "LLM" + (s.tokens ? "（tokens " + s.tokens + "）" : "")
-        : s.toolName || "",
-      status: (s.ok ? "ok" : "err") as "ok" | "err",
-      args: (s.args ?? undefined) as Record<string, unknown> | undefined,
-      result: s.result || undefined,
-    }],
-  }));
+  const fails = feedSteps.filter((s) => s.status === "failed").length;
   return (
     <div className="mt-2">
       <button
@@ -362,12 +389,12 @@ export function MessageStepsHistory({ steps }: { steps: MessageStep[] }) {
         className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-primary transition-colors"
       >
         <ListTree className="w-3 h-3" />
-        过程（{steps.length} 步 · {(totalMs / 1000).toFixed(1)}s{fails ? " · " + fails + " 失败" : ""}）
+        过程（{feedSteps.length} 步 · {(totalMs / 1000).toFixed(1)}s{fails ? " · " + fails + " 失败" : ""}）
         <span className="text-[10px]">{open ? "▾" : "▸"}</span>
       </button>
       {open && (
         <div className="mt-2">
-          <ActivityFeed steps={toFeedSteps} />
+          <ActivityFeed steps={feedSteps} />
         </div>
       )}
     </div>

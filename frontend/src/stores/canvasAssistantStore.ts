@@ -330,6 +330,22 @@ function applyCanvasEvent(event: any, api: CanvasEventApi): void {
       void get().refreshSessions(api.effCanvasId());
       break;
     case "done": {
+      // 后端随 done 下发本轮过程投影（tool/dispatch 动作 + 归属）：挂到本轮助手消息上，
+      // 这样"过程"折叠条立刻可看，不必刷新页面（刷新只是从 DB 读同一份投影）。
+      const doneSteps: MessageStep[] | null =
+        Array.isArray(event.steps) && event.steps.length ? (event.steps as MessageStep[]) : null;
+      if (doneSteps) {
+        set((s: CanvasAssistantStore) => {
+          const msgs = s.messages.slice();
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === "assistant") {
+              msgs[i] = { ...msgs[i], steps: doneSteps };
+              break;
+            }
+          }
+          return { messages: msgs };
+        });
+      }
       // done 收敛：工作台所有 step 置为完成（run/wait → done），避免残留"执行中"或"2/x"
       set((s: CanvasAssistantStore) => ({
         steps: s.steps.map((st) =>
@@ -675,14 +691,15 @@ export const useCanvasAssistantStore = create<CanvasAssistantStore>()((set, get)
           const jsonStr = line.slice(6).trim();
           if (!jsonStr) continue;
           try {
-            const event = JSON.parse(jsonStr);
-            if (event.type === "done") {
-              set((s) => ({
-                steps: s.steps.map((st) => (st.status === "run" ? { ...st, status: "done", tools: st.tools } : st)),
-              }));
-              streamingLock = false;
-              set({ isStreaming: false });
-            }
+            // 统一走 applyCanvasEvent：残留的 done 同样带 steps/收尾副作用，
+            // 这里手抄一份收尾逻辑就会漏掉新字段（此前漏的就是 steps）。
+            applyCanvasEvent(JSON.parse(jsonStr), {
+              set, get, ctx, state: streamState,
+              effCanvasId: () => effCanvasId,
+              patchAssistant,
+              onDone: () => { streamingLock = false; set({ isStreaming: false }); },
+              mode: "send",
+            });
           } catch { /* ignore */ }
         }
       }

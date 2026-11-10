@@ -608,8 +608,15 @@ async def send_message(
                 pass
             await db.commit()
 
-            # Send done event
-            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            # Send done event（带 steps：前端不必刷新即可显示过程按钮）
+            yield "data: " + json.dumps(
+                {
+                    "type": "done",
+                    "steps": assistant_msg.steps or [],
+                    "message_id": str(assistant_msg.id),
+                },
+                ensure_ascii=False,
+            ) + "\n\n"
 
         except AINotConfiguredError:
             yield f"data: {json.dumps({'type': 'error', 'message': '请在 .env 配置 OPENAI_API_KEY'}, ensure_ascii=False)}\n\n"
@@ -2150,8 +2157,21 @@ async def canvas_ai_chat(
                 save_content = f"本次分析通过画布工具完成：已在画布执行 {canvas_actions_count} 次落块操作，请查看画布内容与工作台执行记录。"
             # 占位行由连接段创建（请求级 session），任务体经 task_db 重新加载后更新
             assistant_row = await db.get(AIMessage, assistant_msg_id) if assistant_msg_id else None
+            # 过程投影必须在 done 之前生成：done 之后的事件在这个通道上已没有读者
+            # （前端收到 done 即收尾），只有落库版本能靠刷新补——所以要提前算。
+            _final_steps: list[dict] = []
             if assistant_row is not None:
                 assistant_row.content = save_content
+                try:
+                    from app.services import agent_trace as _trace
+
+                    await _trace.flush(db=db)
+                    _final_steps = await _trace.generate_steps_projection(
+                        db, _trace.current_trace_id()
+                    )
+                    assistant_row.steps = _final_steps
+                except Exception:  # noqa: BLE001
+                    _log.debug("canvas steps_projection_failed", exc_info=True)
                 try:
                     await db.commit()
                 except Exception:
@@ -2165,7 +2185,13 @@ async def canvas_ai_chat(
 
             completed = True
             # ---- 6. 统一下发唯一的 done：前端据此结束"思考中"并解锁输入 ----
-            yield ({"type": "done", "degraded": stream_degraded})
+            # 随 done 带 steps：前端据此立刻显示"过程"按钮，不必刷新页面。
+            yield ({
+                "type": "done",
+                "degraded": stream_degraded,
+                "steps": _final_steps,
+                "message_id": str(assistant_msg_id) if assistant_msg_id else None,
+            })
 
         # 任务级异常：error 之后必须补一个 done。
         # 前端只在收到 done 时才解锁输入框（error 不解锁）——只发 error 会让用户

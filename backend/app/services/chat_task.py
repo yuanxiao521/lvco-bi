@@ -222,6 +222,9 @@ async def run_chat_task(
     _turn_stats: dict[str, Any] = {"rounds": 0, "tool_calls": 0, "tool_failures": 0, "degraded": False}
     full_content = ""
     collected_charts: list[dict] = []
+    # 过程步骤投影（收尾生成，随 done 下发 + 落库）：在 done 之前算好，
+    # 否则订阅方命中 done 就 break，前端永远收不到（只能刷新页面从 DB 补）。
+    _final_steps: list[dict] = []
     seen_chart_keys: set[str] = set()
     _fence_state = "closed"
     _fence_buffer = ""
@@ -491,7 +494,23 @@ async def run_chat_task(
                 elif ev_type == "done":
                     if event.get("degraded"):
                         _turn_stats["degraded"] = True
-                    _publish({"type": "done", "charts": collected_charts, "degraded": event.get("degraded", False)})
+                    # 投影必须在 done 之前生成：事件日志的订阅方命中 done 即 break
+                    # （_stream_from_event_log），晚于 done 的事件永远到不了前端。
+                    # 先 flush 明细，避免最后一批 tool 行还在内存队列里导致少几步。
+                    try:
+                        await agent_trace.flush(db=db)
+                        _final_steps = await agent_trace.generate_steps_projection(
+                            db, agent_trace.current_trace_id()
+                        )
+                    except Exception:  # noqa: BLE001
+                        _log.debug("steps_projection_failed", exc_info=True)
+                    _publish({
+                        "type": "done",
+                        "charts": collected_charts,
+                        "steps": _final_steps,
+                        "message_id": str(assistant_msg_id) if assistant_msg_id else None,
+                        "degraded": event.get("degraded", False),
+                    })
                 elif ev_type == "error":
                     _publish({"type": "error", "message": event["message"]})
                 elif ev_type == "compressed_history":
@@ -536,9 +555,14 @@ async def run_chat_task(
                         # 过程步骤投影：从 agent_calls 事实源生成，随消息永久
                         # （历史消息展开过程时零查询成本；生成失败不影响收尾）
                         try:
-                            row.steps = await agent_trace.generate_steps_projection(
-                                db, agent_trace.current_trace_id()
-                            )
+                            # 复用 done 事件里已下发的那份（同一 tick 生成），
+                            # 保证"用户看到的"与"落库的"完全一致；异常路径才重算。
+                            if _final_steps:
+                                row.steps = _final_steps
+                            else:
+                                row.steps = await agent_trace.generate_steps_projection(
+                                    db, agent_trace.current_trace_id()
+                                )
                         except Exception:  # noqa: BLE001
                             _log.debug("steps_projection_failed", exc_info=True)
                         await db.commit()

@@ -61,6 +61,8 @@ export interface AISessionDetail extends AISession {
 export interface MessageStep {
   id: string;
   kind: "tool" | "llm" | "dispatch";
+  /** 归属：lead / recon / agent_orch / canvas_orch（旧数据可能没有，按 Lead 处理） */
+  agent?: string;
   toolName: string;
   ok: boolean;
   durationMs: number;

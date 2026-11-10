@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createSession, listMessages, listSessions } from "../api/ai";
 import { tokenStore } from "../api/client";
-import type { AISession, AIMessage } from "../types/api";
+import type { AISession, AIMessage, MessageStep } from "../types/api";
 import { mapProgressStatus, TOOL_STAGE } from "../pages/FreeCanvas/components/ActivityFeed";
 import type { AgentMeta, FeedStep } from "../pages/FreeCanvas/components/ActivityFeed";
 
@@ -343,6 +343,26 @@ export const useAIChatStore = create<AIChatStore>()((set, get) => ({
               break;
             case "done": {
               const doneCharts: StreamingChart[] = event.charts || [];
+              // 后端随 done 下发本轮过程投影（tool/dispatch 动作）与真实消息 id：
+              // 立刻挂到本条消息上 → "过程"折叠条无需刷新页面即可出现。
+              const doneSteps: MessageStep[] | null =
+                Array.isArray(event.steps) && event.steps.length ? (event.steps as MessageStep[]) : null;
+              const doneMsgId = event.message_id ? String(event.message_id) : null;
+              if (doneSteps || doneMsgId) {
+                set((s) => ({
+                  messages: s.messages.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          // 换成后端真实 id：历史渲染用 id 前缀判断"是直播占位"，
+                          // 不换的话这条消息的折叠条会被当成占位而隐藏。
+                          id: doneMsgId && !isResume ? doneMsgId : m.id,
+                          steps: doneSteps ?? m.steps ?? null,
+                        }
+                      : m,
+                  ),
+                }));
+              }
               if (doneCharts.length > 0) {
                 set((s) => ({
                   messages: s.messages.map((m) =>

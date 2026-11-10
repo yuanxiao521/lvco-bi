@@ -198,8 +198,20 @@ async def run_canvas_task(
                     "请查看画布内容与工作台执行记录。"
                 )
             assistant_row = await db.get(AIMessage, assistant_msg_id) if assistant_msg_id else None
+            # 过程投影（与对话入口同一契约）：必须在 done 之前生成并落库——
+            # 订阅方命中 done 即 break（_stream_from_event_log），晚于 done 的事件
+            # 前端收不到，只能靠刷新页面从 DB 补，表现为"过程按钮要刷新才出现"。
+            _final_steps: list[dict] = []
             if assistant_row is not None:
                 assistant_row.content = save_content
+                try:
+                    await agent_trace.flush(db=db)
+                    _final_steps = await agent_trace.generate_steps_projection(
+                        db, agent_trace.current_trace_id()
+                    )
+                    assistant_row.steps = _final_steps
+                except Exception:  # noqa: BLE001
+                    _log.debug("canvas steps_projection_failed", exc_info=True)
                 try:
                     await db.commit()
                 except Exception:  # noqa: BLE001
@@ -211,7 +223,12 @@ async def run_canvas_task(
                     pass
 
             completed = True
-            await _publish({"type": "done", "degraded": stream_degraded})
+            await _publish({
+                "type": "done",
+                "degraded": stream_degraded,
+                "steps": _final_steps,
+                "message_id": str(assistant_msg_id) if assistant_msg_id else None,
+            })
 
         except AINotConfiguredError:
             await _publish({"type": "error", "message": "AI 未配置"})
