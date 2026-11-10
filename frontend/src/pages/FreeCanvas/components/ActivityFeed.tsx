@@ -100,6 +100,9 @@ const TOOL_LABEL: Record<string, string> = {
   remove_block: "删除块",
   arrange_layout: "自动布局",
   clear_canvas: "清空画布",
+  get_canvas_layout: "读取画布布局",
+  list_metrics: "查看指标",
+  profile_datasource: "采样数据源",
 };
 
 /** 汇总工具结果：取首行 error 或 ok，供 chip 状态展示 */
@@ -334,8 +337,8 @@ export default memo(ActivityFeed);
 /** 归属标签：投影里的 agent key → 展示名（Lead 自己 vs 各子 agent） */
 const AGENT_LABEL: Record<string, string> = {
   lead: "Lead",
+  recon: "Lead·观察",
   react: "子agent·轻量执行",
-  recon: "子agent·侦察",
   agent_orch: "子agent·执行编排",
   canvas_orch: "子agent·画布编排",
 };
@@ -360,13 +363,15 @@ export function messageStepsToFeed(steps: MessageStep[]): FeedStep[] {
     .map((s) => {
       const who = agentLabel(s.agent);
       const isDispatch = s.kind === "dispatch";
-      const action = isDispatch ? "派发任务" : "调用 " + (s.toolName || "未知工具");
+      // recon: 前缀是 trace 用的（Lead 的只读观察），展示时去掉；工具名统一走 TOOL_LABEL
+      const rawName = String(s.toolName || "").replace(/^recon:/, "");
+      const action = isDispatch ? "派发任务" : TOOL_LABEL[rawName] ?? (rawName || "工具");
       return {
         id: s.id,
         title: "【" + who + "】" + action,
         status: (s.ok ? "done" : "failed") as "done" | "failed",
         tools: [{
-          name: isDispatch ? "派发任务" : s.toolName || "工具",
+          name: isDispatch ? "派发任务" : rawName || "工具",
           status: (s.ok ? "ok" : "err") as "ok" | "err",
           args: (s.args ?? undefined) as Record<string, unknown> | undefined,
           result: s.result || undefined,
